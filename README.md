@@ -27,7 +27,7 @@ action, middle = copy to input, right = menu), `:edit mapcar` opens the editor o
 `:inspect expr`, `:who-calls fn`, `:browse-class name`. Keys: F6 next window, F7 tile, F8 theme, F10 quit.
 
 ```
-NeoGenera 0.3.0 -- type :help for help, :quit to leave.
+NeoGenera 0.6.0 -- type :help for help, :quit to leave.
 CL-USER> (defun fact (n) (if (<= n 1) 1 (* n (fact (- n 1)))))
 FACT
 CL-USER> (fact 20)
