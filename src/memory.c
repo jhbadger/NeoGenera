@@ -43,6 +43,7 @@ static Obj   *o_trigger, *c_trigger;
 static Obj   *o_to_hp, *c_to_hp;
 int heap_fixed;
 int gc_pending, gc_stress, gc_verbose;
+int gc_inhibit;
 size_t gc_count;
 
 static Obj *global_roots[4096];
@@ -222,7 +223,7 @@ static void scavenge(Obj *oscan, Obj *cscan) {
       Obj h = oscan[0];
       size_t n = (size_t)(h >> 16);
       int t = (int)((h >> 8) & 0xff);
-      if (t != T_STRING && t != T_FLONUM)
+      if (t != T_STRING && t != T_FLONUM && t != T_BIGNUM)
         for (size_t i = 0; i < n; i++) oscan[1 + i] = forward(oscan[1 + i]);
       oscan += 1 + n; progress = 1;
     }
@@ -263,7 +264,7 @@ void gc(void) {
     fprintf(stderr, "[gc %zu: %zuK -> %zuK]\n", gc_count, before >> 10, (live_o + live_c) >> 10);
 }
 
-void gc_check(void) { if (gc_pending) gc(); }
+void gc_check(void) { if (gc_pending && !gc_inhibit) gc(); }
 
 /* Debug aid (build with -DNG_DEBUG): is `o` a plausible live value? */
 int obj_valid(Obj o) {
@@ -289,7 +290,7 @@ int save_image(const char *path) {
   gc_stress = saved_stress;
   FILE *f = fopen(path, "wb");
   if (!f) return -1;
-  ImgHdr h; memcpy(h.magic, "NGIMG002", 8);
+  ImgHdr h; memcpy(h.magic, "NGIMG003", 8);
   h.obj_base = (uint64_t)(uintptr_t)o_base; h.cons_base = (uint64_t)(uintptr_t)c_base;
   h.obj_used = (uint64_t)((char *)o_hp - o_base); h.cons_used = (uint64_t)((char *)c_hp - c_base);
   h.nroots = (uint64_t)nglobal_roots; h.semi = semi;
@@ -307,7 +308,7 @@ int load_image(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f) return -1;
   ImgHdr h;
-  if (fread(&h, sizeof h, 1, f) != 1 || memcmp(h.magic, "NGIMG002", 8) != 0) { fclose(f); return -2; }
+  if (fread(&h, sizeof h, 1, f) != 1 || memcmp(h.magic, "NGIMG003", 8) != 0) { fclose(f); return -2; }
   if (!heap_fixed || h.obj_base != (uint64_t)(uintptr_t)o_space[0] ||
       h.cons_base != (uint64_t)(uintptr_t)c_space[0] || h.semi != semi ||
       h.nroots != (uint64_t)nglobal_roots) { fclose(f); return -3; }

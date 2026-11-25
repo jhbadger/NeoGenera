@@ -31,7 +31,7 @@
 (defmacro signals-error (form)
   (let ((r (gensym)))
     `(let ((,r (handler-case (progn ,form :no-error) (error (e) e))))
-       (%check (stringp ,r) ',form "expected an error"))))
+       (%check (not (eq ,r :no-error)) ',form "expected an error"))))
 
 (defun run-tests (&optional names)
   (setq *test-failures* nil)

@@ -140,7 +140,15 @@ PRIM(p_load_c) {
   return BOOL(load_file(STR_DATA(need_str(argv[0])), 0) == 0);
 }
 
+#define ALIAS(n, f, a, b) defprim("%C-" n, f, a, b)
 void init_prims_io(void) {
+  ALIAS("WRITE-STRING", p_write_string, 1, 4); ALIAS("WRITE-CHAR", p_write_char, 1, 2);
+  ALIAS("TERPRI", p_terpri, 0, 1); ALIAS("FRESH-LINE", p_fresh_line, 0, 1);
+  ALIAS("PRIN1", p_prin1, 1, 2); ALIAS("PRINC", p_princ, 1, 2); ALIAS("PRINT", p_print, 1, 2);
+  ALIAS("WRITE-LINE", p_write_line, 1, 2); ALIAS("FINISH-OUTPUT", p_finish_output, 0, 1);
+  ALIAS("READ", p_read, 0, 4); ALIAS("READ-CHAR", p_read_char, 0, 4); ALIAS("PEEK-CHAR", p_peek_char, 0, 5);
+  ALIAS("UNREAD-CHAR", p_unread_char, 1, 2); defprim_mv("%C-READ-LINE", p_read_line, 0, 4);
+  ALIAS("CLOSE", p_close, 1, 2); ALIAS("STREAM-COLUMN", p_stream_column, 1, 1);
   defprim("WRITE-STRING", p_write_string, 1, 4); defprim("WRITE-CHAR", p_write_char, 1, 2);
   defprim("TERPRI", p_terpri, 0, 1); defprim("FRESH-LINE", p_fresh_line, 0, 1);
   defprim("PRIN1", p_prin1, 1, 2); defprim("PRINC", p_princ, 1, 2); defprim("PRINT", p_print, 1, 2);

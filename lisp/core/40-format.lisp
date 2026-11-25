@@ -2,52 +2,14 @@
 
 (in-package :cl)
 
-;;; ---- errors (minimal condition system; Phase 4 replaces it) ----------------
-
-(defvar *handler-stack* nil)
-
-(defun %signal-error (msg)
-  ;; Called from C for kernel errors and from ERROR.  Unwinds to the innermost
-  ;; HANDLER-CASE if there is one; otherwise returns and the caller falls back
-  ;; to the top level.
-  (when *handler-stack* (throw (car *handler-stack*) msg))
-  nil)
+;;; ---- bootstrap error (replaced by the condition system in 54-conditions.lisp) ----
 
 (defun error (fmt &rest args)
-  (let ((msg (cond ((stringp fmt) (apply #'format nil fmt args))
-                   (t (format nil "~A~{ ~S~}" fmt args)))))
-    (%signal-error msg)
-    (%error-to-top msg)))
+  (%error-to-top (if (stringp fmt) (apply #'format nil fmt args) (format nil "~A~{ ~S~}" fmt args))))
 
 (defun warn (fmt &rest args)
   (format *error-output* "~&WARNING: ~A~%" (apply #'format nil fmt args))
   nil)
-
-(defun %handler-case-run (thunk handler)
-  (let* ((tag (list nil))
-         (result nil)
-         (completed nil))
-    (let ((thrown (catch tag
-                    (let ((*handler-stack* (cons tag *handler-stack*)))
-                      (setq result (multiple-value-list (funcall thunk)))
-                      (setq completed t)
-                      nil))))
-      (if completed
-          (values-list result)
-          (funcall handler thrown)))))
-
-(defmacro handler-case (form &rest clauses)
-  (let* ((normal (remove-if (lambda (c) (eq (car c) :no-error)) clauses))
-         (clause (or (find-if (lambda (c) (member (car c) '(error serious-condition condition t simple-error))) normal)
-                     (car normal))))
-    (if (null clause)
-        form
-        `(%handler-case-run (lambda () ,form)
-                            (lambda (,(or (car (cadr clause)) (gensym))) ,@(cddr clause))))))
-
-(defmacro ignore-errors (&rest forms)
-  (let ((e (gensym)))
-    `(handler-case (progn ,@forms) (error (,e) (values nil ,e)))))
 
 ;;; ---- time ---------------------------------------------------------------------
 

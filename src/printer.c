@@ -177,6 +177,7 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_SYMBOL: print_symbol(b, o, escape, readable); return;
   case T_STRING: print_string(b, o, escape); return;
   case T_FLONUM: format_double(b, flonum_value(o)); return;
+  case T_BIGNUM: case T_RATIO: number_print(b, o, 10); return;
   case T_VECTOR: {
     buf_puts(b, "#(");
     for (size_t i = 0; i < OBJ_NWORDS(o); i++) { if (i) buf_putc(b, ' '); print_rec(b, SLOT(o, i), escape, readable, depth + 1); }
@@ -202,7 +203,15 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_STREAM: buf_puts(b, "#<STREAM>"); return;
   case T_PACKAGE: buf_puts(b, "#<PACKAGE "); print_string(b, SLOT(o, PK_NAME), 0); buf_putc(b, '>'); return;
   case T_STRUCT: {
+    Obj hook = SYM_FUNC(Q_print_hook);
+    if (hook != NIL && !CONSP(hook)) {
+      gc_inhibit++;
+      Obj r = call2(hook, o, BOOL(escape));
+      gc_inhibit--;
+      if (STRINGP(r)) { buf_put(b, STR_DATA(r), STR_LEN(r)); return; }
+    }
     Obj type = SLOT(o, 0);
+    if (IS_TYPE(type, T_STRUCT)) { buf_puts(b, "#<INSTANCE>"); return; }
     buf_puts(b, "#S(");
     Obj name = CONSP(type) ? CAR(type) : type;
     print_rec(b, name, escape, readable, depth + 1);

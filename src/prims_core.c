@@ -557,6 +557,54 @@ PRIM(p_struct_set_typed) {
   return SLOT(argv[0], UNFIX(argv[1])) = argv[3];
 }
 
+PRIM(p_backtrace) {
+  /* (%backtrace max) -> list of (function name args) for active VM frames, innermost first */
+  int max = (argc > 0 && FIXP(argv[0])) ? (int)UNFIX(argv[0]) : 100;
+  Obj head = NIL, tail = NIL;
+  for (int i = vfp - 1; i >= 0 && max-- > 0; i--) {
+    Obj fn = vframes[i].closure, code = SLOT(fn, 0);
+    int n = (int)UNFIX(SLOT(code, C_NREQ)) + (int)UNFIX(SLOT(code, C_NOPT)) + (SLOT(code, C_REST) != NIL ? 1 : 0);
+    int base = vframes[i].base;
+    Obj args = NIL;
+    for (int k = n - 1; k >= 0; k--) args = cons(vstack[base + k], args);
+    Obj cell = cons(list3(fn, SLOT(code, C_NAME), args), NIL);
+    if (head == NIL) head = cell; else CDR(tail) = cell;
+    tail = cell;
+  }
+  return head;
+}
+PRIM(p_make_instance) {
+  /* (%make-instance class nslots): struct whose slot 0 is CLASS and whose other slots are unbound */
+  UNUSED_ARGS;
+  SObj n = need_fix(argv[1]);
+  if (n < 0 || n > 100000) lisp_error("%%MAKE-INSTANCE: bad slot count");
+  Obj s = make_obj(T_STRUCT, (size_t)n + 1);
+  SLOT(s, 0) = argv[0];
+  for (SObj i = 1; i <= n; i++) SLOT(s, i) = UNSUPPLIED;
+  return s;
+}
+PRIM(p_last_read_start) { UNUSED_ARGS; return FIX(last_read_start); }
+PRIM(p_stream_position) { UNUSED_ARGS; if (!IS_TYPE(argv[0], T_STREAM)) type_error("STREAM", argv[0]); return FIX(stream_position(argv[0])); }
+PRIM(p_utf8_encode) {
+  UNUSED_ARGS;
+  Obj tmp = make_string_out_stream();
+  stream_putc(tmp, (int)need_fix(argv[0]));
+  return stream_output_string(tmp);
+}
+PRIM(p_utf8_decode) {
+  /* (%utf8-decode string index) -> (values code next-index) */
+  UNUSED_ARGS;
+  Obj str = need_str(argv[0]); SObj i = need_fix(argv[1]);
+  const unsigned char *p = (const unsigned char *)STR_DATA(str); SObj n = (SObj)STR_LEN(str);
+  if (i < 0 || i >= n) lisp_error("%%UTF8-DECODE: index out of range");
+  int c = p[i], extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+  int code = extra == 3 ? (c & 7) : extra == 2 ? (c & 15) : extra == 1 ? (c & 31) : c;
+  SObj j = i + 1;
+  for (; extra > 0 && j < n && (p[j] & 0xC0) == 0x80; extra--, j++) code = (code << 6) | (p[j] & 0x3F);
+  mv_vals[0] = FIX(code); mv_vals[1] = FIX(j); mv_count = 2;
+  return mv_vals[0];
+}
+
 /* ---- system ------------------------------------------------------------ */
 PRIM(p_gc) { UNUSED_ARGS; gc(); return FIX((SObj)heap_bytes_used()); }
 PRIM(p_gc_stress) { UNUSED_ARGS; gc_stress = argv[0] != NIL; gc_pending = gc_stress; return argv[0]; }
@@ -644,6 +692,10 @@ void init_prims_core(void) {
   defprim("%STRUCT-SET", p_struct_set, 3, 3); defprim("%STRUCT-TYPE", p_struct_type, 1, 1);
   defprim("%STRUCT-TYPEP", p_struct_typep, 2, 2); defprim("%STRUCT-REF-TYPED", p_struct_ref_typed, 3, 3);
   defprim("%STRUCT-SET-TYPED", p_struct_set_typed, 4, 4); defprim("%COPY-STRUCT", p_copy_struct, 1, 1);
+  defprim("%MAKE-INSTANCE", p_make_instance, 2, 2); defprim("%NATIVE-STREAM-P", p_streamp, 1, 1);
+  defprim("%BACKTRACE", p_backtrace, 0, 1); defprim("%LAST-READ-START", p_last_read_start, 0, 0);
+  defprim("%STREAM-POSITION", p_stream_position, 1, 1); defprim("%UTF8-ENCODE", p_utf8_encode, 1, 1);
+  defprim_mv("%UTF8-DECODE", p_utf8_decode, 2, 2);
   defprim("GC", p_gc, 0, 0); defprim("%GC-STRESS", p_gc_stress, 1, 1); defprim("%GC-COUNT", p_gc_count, 0, 0);
   defprim("%HEAP-USED", p_heap_used, 0, 0);
   defprim("EXIT", p_exit, 0, 1); defprim("QUIT", p_exit, 0, 1);

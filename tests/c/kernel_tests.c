@@ -13,7 +13,7 @@ static int checks, failures;
 
 static void init_all(void) {
   init_memory(); init_eval(); init_symbols(); init_streams(); init_vm();
-  init_prims_core(); init_prims_data(); init_prims_io();
+  init_prims_core(); init_prims_data(); init_prims_num(); init_prims_io();
 }
 
 static Obj rd(const char *s) { return read_from_cstring(s); }
@@ -95,13 +95,31 @@ static void test_errors(void) {
   CHECK(error_signalled("(undefined-fn-123)"));
   CHECK(error_signalled("unbound-variable-123"));
   CHECK(error_signalled("(+ 1 \"x\")"));
-  CHECK(error_signalled("(+ 1152921504606846975 1)"));      /* fixnum overflow */
   CHECK(error_signalled("(aref (vector 1 2) 5)"));
   CHECK(error_signalled("(funcall (lambda (a) a))"));
   CHECK(error_signalled("(/ 1 0)"));
   CHECK(!error_signalled("(+ 1 2)"));
   /* state is restored after errors */
   CHECK(vsp == 0 && spsp == 0 && nroots <= 4);
+}
+
+static void test_numbers(void) {
+  CHECK(prints_as(ev("(+ 1152921504606846975 1)"), "1152921504606846976"));        /* fixnum overflow -> bignum */
+  CHECK(ev("(= (- (+ 1152921504606846975 1) 1) 1152921504606846975)") == TT);
+  CHECK(FIXP(ev("(- (+ 1152921504606846975 1) 1)")));                                /* normalizes back */
+  CHECK(prints_as(ev("(* 123456789012345678901234567890 987654321098765432109876543210)"),
+                  "121932631137021795226185032733622923332237463801111263526900"));
+  CHECK(prints_as(ev("(floor (* 123456789012345678901234567890 987654321098765432109876543210) 123456789012345678901234567890)"), "987654321098765432109876543210"));
+  CHECK(prints_as(ev("(expt 2 200)"), "1606938044258990275541962092341162602522202993782792835301376"));
+  CHECK(prints_as(ev("(/ 6 4)"), "3/2"));
+  CHECK(prints_as(ev("(+ 1/2 1/3)"), "5/6"));
+  CHECK(prints_as(ev("(* 1/3 3)"), "1"));
+  CHECK(prints_as(ev("(- (expt 10 25))"), "-10000000000000000000000000"));
+  CHECK(prints_as(ev("(gcd (expt 2 90) (expt 6 50))"), "1125899906842624"));
+  CHECK(prints_as(ev("(ash -1 100)"), "-1267650600228229401496703205376"));
+  CHECK(prints_as(ev("(ash (expt 2 100) -99)"), "2"));
+  CHECK(error_signalled("(/ 5 0)"));
+  CHECK(error_signalled("(/ (expt 10 30) 0)"));
 }
 
 static void test_gc(void) {
@@ -149,6 +167,7 @@ int main(void) {
   test_reader_printer();
   test_evaluator();
   test_errors();
+  test_numbers();
   test_gc();
   test_image();
   printf("kernel tests: %d checks, %d failures\n", checks, failures);

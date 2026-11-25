@@ -38,23 +38,22 @@ static int skip_ws(Obj s) {
 /* ---- numbers ---------------------------------------------------------- */
 static int parse_number(const char *tok, Obj *out) {
   const char *p = tok;
-  int neg = 0;
-  if (*p == '+' || *p == '-') { neg = *p == '-'; p++; }
+  if (*p == '+' || *p == '-') p++;
   const char *digits = p;
   while (isdigit((unsigned char)*p)) p++;
   size_t nd = (size_t)(p - digits);
-  if (*p == 0 && nd > 0) {
-    errno = 0;
-    char *end; long long v = strtoll(digits, &end, 10);
-    if (errno || v > (long long)FIX_MAX + (neg ? 1 : 0)) lisp_error("integer literal too large (bignums arrive in Phase 4): %s", tok);
-    *out = FIX(neg ? -v : v);
-    return 1;
+  if (*p == 0 && nd > 0) { *out = int_parse(tok, strlen(tok), 10); return 1; }
+  if (*p == '/' && nd > 0) {                              /* ratio */
+    const char *den = p + 1, *q = den;
+    while (isdigit((unsigned char)*q)) q++;
+    if (*q == 0 && q > den) {
+      Obj n = int_parse(tok, (size_t)(p - tok), 10), d = int_parse(den, strlen(den), 10);
+      *out = make_ratio(n, d);
+      return 1;
+    }
+    return 0;
   }
-  if (*p == '.' && p[1] == 0 && nd > 0) {                 /* "12." */
-    long long v = strtoll(digits, NULL, 10);
-    *out = FIX(neg ? -v : v);
-    return 1;
-  }
+  if (*p == '.' && p[1] == 0 && nd > 0) { *out = int_parse(tok, strlen(tok) - 1, 10); return 1; }   /* "12." */
   /* float syntax */
   size_t nfrac = 0;
   int have_dot = 0;
@@ -371,10 +370,10 @@ static Obj read_hash(Obj s) {
     Buf b; buf_init(&b);
     for (;;) { int n = stream_getc(s); if (is_delim(n)) { stream_ungetc(s, n); break; } buf_putc(&b, n); }
     buf_putc(&b, 0);
-    char *end; long long v = strtoll(b.buf, &end, base);
-    if (*end || !FIX_FITS(v)) reader_error("bad radix integer");
+    Obj v = int_parse(b.buf, b.len - 1, base);
+    if (v == UNBOUND) reader_error("bad radix integer");
     buf_free(&b);
-    return FIX(v);
+    return v;
   }
   case '.': {
     if (SYM_VALUE(Q_read_eval) == NIL) reader_error("#. disabled");
@@ -425,10 +424,13 @@ static Obj rd(Obj s) {
   }
 }
 
+long last_read_start;
+
 Obj read_form(Obj stream, int *eof) {
   qq_depth = 0;
   int c = skip_ws(stream);
   if (c < 0) { *eof = 1; return NIL; }
+  last_read_start = stream_position(stream);
   *eof = 0;
   return rd(stream);
 }

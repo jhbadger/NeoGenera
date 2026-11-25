@@ -119,9 +119,10 @@ int stream_getc(Obj s) {
   switch (kind_of(s)) {
   case SK_STDIN: case SK_FILE_IN: {
     long pk = (long)UNFIX(SLOT(s, ST_PEEK));
-    if (pk >= 0) { SLOT(s, ST_PEEK) = FIX(-1); return (int)pk; }
+    if (pk >= 0) { SLOT(s, ST_PEEK) = FIX(-1); SLOT(s, ST_POS) = FIX(UNFIX(SLOT(s, ST_POS)) + 1); return (int)pk; }
     if (kind_of(s) == SK_STDIN) fflush(stdout);
     int c = fgetc(files[UNFIX(SLOT(s, ST_FILE))]);
+    if (c >= 0) SLOT(s, ST_POS) = FIX(UNFIX(SLOT(s, ST_POS)) + 1);
     return c;
   }
   case SK_STR_IN: {
@@ -137,8 +138,10 @@ int stream_getc(Obj s) {
 void stream_ungetc(Obj s, int c) {
   if (c < 0) return;
   if (kind_of(s) == SK_STR_IN) SLOT(s, ST_POS) = FIX(UNFIX(SLOT(s, ST_POS)) - 1);
-  else SLOT(s, ST_PEEK) = FIX(c);
+  else { SLOT(s, ST_PEEK) = FIX(c); SLOT(s, ST_POS) = FIX(UNFIX(SLOT(s, ST_POS)) - 1); }
 }
+
+long stream_position(Obj s) { return (long)UNFIX(SLOT(s, ST_POS)); }
 
 int stream_peekc(Obj s) { int c = stream_getc(s); stream_ungetc(s, c); return c; }
 

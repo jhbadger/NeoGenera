@@ -69,6 +69,7 @@ Obj plist_put(Obj plist, Obj key, Obj val) {
 int eql(Obj a, Obj b) {
   if (a == b) return 1;
   if (FLONUMP(a) && FLONUMP(b)) return memcmp(&SLOT(a, 0), &SLOT(b, 0), sizeof(double)) == 0;
+  if (OBJP(a) && OBJP(b) && (OBJ_TYPE(a) == T_BIGNUM || OBJ_TYPE(a) == T_RATIO) && OBJ_TYPE(a) == OBJ_TYPE(b)) return num_eql(a, b);
   return 0;
 }
 
@@ -120,6 +121,7 @@ uint64_t sxhash(Obj o, int depth) {
   case T_SYMBOL: return hash_bytes(STR_DATA(SYM_NAME(o)), STR_LEN(SYM_NAME(o))) ^ 0x5bd1e995;
   case T_FLONUM: { uint64_t b; memcpy(&b, &SLOT(o, 0), 8); return b * 0x9E3779B97F4A7C15ULL; }
   case T_VECTOR: return 0x1234 + OBJ_NWORDS(o);
+  case T_BIGNUM: case T_RATIO: return num_hash(o);
   default: return 99;
   }
 }

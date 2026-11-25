@@ -34,11 +34,6 @@
            (when e (setq form f) (setq expanded t) (go top)))))
     (values form expanded)))
 
-(defun %fn-symbol (name)
-  (if (and (consp name) (eq (car name) 'setf))
-      (intern (%string-concat "(SETF " (symbol-name (cadr name)) ")") (symbol-package (cadr name)))
-      name))
-
 ;;; ---- variables -----------------------------------------------------------
 
 (defun note-var-use (var)
@@ -58,7 +53,7 @@
 
 (defun an-symbol (sym env)
   (let ((b (assq sym (aenv-vars env))))
-    (cond (b (an-lref (cdr b)))
+    (cond (b (if (cvar-p (cdr b)) (an-lref (cdr b)) (an (cadr (cdr b)) env)))
           ((or (null sym) (eq sym t) (keywordp sym)) (list :const sym))
           ((and (%constant-p sym) (boundp sym)) (list :const (symbol-value sym)))
           (t (list :gref sym)))))
@@ -118,6 +113,11 @@
     (flet (an-flet (cadr form) (cddr form) env nil))
     (labels (an-flet (cadr form) (cddr form) env t))
     (macrolet (an-macrolet (cadr form) (cddr form) env))
+    (symbol-macrolet
+     (let ((env2 (copy-aenv env)))
+       (dolist (b (cadr form))
+         (setf (aenv-vars env2) (acons (car b) (list :symmac (cadr b)) (aenv-vars env2))))
+       (an-body (cddr form) env2)))
     (block (an-block (cadr form) (cddr form) env))
     (return-from (an-return-from (cadr form) (caddr form) (cdddr form) env))
     (tagbody (an-tagbody (cdr form) env))
@@ -308,7 +308,9 @@
 
 (defun an-setq-1 (sym value env)
   (let ((b (assq sym (aenv-vars env))))
-    (cond (b (let ((var (cdr b)) (node (an value env)))
+    (cond ((and b (not (cvar-p (cdr b))))
+           (an (list 'setf (cadr (cdr b)) value) env))
+          (b (let ((var (cdr b)) (node (an value env)))
                (note-var-use var)
                (setf (cvar-mutated var) t)
                (list :lset var node)))

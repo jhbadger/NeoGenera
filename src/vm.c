@@ -88,7 +88,7 @@ static Obj vm_execute(int stop_vfp) {
     case OP_CALL: {
       int n = ip[pc++];
       fr->pc = pc;
-      if (gc_pending) { gc(); RELOAD(); }
+      if (gc_pending && !gc_inhibit) { gc(); RELOAD(); }
       Obj fn = vstack[vsp - n - 1];
       if (IS_TYPE(fn, T_CLOSURE)) { vm_enter(n); RELOAD(); break; }
       r = apply_stack(n);
@@ -99,7 +99,7 @@ static Obj vm_execute(int stop_vfp) {
     case OP_TAILCALL: {
       int n = ip[pc++];
       fr->pc = pc;
-      if (gc_pending) { gc(); RELOAD(); }
+      if (gc_pending && !gc_inhibit) { gc(); RELOAD(); }
       Obj fn = vstack[vsp - n - 1];
       if (IS_TYPE(fn, T_CLOSURE)) {
         int dst = base - 1;

@@ -14,6 +14,7 @@
 #include <setjmp.h>
 #include <stdarg.h>
 
+typedef struct { char *buf; size_t len, cap; } Buf;
 typedef uintptr_t Obj;
 typedef intptr_t SObj;
 
@@ -46,7 +47,7 @@ typedef intptr_t SObj;
 /* ---- heap objects ----------------------------------------------------- */
 enum {
   T_SYMBOL = 1, T_STRING, T_VECTOR, T_FLONUM, T_EVALFN, T_CLOSURE, T_CODE,
-  T_PRIM, T_STREAM, T_PACKAGE, T_STRUCT, T_ADVEC
+  T_PRIM, T_STREAM, T_PACKAGE, T_STRUCT, T_ADVEC, T_BIGNUM, T_RATIO
 };
 
 #define HDR(n, t)      (((Obj)(n) << 16) | ((Obj)(t) << 8) | TAG_HDR)
@@ -168,7 +169,7 @@ Obj   fn_symbol(Obj name);                      /* (setf x) -> symbol       */
   X(package,"*PACKAGE*") X(stdout,"*STANDARD-OUTPUT*") X(stdin,"*STANDARD-INPUT*") \
   X(stderr,"*ERROR-OUTPUT*") X(features,"*FEATURES*") X(signal_error,"%SIGNAL-ERROR") \
   X(sf_eval,"EVAL") X(print_pkg,"*PRINT-PACKAGES*") X(read_eval,"*READ-EVAL*") \
-  X(in_signal,"*IN-ERROR-SIGNAL*") X(struct_parent,"%STRUCT-PARENT")
+  X(in_signal,"*IN-ERROR-SIGNAL*") X(print_hook,"%PRINT-HOOK") X(struct_parent,"%STRUCT-PARENT")
 #define X(id, str) extern Obj Q_##id;
 SYMBOL_LIST(X)
 #undef X
@@ -228,7 +229,7 @@ typedef struct Frame {
   struct Frame *prev;
   int kind;
   Obj tag, value, cleanup, mvlist;
-  int spsp, vsp, vfp, nroots, eval_depth;
+  int spsp, vsp, vfp, nroots, eval_depth, gci;
   jmp_buf jb;
 } Frame;
 extern Frame *frame_top;
@@ -252,6 +253,25 @@ Obj   resolve_function(Obj f);
 Obj   vm_apply_closure(int n);                 /* closure on stack, run it */
 void  init_eval(void);
 void  init_vm(void);
+/* numbers (bignum.c) */
+int   is_integer(Obj o);
+Obj   int_from_i64(int64_t v);
+int   int_sign(Obj a); Obj int_neg(Obj a); Obj int_abs(Obj a); int int_even(Obj a);
+int   int_cmp(Obj a, Obj b);
+Obj   int_add(Obj a, Obj b); Obj int_sub(Obj a, Obj b); Obj int_mul(Obj a, Obj b);
+void  int_divmod(Obj a, Obj b, int mode, Obj *q, Obj *r);   /* 0 floor 1 ceiling 2 truncate 3 round */
+Obj   int_gcd(Obj a, Obj b); Obj int_pow(Obj base, int64_t e); Obj int_ash(Obj a, int64_t s);
+Obj   int_isqrt(Obj n); Obj int_logop(int op, Obj a, Obj b); int64_t int_length(Obj a);
+double int_to_double(Obj a); Obj int_from_double(double d);
+uint64_t int_hash(Obj a); int int_eql(Obj a, Obj b);
+void  int_print(Buf *b, Obj a, int radix);
+Obj   int_parse(const char *s, size_t len, int radix);       /* UNBOUND if invalid */
+Obj   make_ratio(Obj n, Obj d); Obj ratio_numerator(Obj o); Obj ratio_denominator(Obj o);
+Obj   float_to_rational(double d);
+int   num_sign(Obj a); int num_eql(Obj a, Obj b); uint64_t num_hash(Obj a);
+void  number_print(Buf *b, Obj o, int radix);
+Obj   num_div(Obj a, Obj b);
+extern int gc_inhibit;
 Obj   num_add(Obj a, Obj b);
 Obj   num_sub(Obj a, Obj b);
 Obj   num_mul(Obj a, Obj b);
@@ -269,13 +289,14 @@ enum {
 /* ---- primitives ------------------------------------------------------- */
 typedef Obj (*PrimFn)(int argc, Obj *argv);
 typedef struct { const char *name; PrimFn fn; int min, max, mv; Obj obj; } PrimEntry;
-#define MAX_PRIMS 1024
+#define MAX_PRIMS 2048
 extern PrimEntry prim_table[MAX_PRIMS];
 extern int nprims;
 Obj   defprim(const char *name, PrimFn fn, int min, int max);
 Obj   defprim_mv(const char *name, PrimFn fn, int min, int max);
 void  init_prims_core(void);
 void  init_prims_data(void);
+void  init_prims_num(void);
 void  init_prims_io(void);
 Obj   values_list(Obj list);
 #define PRIM(name) static Obj name(int argc, Obj *argv)
@@ -295,6 +316,8 @@ int   stream_getc(Obj s);
 int   stream_peekc(Obj s);
 void  stream_ungetc(Obj s, int c);
 void  stream_flush(Obj s);
+long  stream_position(Obj s);
+extern long last_read_start;
 int   stream_close(Obj s);
 Obj   open_file_stream(const char *path, int output, int append);
 void  init_streams(void);
@@ -302,7 +325,6 @@ void  init_streams(void);
 Obj   read_form(Obj stream, int *eof);          /* sets *eof=1 at EOF       */
 Obj   read_from_cstring(const char *s);
 
-typedef struct { char *buf; size_t len, cap; } Buf;
 void  buf_init(Buf *b);
 void  buf_free(Buf *b);
 void  buf_put(Buf *b, const char *s, size_t n);

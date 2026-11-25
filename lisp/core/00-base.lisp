@@ -14,6 +14,11 @@
   (make-symbol (%string-concat (if (stringp prefix) prefix "G")
                                (%number-to-string *gensym-counter*))))
 
+(defun %fn-symbol (name)
+  (if (and (consp name) (eq (car name) 'setf))
+      (intern (%string-concat "(SETF " (symbol-name (cadr name)) ")") (symbol-package (cadr name)))
+      name))
+
 (defmacro in-package (name)
   (list 'setq '*package* (list 'find-package (list 'quote name))))
 

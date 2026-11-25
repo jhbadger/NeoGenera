@@ -38,7 +38,7 @@ void unbind_to(int h) {
 void frame_push(Frame *f, int kind, Obj tag) {
   f->prev = frame_top; f->kind = kind; f->tag = tag;
   f->value = NIL; f->cleanup = NIL; f->mvlist = UNBOUND;
-  f->spsp = spsp; f->vsp = vsp; f->vfp = vfp; f->nroots = nroots; f->eval_depth = eval_depth;
+  f->spsp = spsp; f->vsp = vsp; f->vfp = vfp; f->nroots = nroots; f->eval_depth = eval_depth; f->gci = gc_inhibit;
   frame_top = f;
 }
 
@@ -51,7 +51,7 @@ Frame *find_frame(int kind, Obj tag) {
 }
 
 static void restore_state(Frame *f) {
-  unbind_to(f->spsp); vsp = f->vsp; vfp = f->vfp; nroots = f->nroots; eval_depth = f->eval_depth;
+  unbind_to(f->spsp); vsp = f->vsp; vfp = f->vfp; nroots = f->nroots; eval_depth = f->eval_depth; gc_inhibit = f->gci;
 }
 
 void throw_to(Frame *target, Obj value) {
@@ -802,7 +802,7 @@ Obj eval(Obj form, Obj vars, Obj funs) {
   int saved = nroots;
   PROTECT(form); PROTECT(vars); PROTECT(funs);
   if (++eval_depth > MAX_EVAL_DEPTH) { eval_depth = 0; lisp_error("Control stack exhausted (evaluator depth)"); }
-  if (gc_pending) gc();
+  if (gc_pending && !gc_inhibit) gc();
   Obj head = CAR(form), f = NIL, r;
   if (SYMBOLP(head)) {
     int sf = SYM_SFID(head);
