@@ -136,6 +136,13 @@
 
 (defun elt (s i) (if (listp s) (car (nthcdr i s)) (aref s i)))
 
+(let ((%make-string-prim #'make-string))
+  (defun make-string (n &rest args)
+    "A string of N characters; the fill character is the optional second argument or the :INITIAL-ELEMENT keyword."
+    (if (and args (eq (car args) :initial-element))
+        (funcall %make-string-prim n (cadr args))
+        (apply %make-string-prim n args))))
+
 (defun make-array (dims &key initial-element initial-contents fill-pointer adjustable element-type)
   (let ((n (if (consp dims) (car dims) dims)) (stringp (eq element-type 'character)))
     (cond ((or fill-pointer adjustable)

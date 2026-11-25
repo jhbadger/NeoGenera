@@ -39,4 +39,13 @@
     "lisp/docs/20-export.lisp"
     "lisp/docs/30-tutorial.lisp"
     "lisp/docs/40-api-docs.lisp"
-    "lisp/docs/50-manual.lisp"))
+    "lisp/docs/50-manual.lisp"
+    "lisp/math/00-numeric.lisp"
+    "lisp/math/10-random.lisp"
+    "lisp/math/20-matrix.lisp"
+    "lisp/math/30-stats.lisp"
+    "lisp/math/40-tests.lisp"
+    "lisp/math/50-models.lisp"
+    "lisp/math/60-dataframe.lisp"
+    "lisp/math/70-plot.lisp"
+    "lisp/math/80-symbolic.lisp"))

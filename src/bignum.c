@@ -80,7 +80,10 @@ static size_t mag_sub(const limb *a, size_t na, const limb *b, size_t nb, limb *
   while (na && out[na - 1] == 0) na--;
   return na;
 }
-static size_t mag_mul(const limb *a, size_t na, const limb *b, size_t nb, limb *out) {
+/* Multiplication: schoolbook below KARA_CUT limbs, Karatsuba above, chunking for unbalanced operands.
+   KMUL writes exactly na+nb limbs to OUT (leading zeros included). */
+#define KARA_CUT 32
+static void school_mul(const limb *a, size_t na, const limb *b, size_t nb, limb *out) {
   memset(out, 0, (na + nb) * sizeof(limb));
   for (size_t i = 0; i < na; i++) {
     uint64_t c = 0;
@@ -90,6 +93,50 @@ static size_t mag_mul(const limb *a, size_t na, const limb *b, size_t nb, limb *
     }
     out[i + nb] = (limb)c;
   }
+}
+static void add_in(limb *x, size_t nx, const limb *y, size_t ny) {   /* x += y, carry stays inside x */
+  uint64_t c = 0; size_t i = 0;
+  for (; i < ny && i < nx; i++) { uint64_t t = (uint64_t)x[i] + y[i] + c; x[i] = (limb)t; c = t >> 32; }
+  for (; c && i < nx; i++) { uint64_t t = (uint64_t)x[i] + c; x[i] = (limb)t; c = t >> 32; }
+}
+static void sub_in(limb *x, size_t nx, const limb *y, size_t ny) {   /* x -= y, x >= y */
+  int64_t b = 0; size_t i = 0;
+  for (; i < nx; i++) {
+    int64_t t = (int64_t)x[i] - (i < ny ? (int64_t)y[i] : 0) - b;
+    if (t < 0) { t += ((int64_t)1 << 32); b = 1; } else b = 0;
+    x[i] = (limb)t;
+    if (i >= ny && !b) break;
+  }
+}
+static void kmul(const limb *a, size_t na, const limb *b, size_t nb, limb *out) {
+  if (na < nb) { const limb *t = a; a = b; b = t; size_t tn = na; na = nb; nb = tn; }
+  if (nb < KARA_CUT) { school_mul(a, na, b, nb, out); return; }
+  size_t h = (na + 1) / 2;
+  if (nb <= h) {                                   /* unbalanced: multiply NB-sized chunks of A */
+    memset(out, 0, (na + nb) * sizeof(limb));
+    limb *tmp = xmalloc(2 * nb * sizeof(limb));
+    for (size_t off = 0; off < na; off += nb) {
+      size_t len = na - off < nb ? na - off : nb;
+      kmul(a + off, len, b, nb, tmp);
+      add_in(out + off, na + nb - off, tmp, len + nb);
+    }
+    free(tmp); return;
+  }
+  size_t a1n = na - h, b1n = nb - h;
+  limb *buf = xmalloc((2 * (h + 1) + 2 * h + 2) * sizeof(limb));
+  limb *sa = buf, *sb = buf + h + 1, *z1 = buf + 2 * (h + 1);
+  memset(sa, 0, (h + 1) * sizeof(limb)); memcpy(sa, a, h * sizeof(limb)); add_in(sa, h + 1, a + h, a1n);
+  memset(sb, 0, (h + 1) * sizeof(limb)); memcpy(sb, b, h * sizeof(limb)); add_in(sb, h + 1, b + h, b1n);
+  kmul(sa, h + 1, sb, h + 1, z1);                  /* (a0+a1)(b0+b1): 2h+2 limbs */
+  kmul(a, h, b, h, out);                           /* z0 -> out[0..2h) */
+  kmul(a + h, a1n, b + h, b1n, out + 2 * h);       /* z2 -> out[2h..na+nb) */
+  sub_in(z1, 2 * h + 2, out, 2 * h);
+  sub_in(z1, 2 * h + 2, out + 2 * h, a1n + b1n);
+  add_in(out + h, na + nb - h, z1, 2 * h + 2 > na + nb - h ? na + nb - h : 2 * h + 2);
+  free(buf);
+}
+static size_t mag_mul(const limb *a, size_t na, const limb *b, size_t nb, limb *out) {
+  kmul(a, na, b, nb, out);
   size_t n = na + nb;
   while (n && out[n - 1] == 0) n--;
   return n;

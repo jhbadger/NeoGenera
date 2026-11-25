@@ -403,7 +403,7 @@
       (dolist (d *documents*) (scan (doc-nodes d))))
     table))
 
-(defvar *core-symbols* nil "Hash set of the COMMON-LISP symbols present when the system was built.")
+(defvar *core-symbols* nil "Hash set of the COMMON-LISP symbols that were defined when the system was built.")
 
 (defun snapshot-core-symbols ()
   (let ((table (make-hash-table :test 'eq)))

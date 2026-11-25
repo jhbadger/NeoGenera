@@ -15,5 +15,7 @@
 (import-markdown :documentation-system "docs/manual/documentation-system.md" :category :manual
                  :keywords (documentation docstring markdown export html pdf search tutorial))
 
+(import-markdown :math-manual "docs/manual/math-manual.md" :category :manual
+                 :keywords (math statistics matrix linear-algebra random distribution regression plot data-frame symbolic))
 ;;; Coverage is measured over what exists now; symbols defined later (user code, tests) are not counted.
 (snapshot-core-symbols)
