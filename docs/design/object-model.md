@@ -38,7 +38,7 @@ the collector can size any object without knowing its type.
 ## NIL and image portability
 
 `NIL` is an ordinary symbol, but it is allocated outside both semispaces so it never moves.
-It lives in a page **at a fixed virtual address** just past the heap (`HEAP_HINT + 4·semispace`).
+It lives in a page **at a fixed virtual address** just past the heap (`heap base + 4·semispace`).
 A heap image stores raw `NIL` pointers, so the address must be identical in every process;
 an earlier version used a static C array and broke under ASLR. The same rule applies to
 anything else that would put a process-specific address into the heap: primitives are stored

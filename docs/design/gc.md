@@ -9,7 +9,7 @@ objects and one for conses. Conses carry no header, so mixing them into one spac
 make linear scanning of to-space ambiguous. Collection scans both to-spaces alternately
 until neither has unscanned data.
 
-Both semispaces are mapped at a fixed virtual address (`HEAP_HINT`) so a heap image is a
+Both semispaces are mapped at a fixed virtual address (the first of `heap_hints` in `memory.c` the kernel honours; a lower one exists for 39-bit Android address spaces) so a heap image is a
 raw dump (see `bootstrap.md`). Space is reserved with `MAP_NORESERVE`; only touched pages
 cost memory. The collector triggers when allocation since the last collection exceeds
 `max(48 MB, 2 × live data)`.

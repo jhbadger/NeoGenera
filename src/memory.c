@@ -31,7 +31,15 @@ Obj NIL, TT;
  * in every process (a heap image stores NIL pointers). */
 static Obj *nil_storage;
 
-#define HEAP_HINT 0x300000000000ULL
+/* Candidate fixed addresses for the heap, tried in order.  The first suits 47/48-bit address spaces (macOS,
+ * x86-64 Linux); the second lies inside a 39-bit space (0x8000000000), which many Android/Termux aarch64
+ * kernels use, below where the kernel puts PIE executables and the top-down mmap area there.  Images
+ * record the address they were built at, so an image must be loaded on a system that picks the same one. */
+static const uintptr_t heap_hints[] = { 0x300000000000ULL, 0x1000000000ULL };
+#define NHINTS (sizeof heap_hints / sizeof heap_hints[0])
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0
+#endif
 
 static char  *region;
 static size_t semi;                    /* bytes per semispace */
@@ -81,15 +89,25 @@ static void select_space(int which) {
 
 void init_memory(void) {
   size_t try_semi[] = { 1ULL << 29, 1ULL << 27, 1ULL << 25 };
-  for (int i = 0; i < 3; i++) {
+  /* Prefer any fixed address (largest size first) over a floating one: images need a fixed heap. */
+  for (int i = 0; i < 3 && !region; i++) {
     semi = try_semi[i];
-    void *want = (void *)HEAP_HINT;
-    void *p = mmap(want, semi * 4 + 65536, PROT_READ | PROT_WRITE,
+    size_t len = semi * 4 + 65536;
+    for (size_t k = 0; k < NHINTS && !region; k++) {
+      void *want = (void *)heap_hints[k];
+      void *p = mmap(want, len, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANON | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+      if (p == MAP_FAILED) continue;
+      if (p != want) { munmap(p, len); continue; }   /* hint not honoured (e.g. beyond a 39-bit VA space) */
+      region = p;
+      heap_fixed = 1;
+    }
+  }
+  for (int i = 0; i < 3 && !region; i++) {
+    semi = try_semi[i];
+    void *p = mmap(NULL, semi * 4 + 65536, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-    if (p == MAP_FAILED) continue;
-    region = p;
-    heap_fixed = (p == want);
-    break;
+    if (p != MAP_FAILED) { region = p; heap_fixed = 0; }
   }
   if (!region) { fprintf(stderr, "cannot reserve heap\n"); exit(2); }
   o_space[0] = region;            o_space[1] = region + semi;
