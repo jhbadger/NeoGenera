@@ -33,4 +33,10 @@
     "lisp/editor/00-buffer.lisp"
     "lisp/editor/10-editor.lisp"
     "lisp/editor/20-files.lisp"
-    "lisp/ui/60-tools-ui.lisp"))
+    "lisp/ui/60-tools-ui.lisp"
+    "lisp/docs/00-docs.lisp"
+    "lisp/docs/10-viewer.lisp"
+    "lisp/docs/20-export.lisp"
+    "lisp/docs/30-tutorial.lisp"
+    "lisp/docs/40-api-docs.lisp"
+    "lisp/docs/50-manual.lisp"))

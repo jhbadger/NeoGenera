@@ -29,7 +29,8 @@
    (vis-count :initform 0 :accessor lw-vis-count)
    (input-top :initform 0 :accessor lw-input-top)
    (last-error :initform nil :accessor lw-last-error)
-   (read-only :initform nil :initarg :read-only :accessor lw-read-only)))
+   (read-only :initform nil :initarg :read-only :accessor lw-read-only)
+   (lesson :initform nil :accessor lw-lesson)))
 
 (defmethod initialize-instance :after ((w listener-window) &rest args)
   (declare (ignore args))
@@ -62,6 +63,7 @@
         (:link (values (tc :link) (tc :bg) +underline+))
         (:dim (values (tc :dim) (tc :bg) (if (= -1 (tc :dim)) +dim+ 0)))
         (:bold (values (tc :fg) (tc :bg) +bold+))
+        (:em (values (tc :fg) (tc :bg) +underline+))
         (t (values (tc :fg) (tc :bg) 0)))))
 
 (defun %input-rows (w iw)
@@ -375,7 +377,8 @@ Returns (values list-of-values ok-p)."
               (%fresh-line w)
               (setq *** ** ** * * (car vals))
               (dolist (v vals) (setq *result-history* (cons v *result-history*)))
-              (%show-values w vals))))))))
+              (%show-values w vals)
+              (when (lw-lesson w) (tutorial-observe w form vals)))))))))
 
 
 (defun %submit (w)

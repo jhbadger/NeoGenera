@@ -179,6 +179,8 @@
     (cond ((and (symbolp object) object)
            (when (boundp object) (format stream "  value: ~S~%" (symbol-value object)))
            (when (fboundp object) (format stream "  function: ~S~%" (symbol-function object)))
+           (when (documentation object 'function) (format stream "  documentation: ~A~%" (documentation object 'function)))
+           (when (documentation object 'variable) (format stream "  variable documentation: ~A~%" (documentation object 'variable)))
            (when (symbol-plist object) (format stream "  plist: ~S~%" (symbol-plist object)))
            (format stream "  package: ~S~%" (symbol-package object)))
           ((and (structp object) (not (%hash-table-p object)))

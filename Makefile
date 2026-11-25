@@ -5,7 +5,7 @@ SRC      = src/memory.c src/symbols.c src/stream.c src/reader.c src/printer.c \
            src/eval.c src/vm.c src/prims_core.c src/prims_data.c src/prims_num.c src/bignum.c src/term.c src/prims_sys.c src/prims_io.c src/main.c
 BIN      = build/neogenera
 NG       = $(BIN) --no-toplevel
-LISP_SRC = $(wildcard lisp/*/*.lisp lisp/sources.lisp)
+LISP_SRC = $(wildcard lisp/*/*.lisp lisp/sources.lisp docs/manual/*.md)
 
 .PHONY: all kernel stage0 stage1 stage2 selfhost world test test-c test-lisp test-pty test-stress asan clean
 

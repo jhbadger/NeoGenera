@@ -13,13 +13,17 @@
    (subject :initarg :subject :initform nil :accessor rw-subject))
   (:default-initargs :read-only t))
 
+(defgeneric report-refreshed (window))
+(defmethod report-refreshed ((w report-window)) nil)
+
 (defun report-refresh (w)
   (ob-clear (lw-obuf w))
   (setf (rw-entries w) nil)
   (let ((*current-listener* w))
     (handler-case (funcall (rw-producer w) w (lw-stream w))
       (error (e) (format (lw-stream w) "Error: ~A~%" e))))
-  (setf (lw-scroll-back w) 0))
+  (setf (lw-scroll-back w) 0)
+  (report-refreshed w))
 
 (defmethod initialize-instance :after ((w report-window) &rest args)
   (declare (ignore args))
@@ -119,6 +123,8 @@
      (append (list (list "name" (symbol-name obj) nil) (list "package" (symbol-package obj) nil))
              (when (boundp obj) (list (list "value" (symbol-value obj) (lambda (v) (set obj v)))))
              (when (fboundp obj) (list (list "function" (symbol-function obj) nil)))
+             (when (documentation obj 'function) (list (list "documentation" (documentation obj 'function) nil)))
+             (when (documentation obj 'variable) (list (list "variable documentation" (documentation obj 'variable) nil)))
              (list (list "plist" (symbol-plist obj) (lambda (v) (%set-symbol-plist obj v))))))
     ((functionp obj)
      (let ((parts (and (compiled-function-p obj) (%code-parts obj))))

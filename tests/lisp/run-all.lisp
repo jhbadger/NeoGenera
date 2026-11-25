@@ -5,5 +5,6 @@
 (load "tests/lisp/phase4-tests.lisp")
 (load "tests/lisp/ui-tests.lisp")
 (load "tests/lisp/tools-tests.lisp")
+(load "tests/lisp/docs-tests.lisp")
 (let ((ok (run-tests)))
   (exit (if ok 0 1)))

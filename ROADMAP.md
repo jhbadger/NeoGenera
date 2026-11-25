@@ -6,8 +6,8 @@ NeoGenera is a Lisp environment in the spirit of Symbolics Genera: a single, liv
 
 ## Status
 
-*Last updated 2026-11-25.* **Phases 0-6 are implemented**; the compiler compiles itself to a byte-identical
-fixed point (`make selfhost`, 30 source files). Phases 7-10 are still planned.
+*Last updated 2026-11-25.* **Phases 0-7 are implemented**; the compiler compiles itself to a byte-identical
+fixed point (`make selfhost`, 36 source files). Phases 8-10 are still planned.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -18,9 +18,10 @@ fixed point (`make selfhost`, 30 source files). Phases 7-10 are still planned.
 | 4 Conditions, CLOS, streams | done, with deviations | `tests/lisp/phase4-tests.lisp` |
 | 5 Text window system | done, with deviations | `tests/lisp/ui-tests.lisp`, `tests/ui/pty_test.py` (real pty) |
 | 6 Editor and developer tools | done, with deviations | `tests/lisp/tools-tests.lisp`, pty test |
+| 7 Hypertext documentation | done, with deviations | `tests/lisp/docs-tests.lisp`, `docs/design/docs.md`, `docs/manual/`, coverage gate |
 
-Totals: 74 C checks, 71 Lisp test groups with 910 checks (run interpreted-and-compiled and under ASan),
-20 real-terminal checks. The Lisp suite takes about 1.5 seconds.
+Totals: 74 C checks, 83 Lisp test groups with 1096 checks (run interpreted-and-compiled and under ASan),
+20 real-terminal checks. The Lisp suite takes a few seconds.
 
 ### Deviations from the plan above
 
@@ -67,6 +68,18 @@ These are scope decisions, not oversights; each is a candidate for a later phase
 * GC stress (a collection at every safe point) was run for the Phase 4 groups and for the buffer, undo,
   kill-ring and sexp groups; the cross-reference, profiler and window tests were checked under ASan only,
   because they are too slow with a collection per safe point.
+
+**Phase 7**
+* The Markdown importer handles a documented subset (headings, paragraphs, lists, fenced code, pipe tables,
+  inline code/emphasis/links); no nested lists, images or raw HTML. There are no figures or index entries in the
+  document format; the search index is built from titles, keywords, headings, body text and docstrings.
+* The API reference is generated from docstrings rather than hand-written; the six manuals are hand-written
+  Markdown. Coverage (a CI gate in `docs-tests.lisp`) covers the core `COMMON-LISP` library, not the window
+  system, editor or tool symbols.
+* The PDF writer uses the standard Helvetica/Courier fonts and replaces non-Latin characters with `?`.
+* "Run this example" evaluates in the user's Listener; there is no sandbox. Tutorial checks see only the last form.
+* The documentation tests were run under ASan; GC stress was not run over them (loading the suites takes over
+  ten minutes with a collection at every safe point).
 
 **General**
 * Developed and tested on aarch64 Linux. The code is portable C (POSIX), but x86-64 and macOS builds have

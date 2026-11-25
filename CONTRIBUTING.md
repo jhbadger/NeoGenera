@@ -32,5 +32,6 @@ treat it as a bug, not as noise.
 * UI and editor code must work headless: drive it with `WM-FEED` and assert on the screen buffer; add a pty
   check in `tests/ui/pty_test.py` for anything that depends on the real terminal.
 * Document design decisions in `docs/design/` when they change an invariant.
+* Public functions, macros, variables and classes in `lisp/core/` need a docstring (or a manual mention); `docs-tests.lisp` enforces 100% coverage. Manuals live in `docs/manual/*.md` and are compiled into the image.
 
 See `STYLE.md` for formatting conventions.

@@ -5,12 +5,13 @@ system written in Lisp itself. The long-term plan (text-mode window system, Zmac
 hypertext documentation, bioinformatics / statistics / mathematics libraries) is in
 [`ROADMAP.md`](ROADMAP.md).
 
-**Status:** roadmap phases 0-6 are implemented. NeoGenera has a C kernel (tagged objects, bignums and ratios, a
+**Status:** roadmap phases 0-7 are implemented. NeoGenera has a C kernel (tagged objects, bignums and ratios, a
 copying garbage collector, bytecode VM, heap images, terminal backend), a Common Lisp subset written in Lisp
 (CLOS, conditions and restarts, Gray streams, `loop`, `format`, `defstruct`), a bytecode compiler written in
 Lisp that **compiles itself to a fixed point**, an interactive debugger, a text-mode window system with
 mouse-sensitive output (presentations), an Emacs-style editor with an undo tree, and developer tools
-(Inspector, cross-reference, trace, stepper, profiler, browsers). See [`ROADMAP.md`](ROADMAP.md#status) for
+(Inspector, cross-reference, trace, stepper, profiler, browsers), and an integrated hypertext documentation
+system (manuals, docstrings, search, HTML/PDF export, interactive tutorial). See [`ROADMAP.md`](ROADMAP.md#status) for
 what is and is not done.
 
 ## Quick start
@@ -24,10 +25,10 @@ make test              # C, Lisp and real-terminal (pty) tests
 
 In the window system: type Lisp forms or `:commands` (Tab completes, `:help`), click results (left = default
 action, middle = copy to input, right = menu), `:edit mapcar` opens the editor on a function's source,
-`:inspect expr`, `:who-calls fn`, `:browse-class name`. Keys: F6 next window, F7 tile, F8 theme, F10 quit.
+`:inspect expr`, `:who-calls fn`, `:browse-class name`, `:doc topic`, `:search-doc words`, `:tutorial`. Keys: F6 next window, F7 tile, F8 theme, F10 quit.
 
 ```
-NeoGenera 0.6.0 -- type :help for help, :quit to leave.
+NeoGenera 0.7.0 -- type :help for help, :quit to leave.
 CL-USER> (defun fact (n) (if (<= n 1) 1 (* n (fact (- n 1)))))
 FACT
 CL-USER> (fact 20)
@@ -48,7 +49,7 @@ CL-USER> (disassemble (compile nil '(lambda (x) (+ x 1))))
 | `lisp/editor/` | buffers with undo tree, the editor window, Lisp mode, files, Dired, version control |
 | `lisp/tools/` | cross reference, trace, stepper, profiler |
 | `tests/c`, `tests/lisp`, `tests/ui` | kernel unit tests; Lisp suites and benchmarks; a pty test with a VT emulator |
-| `docs/design/` | object model, GC, VM, compiler, bootstrap, window system, editor, tools |
+| `docs/design/` | object model, GC, VM, compiler, bootstrap, window system, editor, tools, documentation |
 
 ## How it builds itself
 

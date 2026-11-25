@@ -23,23 +23,33 @@
   name)
 
 (defvar *record-lambda-expressions* nil)
+(defun %doc-form (name indicator doc)
+  "A form recording DOC under INDICATOR on the symbol NAME, or NIL when there is no docstring."
+  (and doc (stringp doc) (symbolp name) (list '%put (list 'quote name) (list 'quote indicator) doc)))
+
+(defun %with-doc (def name indicator doc &optional extras)
+  "DEF followed by the forms that record documentation; DEF alone when there is nothing to add."
+  (let ((docf (%doc-form name indicator doc)))
+    (if (or docf extras)
+        (append (list 'progn def) (if docf (list docf) nil) extras (list (list 'quote name)))
+        def)))
+
 (defmacro defun (name ll &body body)
   (multiple-value-bind (decls doc forms) (%split-body body)
-    (declare (ignore doc))
     (let ((def (list '%defun (list 'quote name)
                      (list 'function
                            (list* 'lambda ll
                                   (append decls
                                           (list (list* 'block (if (consp name) (cadr name) name) forms))))))))
-      (if (and *record-lambda-expressions* (symbolp name))
-          (list 'progn def (list '%put (list 'quote name) ''%lambda-expr (list 'quote (list* 'lambda ll body))) (list 'quote name))
-          def))))
+      (%with-doc def name '%doc-function doc
+                 (if (and *record-lambda-expressions* (symbolp name))
+                     (list (list '%put (list 'quote name) ''%lambda-expr (list 'quote (list* 'lambda ll body))))
+                     nil)))))
 
 (defun %defmacro-install (name fn) (%set-macro-function name fn) name)
 
 (defmacro defmacro (name ll &body body)
   (multiple-value-bind (decls doc forms) (%split-body body)
-    (declare (ignore doc))
     (let* ((whole (gensym "WHOLE")) (env (gensym "ENV"))
            (env-var (let ((p (member '&environment ll))) (and p (cadr p))))
            (ll2 (let ((acc nil) (skip nil))
@@ -59,8 +69,9 @@
       ;; a bootstrap cycle through DESTRUCTURING-BIND when redefining macros
       ;; such as DOLIST that the destructuring code itself uses.
       (%eval (copy-tree (list* 'defmacro name ll body)))
-      (list 'progn (list '%put (list 'quote name) ''%macro-ll (list 'quote ll2))
-            (list '%defmacro-install (list 'quote name) (list 'function fn-form))))))
+      (append (list 'progn (list '%put (list 'quote name) ''%macro-ll (list 'quote ll2)))
+              (let ((d (%doc-form name '%doc-function doc))) (if d (list d) nil))
+              (list (list '%defmacro-install (list 'quote name) (list 'function fn-form)))))))
 
 (defun %defvar-init (name thunk has-init always)
   (%proclaim-special name)
@@ -69,15 +80,13 @@
   name)
 
 (defmacro defvar (name &optional (value nil has-value) doc)
-  (declare (ignore doc))
   (%proclaim-special name)
-  (list '%defvar-init (list 'quote name)
-        (if has-value (list 'lambda nil value) nil) has-value nil))
+  (%with-doc (list '%defvar-init (list 'quote name) (if has-value (list 'lambda nil value) nil) has-value nil)
+             name '%doc-variable doc))
 
 (defmacro defparameter (name value &optional doc)
-  (declare (ignore doc))
   (%proclaim-special name)
-  (list '%defvar-init (list 'quote name) (list 'lambda nil value) t t))
+  (%with-doc (list '%defvar-init (list 'quote name) (list 'lambda nil value) t t) name '%doc-variable doc))
 
 (defun %defconstant (name value)
   (cond ((and (%constant-p name) (boundp name))
@@ -88,9 +97,8 @@
   name)
 
 (defmacro defconstant (name value &optional doc)
-  (declare (ignore doc))
   (%proclaim-special name)
-  (list '%defconstant (list 'quote name) value))
+  (%with-doc (list '%defconstant (list 'quote name) value) name '%doc-variable doc))
 
 (defmacro declaim (&rest specs)
   (%declaim specs)
