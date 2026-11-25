@@ -224,3 +224,19 @@
       (dolist (b *doc-bookmarks*)
         (let ((d (resolve-topic b)) (out *standard-output*))
           (when d (write-string "  " out) (present b :type 'doc-ref :stream out :escape nil) (format out "  ~A~%" (doc-title d)))))))
+
+;;; ---- saved with the settings (see lisp/ui/65-settings.lisp) -------------------------------------------
+
+(defun %validate-bookmarks (v)
+  "Keep only bookmarks that name a topic or symbol that still has documentation."
+  (unless (listp v) (error "bookmarks must be a list"))
+  (remove-if-not (lambda (x)
+                   (and x (or (symbolp x) (stringp x)) (not (eq x :contents))
+                        (handler-case (resolve-topic x) (error (e) (declare (ignore e)) nil))))
+                 v))
+
+(define-setting :bookmarks :list "Documentation pages you bookmarked (b in the documentation window)."
+  :session t :default nil
+  :validate #'%validate-bookmarks
+  :get (lambda () *doc-bookmarks*)
+  :set (lambda (v) (setq *doc-bookmarks* v)))

@@ -40,6 +40,22 @@ history. An unbalanced form continues on the next line. Page Up and Page Down sc
 Errors are shown in the window together with a clickable backtrace; the evaluation is abandoned first
 (the interactive debugger with restarts is in the line-mode Listener).
 
+## Settings
+
+`:settings` opens the Settings window. Click a value to use it at once: the colour theme, how windows are
+tiled, and whether your command history is kept. A `*` marks a change that is not saved yet. Click
+`[Save settings]` (or press `s`) to keep your choices for next time; `r` reverts to the saved file and `d`
+restores the defaults.
+
+The same things are available from the Listener: `:set` lists the settings, `:set theme green` changes one
+(a unique prefix of the name is enough), and `:save-settings` writes the file.
+
+Settings are stored in `~/.neogenera/settings.lisp`, or in `$NEOGENERA_HOME/settings.lisp` if that variable is
+set. The file is data, one `(:name value)` entry per line; it is never evaluated, and an entry that is
+unreadable or invalid is skipped. It is only written when you save. Once it exists, your command history and
+documentation bookmarks are refreshed in it each time you quit; turn `save-history` off to stop keeping the
+history. Command history can contain anything you typed, so check who can read your home directory.
+
 ## Colours and terminals
 
 The output uses truecolor when the terminal supports it, 256 colours otherwise, and plain attributes in the

@@ -33,6 +33,7 @@ Lines that start with a colon are *commands*. They can be abbreviated word by wo
 | `:inspect expr` | open an Inspector on a value |
 | `:who-calls fn` | list the callers of a function |
 | `:tutorial` | start the interactive lessons |
+| `:settings` | open the Settings window (theme, window layout, history); `:set` and `:save-settings` do the same from the Listener |
 
 ## Numbers and data
 

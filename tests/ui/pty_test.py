@@ -5,7 +5,7 @@ A small VT100/xterm emulator replays the exact bytes the program writes (cursor 
 clear, UTF-8 text; colours are ignored), so this validates the screen diffing, the input parser
 (keys, mouse, resize) and terminal setup/restore against a real tty.
 """
-import os, pty, sys, time, select, struct, fcntl, termios, signal, re
+import os, pty, sys, time, select, struct, fcntl, termios, signal, re, tempfile, shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -55,9 +55,11 @@ class Term:
     def has(self, s): return s in self.text()
 
 class Session:
-    def __init__(self, rows=30, cols=100):
+    def __init__(self, rows=30, cols=100, home=None):
         self.term = Term(rows, cols)
-        env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor", USER="tester")
+        # NEOGENERA_HOME keeps the settings file away from the real ~/.neogenera
+        env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor", USER="tester",
+                   NEOGENERA_HOME=home or tempfile.mkdtemp(prefix="ng-pty-"))
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(ROOT); os.execvpe(os.path.join(ROOT, "bin/neogenera"), ["neogenera", "--ui"], env)
@@ -93,8 +95,69 @@ def check(name, ok):
     print(("PASS " if ok else "FAIL ") + name)
     if not ok: failures.append(name)
 
+def quit_session(s):
+    """Press F10 and wait for the process to exit; returns its wait status, or None if it did not."""
+    s.send("\x1b[21~")
+    deadline = time.time() + 6
+    while time.time() < deadline:
+        s.pump(0.2)
+        try:
+            p, status = os.waitpid(s.pid, os.WNOHANG)
+        except ChildProcessError:
+            p, status = s.pid, 0
+        if p: return status
+    try: os.kill(s.pid, signal.SIGKILL)
+    except OSError: pass
+    return None
+
+def clean_exit(status):
+    return status is not None and os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+
+def settings_persistence(home):
+    path = os.path.join(home, "settings.lisp")
+    check("plain use does not create a settings file", not os.path.exists(path))
+    s = Session(30, 100, home)
+    s.wait_for("CL-USER>")
+    s.send(":set theme green\r")
+    check(":set theme applies at once", s.wait_for("theme is now green"))
+    s.send(":set tile grid\r")
+    check(":set tile-mode accepts a name prefix", s.wait_for("tile-mode is now grid"))
+    s.send(":save-settings\r")
+    check(":save-settings reports the file", s.wait_for("Settings saved to"))
+    s.send("(+ 40 2)\r")
+    check("evaluates after saving", s.wait_for("=> 42"))
+    s.send(":settings\r")
+    check(":settings opens the Settings window", s.wait_for("NeoGenera Settings") and s.term.has("[Save settings]"))
+    pos = s.locate("( ) amber")
+    if pos:
+        r, c = pos
+        s.send("\x1b[<0;%d;%dM\x1b[<0;%d;%dm" % (c + 3, r + 1, c + 3, r + 1))   # click the amber choice
+        check("clicking a value in the Settings window applies it", s.wait_for("(x) amber") and s.term.has("Theme *"))
+    else:
+        check("found the amber choice to click", False)
+    check("quitting exits cleanly", clean_exit(quit_session(s)))
+    text = open(path).read().lower() if os.path.exists(path) else ""
+    check("the settings file holds the saved theme and tile mode", ":theme :green" in text and ":tile-mode :grid" in text)
+    check("an unsaved change is not written at exit", ":amber" not in text)
+    check("history is kept for the next session", "(+ 40 2)" in text)
+
+    s = Session(30, 100, home)
+    check("saved settings are loaded at startup", s.wait_for("CL-USER>"))
+    s.send(":set theme\r")
+    check("the saved theme is in effect", s.wait_for("theme is green"))
+    s.send(":set tile-mode\r")
+    check("the saved tile mode is in effect", s.wait_for("tile-mode is grid"))
+    found = False
+    for _ in range(8):                                         # Up past the newer lines until the saved one shows
+        s.send("\x1b[A"); s.pump(0.3)
+        if s.term.has("CL-USER> (+ 40 2)"): found = True; break
+    check("saved history is recalled with Up", found)
+    s.send("\x15")
+    check("second session exits cleanly", clean_exit(quit_session(s)))
+
 def main():
-    s = Session(30, 100)
+    home = tempfile.mkdtemp(prefix="ng-pty-")
+    s = Session(30, 100, home)
     check("window system starts (title, prompt, who-line)", s.wait_for("CL-USER>") and s.term.has("Listener") and s.term.has("Package:"))
     check("alternate screen and mouse reporting enabled", s.term.alt_screen and s.term.mouse)
     check("cursor is shown for the input line", s.term.cursor_visible is True)
@@ -170,9 +233,12 @@ def main():
     if exited is None:
         try: os.kill(s.pid, signal.SIGKILL)
         except OSError: pass
+    final_screen = s.term.text()
+    try: settings_persistence(home)
+    finally: shutil.rmtree(home, ignore_errors=True)
     print("\n%d failure(s)" % len(failures))
     if failures:
-        print("--- final screen ---"); print(s.term.text())
+        print("--- final screen ---"); print(final_screen)
     sys.exit(1 if failures else 0)
 
 if __name__ == "__main__":

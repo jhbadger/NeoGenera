@@ -24,16 +24,24 @@
             (terpri out)
             (setq i (+ i 1)))))))
 
-(defun ng-ui (&optional (theme :classic))
-  "Run the NeoGenera window system on the terminal."
-  (set-theme theme)
+(defun ng-ui (&optional theme)
+  "Run the NeoGenera window system on the terminal.  Saved settings (see :settings) are applied first;
+THEME, when given, overrides the saved theme."
   (%install-tool-hooks)
+  (handler-case (settings-load)
+    (error (e) (format t "~&Could not load settings: ~A~%" e)))
+  (when theme (set-theme theme))
+  (settings-mark-clean)
   (if (not (%term-isatty))
       (progn (format t "~&The window system needs an interactive terminal; starting the line Listener.~%")
              (ng-toplevel))
       (let* ((wm (make-wm 24 80))
              (lw (make-instance 'listener-window :title "Listener" :x 0 :y 0 :w 80 :h 22)))
+        (setq *main-listener* lw)
+        (setf (lw-history lw) (copy-list *saved-history*))
         (wm-add-window wm lw)
-        (wm-run wm (lambda () (wm-tile wm :horizontal)))
+        (wm-run wm (lambda () (wm-tile wm *tile-mode*)))
+        (settings-save-session)
+        (setq *saved-history* (lw-history lw) *main-listener* nil)
         (format t "~&Window system closed.~%")))
   nil)

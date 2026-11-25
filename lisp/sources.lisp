@@ -34,6 +34,7 @@
     "lisp/editor/10-editor.lisp"
     "lisp/editor/20-files.lisp"
     "lisp/ui/60-tools-ui.lisp"
+    "lisp/ui/65-settings.lisp"
     "lisp/docs/00-docs.lisp"
     "lisp/docs/10-viewer.lisp"
     "lisp/docs/20-export.lisp"
