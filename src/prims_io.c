@@ -237,9 +237,8 @@ static int c_repl(void) {
   }
 }
 
-int run_toplevel(const char *file) {
-  (void)file;
-  Obj fn = SYM_FUNC(intern("NG-TOPLEVEL", PKG_CL));
+int run_toplevel(const char *name) {
+  Obj fn = SYM_FUNC(intern(name ? name : "NG-TOPLEVEL", PKG_CL));
   if (fn == NIL || CONSP(fn)) return c_repl();
   int ssp = spsp, svsp = vsp, snroots = nroots;
   for (;;) {

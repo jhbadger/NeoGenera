@@ -33,7 +33,7 @@ static void init_all(void) {
   init_streams();
   init_vm();
   init_prims_core();
-  init_prims_data(); init_prims_num();
+  init_prims_data(); init_prims_num(); init_prims_term();
   init_prims_io();
 }
 
@@ -46,6 +46,7 @@ static void *real_main(void *p) {
 #endif
   int argc = a->argc; char **argv = a->argv;
   const char *image = NULL;
+  const char *volatile top_name = "NG-TOPLEVEL";
   const char *volatile save = NULL;
   int use_image = 1;
   volatile int toplevel = 1;
@@ -62,6 +63,8 @@ static void *real_main(void *p) {
     else if (!strcmp(argv[i], "--gc-stress")) gc_stress = 1;
     else if (!strcmp(argv[i], "--gc-verbose")) gc_verbose = 1;
     else if (!strcmp(argv[i], "--no-toplevel")) toplevel = 0;
+    else if (!strcmp(argv[i], "--ui")) top_name = "NG-UI";
+    else if (!strcmp(argv[i], "--toplevel") && i + 1 < argc) top_name = argv[++i];
     else if (!strcmp(argv[i], "--help")) {
       puts("usage: neogenera [-i IMAGE] [--no-image] [--load FILE] [--eval FORM] [--save-image FILE]\n"
            "                 [--gc-stress] [--gc-verbose] [--no-toplevel]");
@@ -107,7 +110,7 @@ static void *real_main(void *p) {
     if (rc != 0) { fprintf(stderr, "cannot save image %s\n", save); a->rc = 1; return NULL; }
     fprintf(stderr, "; saved image %s\n", save);
   }
-  a->rc = toplevel ? run_toplevel(NULL) : 0;
+  a->rc = toplevel ? run_toplevel(top_name) : 0;
   fflush(stdout);
   return NULL;
 }

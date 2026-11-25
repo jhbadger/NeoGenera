@@ -282,7 +282,7 @@ enum {
   OP_CONST, OP_LREF, OP_LSET, OP_FREF, OP_GREF, OP_GSET, OP_GFUN, OP_POP,
   OP_DUP, OP_JMP, OP_JNIL, OP_JNNIL, OP_CALL, OP_TAILCALL, OP_RET, OP_CLOSURE,
   OP_BOX, OP_UNBOX, OP_BOXSET, OP_BIND, OP_UNBIND, OP_SLIDE, OP_CAR, OP_CDR,
-  OP_CONS, OP_EQ, OP_NOT, OP_ADD, OP_SUB, OP_LT, OP_GT, OP_LE, OP_GE, OP_NUMEQ,
+  OP_CONS, OP_EQ, OP_NOT, OP_ADD, OP_SUB, OP_LT, OP_GT, OP_LE, OP_GE, OP_NUMEQ, OP_RETV,
   OP_COUNT
 };
 
@@ -297,6 +297,8 @@ Obj   defprim_mv(const char *name, PrimFn fn, int min, int max);
 void  init_prims_core(void);
 void  init_prims_data(void);
 void  init_prims_num(void);
+void  init_prims_term(void);
+void  term_cleanup(void);
 void  init_prims_io(void);
 Obj   values_list(Obj list);
 #define PRIM(name) static Obj name(int argc, Obj *argv)
@@ -336,7 +338,7 @@ void  print_obj(Obj stream, Obj o, int escape);
 void  format_double(Buf *b, double d);
 
 /* ---- repl ------------------------------------------------------------- */
-int   run_toplevel(const char *file);
+int   run_toplevel(const char *name);
 void  print_error_message(Obj msg);
 int   load_file(const char *path, int verbose);
 extern int  quit_requested;

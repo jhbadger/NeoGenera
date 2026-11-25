@@ -2,12 +2,12 @@ CC      ?= cc
 CFLAGS  ?= -O2 -g -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fno-strict-aliasing
 LDFLAGS ?= -lm -lpthread
 SRC      = src/memory.c src/symbols.c src/stream.c src/reader.c src/printer.c \
-           src/eval.c src/vm.c src/prims_core.c src/prims_data.c src/prims_num.c src/bignum.c src/prims_io.c src/main.c
+           src/eval.c src/vm.c src/prims_core.c src/prims_data.c src/prims_num.c src/bignum.c src/term.c src/prims_io.c src/main.c
 BIN      = build/neogenera
 NG       = $(BIN) --no-toplevel
-LISP_SRC = $(wildcard lisp/core/*.lisp lisp/compiler/*.lisp lisp/sources.lisp)
+LISP_SRC = $(wildcard lisp/*/*.lisp lisp/sources.lisp)
 
-.PHONY: all kernel stage0 stage1 stage2 selfhost world test test-c test-lisp test-stress asan clean
+.PHONY: all kernel stage0 stage1 stage2 selfhost world test test-c test-lisp test-pty test-stress asan clean
 
 all: world
 
@@ -46,11 +46,14 @@ build/neogenera.img: build/stage1.img selfhost
 	$(NG) -i build/stage1.img --eval '(ng-load-fasls "build/s2")' --eval '(ng-use-compiler-eval)' \
 	      --eval '(ng-finalize-image)' --save-image $@
 
-test: test-c test-lisp
+test: test-c test-lisp test-pty
 test-c: $(BIN)
 	@sh tests/c/run.sh
 test-lisp: world
 	$(BIN) -i build/neogenera.img --no-toplevel --load tests/lisp/run-all.lisp
+
+test-pty: world
+	python3 tests/ui/pty_test.py
 
 # every GC safe point collects: finds missing roots
 test-stress: world

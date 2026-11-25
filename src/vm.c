@@ -124,6 +124,9 @@ static Obj vm_execute(int stop_vfp) {
       PUSH(r);
       RELOAD();
       break;
+    case OP_RETV:                       /* return, keeping the multiple values left by the preceding call */
+      r = vstack[--vsp];
+      goto do_return;
     case OP_CLOSURE: {
       int k = ip[pc++], n = ip[pc++];
       Obj c = make_obj(T_CLOSURE, (size_t)(1 + n));

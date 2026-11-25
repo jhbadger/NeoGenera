@@ -1,0 +1,38 @@
+;;;; 50-ui.lisp -- built-in presentation commands and the NG-UI entry point.
+
+(in-package :cl)
+
+(define-presentation-command (describe t :documentation "Describe" :default t) (obj) (describe obj))
+(define-presentation-command (copy-to-input t :documentation "Copy to input") (obj)
+  (when *current-listener* (%insert-text *current-listener* (%input-text-for obj))))
+(define-presentation-command (disassemble function :documentation "Disassemble") (obj)
+  (if (%codep (if (functionp obj) (if (compiled-function-p obj) obj nil) nil)) (disassemble obj) (describe obj)))
+(define-presentation-command (show-frame frame :documentation "Show arguments" :default t) (f)
+  (format t "~&Frame ~A~%" (%frame-name f))
+  (let ((i 0)) (dolist (a (caddr f)) (format t "  arg ~D = ~A~%" i (%abbrev a 200)) (setq i (+ i 1)))))
+(define-presentation-command (describe-condition condition :documentation "Report" :default t) (c)
+  (format t "~&~A~%  condition class: ~A~%" (condition-report-string c) (symbol-name (%cls-name (class-of c)))))
+
+(define-command (backtrace :documentation "Show the backtrace of the last error") ()
+  (let ((e (and *current-listener* (lw-last-error *current-listener*))) (out *standard-output*))
+    (if (null e)
+        (format t "~&No error to show~%")
+        (let ((i 0))
+          (dolist (f (cdr e))
+            (with-output-as-presentation (out f 'frame)
+              (format out "~3D: (~A~{ ~A~})" i (%frame-name f) (mapcar #'%abbrev (caddr f))))
+            (terpri out)
+            (setq i (+ i 1)))))))
+
+(defun ng-ui (&optional (theme :classic))
+  "Run the NeoGenera window system on the terminal."
+  (set-theme theme)
+  (if (not (%term-isatty))
+      (progn (format t "~&The window system needs an interactive terminal; starting the line Listener.~%")
+             (ng-toplevel))
+      (let* ((wm (make-wm 24 80))
+             (lw (make-instance 'listener-window :title "Listener" :x 0 :y 0 :w 80 :h 22)))
+        (wm-add-window wm lw)
+        (wm-run wm (lambda () (wm-tile wm :horizontal)))
+        (format t "~&Window system closed.~%")))
+  nil)

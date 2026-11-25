@@ -107,6 +107,20 @@
   (is-equal '(1 2) (%compile-eval '(multiple-value-list (let ((x 1)) (values x 2)))))
   (is-equal '(7 8) (multiple-value-list (funcall (compile nil '(lambda () (block b (return-from b (values 7 8)))))))))
 
+(deftest return-from-values
+  ;; multiple values and tail calls through a RETURN-FROM nested in loops
+  (is-equal '(1 2) (multiple-value-list (funcall (compile nil '(lambda () (loop (return (values 1 2))))))))
+  (let ((f (compile nil '(lambda (l) (dolist (x l) (when (> x 2) (return-from nil (values x (+ x 1)))))))))
+    (is-equal '(3 4) (multiple-value-list (funcall f '(1 2 3)))))
+  (is-equal '(5 6) (multiple-value-list (%compile-eval '(block b (let ((x 5)) (return-from b (values x 6)))))))
+  ;; with a dynamic binding in between the value is still returned correctly
+  (is-equal '(:in :bound) (multiple-value-list (%compile-eval '(block b (let ((*ct-special* :bound)) (return-from b (values :in *ct-special*)))))))
+  (is-equal '(1 2) (multiple-value-list (%compile-eval '(let ((*ct-special* :b)) (values 1 2)))))
+  (is-equal '(1 2) (multiple-value-list (%compile-eval '(let ((*ct-special* :b)) (let ((*ct-special* :c)) (values 1 2))))))
+  (is-equal '(7) (multiple-value-list (%compile-eval '(let ((a (values 1 2))) (let ((*ct-special* :b)) (+ a 6))))))
+  (is-equal :global (ct-read-special))
+  (is-equal 100000 (%compile-eval '(labels ((f (n) (block nil (when (= n 0) (return 100000)) (return (f (- n 1)))))) (f 5000)))))
+
 (deftest compiled-defuns
   (%compile-eval '(defun ct-fib (n) (if (< n 2) n (+ (ct-fib (- n 1)) (ct-fib (- n 2))))))
   (is-equal 832040 (funcall 'ct-fib 30))

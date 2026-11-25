@@ -21,4 +21,10 @@
     "lisp/compiler/10-analyze.lisp"
     "lisp/compiler/20-codegen.lisp"
     "lisp/compiler/30-driver.lisp"
-    "lisp/compiler/40-build.lisp"))
+    "lisp/compiler/40-build.lisp"
+    "lisp/ui/00-screen.lisp"
+    "lisp/ui/10-wm.lisp"
+    "lisp/ui/20-present.lisp"
+    "lisp/ui/30-commands.lisp"
+    "lisp/ui/40-listener.lisp"
+    "lisp/ui/50-ui.lisp"))

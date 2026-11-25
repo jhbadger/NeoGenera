@@ -109,12 +109,24 @@
       (setq k (+ k 1)))
     nspec))
 
+(defun last-emitted-call-p ()
+  ;; True when the last value-producing instruction was a call (UNBIND/SLIDE do not disturb the
+  ;; multiple values it left behind).
+  (let ((items *cg-items*))
+    (loop
+      (cond ((null items) (return nil))
+            ((member (car (car items)) '(:unbind :slide)) (setq items (cdr items)))
+            (t (return (eq (car (car items)) :call)))))))
+
 (defun gen-scope-exit (nvars nspec tail)
-  (when (> nspec 0)
-    (emit :unbind nspec)
-    (setq *cg-nspec* (- *cg-nspec* nspec)))
-  (when (> nvars 0) (emit :slide nvars))
-  (finish tail))
+  ;; A tail-position scope that bound specials cannot use TAILCALL (the bindings must be undone
+  ;; first).  If the body ended in a call, RETV keeps the multiple values that call left behind.
+  (let ((after-call (and tail (last-emitted-call-p))))
+    (when (> nspec 0)
+      (emit :unbind nspec)
+      (setq *cg-nspec* (- *cg-nspec* nspec)))
+    (when (> nvars 0) (emit :slide nvars))
+    (when tail (emit (if after-call :retv :ret)))))
 
 (defun gen-let (node tail)
   (let ((bindings (cadr node)) (inits (caddr node)) (body (cadddr node))
@@ -191,17 +203,28 @@
     (finish tail)))
 
 (defun gen-return-from (node tail)
+  ;; Target block in tail position of its function: leave the function directly.  With no dynamic
+  ;; binding made since the block was entered the value is compiled in TAIL mode (keeps tail calls and
+  ;; multiple values); otherwise unbind first and use RETV/RET.  Other blocks: jump to the join label.
+  (declare (ignore tail))
   (let ((blk (cadr node)) (d0 *cg-depth*))
-    (if (and tail (cblock-tailp blk))
-        (gen (caddr node) t)
-        (progn
-          (gen (caddr node) nil)
-          (when (> *cg-nspec* (cblock-nspec blk))
-            (emit :unbind (- *cg-nspec* (cblock-nspec blk))))
-          (let ((extra (- *cg-depth* 1 (cblock-depth blk))))
-            (when (> extra 0) (emit :slide extra)))
-          (emit :jmp (cblock-label blk))
-          (setq *cg-depth* (+ d0 1))))))
+    (cond ((and (cblock-tailp blk) (= *cg-nspec* (cblock-nspec blk)))
+           (gen (caddr node) t)
+           (setq *cg-depth* (+ d0 1)))
+          ((cblock-tailp blk)
+           (gen (caddr node) nil)
+           (let ((after-call (last-emitted-call-p)))
+             (emit :unbind (- *cg-nspec* (cblock-nspec blk)))
+             (emit (if after-call :retv :ret)))
+           (setq *cg-depth* (+ d0 1)))
+          (t
+           (gen (caddr node) nil)
+           (when (> *cg-nspec* (cblock-nspec blk))
+             (emit :unbind (- *cg-nspec* (cblock-nspec blk))))
+           (let ((extra (- *cg-depth* 1 (cblock-depth blk))))
+             (when (> extra 0) (emit :slide extra)))
+           (emit :jmp (cblock-label blk))
+           (setq *cg-depth* (+ d0 1))))))
 
 (defun gen-tagbody (node tail)
   (let ((tb (cadr node)) (items (cddr node)))

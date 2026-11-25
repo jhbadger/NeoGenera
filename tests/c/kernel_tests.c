@@ -13,7 +13,7 @@ static int checks, failures;
 
 static void init_all(void) {
   init_memory(); init_eval(); init_symbols(); init_streams(); init_vm();
-  init_prims_core(); init_prims_data(); init_prims_num(); init_prims_io();
+  init_prims_core(); init_prims_data(); init_prims_num(); init_prims_term(); init_prims_io();
 }
 
 static Obj rd(const char *s) { return read_from_cstring(s); }

@@ -14,6 +14,10 @@
   (make-symbol (%string-concat (if (stringp prefix) prefix "G")
                                (%number-to-string *gensym-counter*))))
 
+(defun fourth (l) (cadddr l))
+(defun fifth (l) (car (cddddr l)))
+(defun sixth (l) (cadr (cddddr l)))
+
 (defun %fn-symbol (name)
   (if (and (consp name) (eq (car name) 'setf))
       (intern (%string-concat "(SETF " (symbol-name (cadr name)) ")") (symbol-package (cadr name)))

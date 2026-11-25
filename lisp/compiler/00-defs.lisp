@@ -36,7 +36,7 @@
     (:call 12 1) (:tailcall 13 1) (:ret 14 0) (:closure 15 2) (:box 16 0)
     (:unbox 17 0) (:boxset 18 0) (:bind 19 1) (:unbind 20 1) (:slide 21 1)
     (:car 22 0) (:cdr 23 0) (:cons 24 0) (:eq 25 0) (:not 26 0) (:add 27 0)
-    (:sub 28 0) (:lt 29 0) (:gt 30 0) (:le 31 0) (:ge 32 0) (:numeq 33 0)))
+    (:sub 28 0) (:lt 29 0) (:gt 30 0) (:le 31 0) (:ge 32 0) (:numeq 33 0) (:retv 34 0)))
 
 (defun op-code (op) (cadr (assq op *opcodes*)))
 (defun op-nargs (op) (caddr (assq op *opcodes*)))
@@ -44,7 +44,7 @@
 (defun op-delta (op args)
   (case op
     ((:const :lref :fref :gref :gfun :dup) 1)
-    ((:lset :gset :pop :jnil :jnnil :bind :ret :cons :eq :add :sub :lt :gt :le :ge :numeq :boxset) -1)
+    ((:lset :gset :pop :jnil :jnnil :bind :ret :retv :cons :eq :add :sub :lt :gt :le :ge :numeq :boxset) -1)
     ((:call :tailcall) (- (car args)))
     (:closure (- 1 (cadr args)))
     (:slide (- (car args)))
