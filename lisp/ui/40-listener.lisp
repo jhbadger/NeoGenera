@@ -98,9 +98,12 @@
     (values row 0)))
 
 
+(defgeneric window-word-wrap (window))
+(defmethod window-word-wrap ((w listener-window)) nil)
+
 (defmethod window-draw-content ((w listener-window) screen ix iy iw ih focused)
   (when (and (> iw 0) (> ih 0))
-    (let* ((rows (ob-layout (lw-obuf w) iw)) (nrows (length rows))
+    (let* ((rows (ob-layout (lw-obuf w) iw 800 (window-word-wrap w))) (nrows (length rows))
            (in-rows (if (lw-read-only w) nil (%input-rows w iw))) (n-in (if (null in-rows) 0 (min (length in-rows) (max 1 (floor ih 2)))))
            (out-h (max 0 (- ih n-in)))
            (back (max 0 (min (lw-scroll-back w) (max 0 (- nrows out-h)))))

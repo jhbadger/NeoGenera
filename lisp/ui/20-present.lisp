@@ -55,23 +55,94 @@
 
 ;;; ---- layout: wrap logical lines into display rows ----------------------------------------------------
 
-(defun ob-layout (b width &optional (max-lines 800))
-  "Returns a vector of display rows.  A row is a list of chunks (text style pres col)."
+(defun ob-layout (b width &optional (max-lines 800) word-wrap)
+  "Returns a vector of display rows.  A row is a list of chunks (text style pres col).
+With WORD-WRAP, lines break between words (see %LAYOUT-LINE-WORDS) rather than at the last column."
   (let ((rows nil) (lines nil) (k 0))
     (dolist (l (ob-rlines b)) (when (>= k max-lines) (return)) (setq lines (cons l lines)) (setq k (+ k 1)))
     (dolist (line lines)
-      (let ((cur nil) (col 0) (segs (reverse (oline-rsegs line))))
-        (dolist (sg segs)
-          (let ((text (seg-text sg)) (pos 0))
-            (loop
-              (when (>= pos (length text)) (return))
-              (when (>= col width) (setq rows (cons (nreverse cur) rows)) (setq cur nil) (setq col 0))
-              (let ((end (utf8-prefix-end text pos (- width col))))
-                (setq cur (cons (list (subseq text pos end) (seg-style sg) (seg-pres sg) col) cur))
-                (setq col (+ col (utf8-length (subseq text pos end))))
-                (setq pos end)))))
-        (setq rows (cons (nreverse cur) rows))))
+      (if (and word-wrap (> width 0))
+          (dolist (r (%layout-line-words (reverse (oline-rsegs line)) width)) (setq rows (cons r rows)))
+          (let ((cur nil) (col 0) (segs (reverse (oline-rsegs line))))
+            (dolist (sg segs)
+              (let ((text (seg-text sg)) (pos 0))
+                (loop
+                  (when (>= pos (length text)) (return))
+                  (when (>= col width) (setq rows (cons (nreverse cur) rows)) (setq cur nil) (setq col 0))
+                  (let ((end (utf8-prefix-end text pos (- width col))))
+                    (setq cur (cons (list (subseq text pos end) (seg-style sg) (seg-pres sg) col) cur))
+                    (setq col (+ col (utf8-length (subseq text pos end))))
+                    (setq pos end)))))
+            (setq rows (cons (nreverse cur) rows)))))
     (coerce (nreverse rows) 'vector)))
+
+(defun %line-units (segs)
+  "Split SEGS into units: runs of spaces or of non-spaces, each a list (spacep width pieces),
+where a piece is (text style pres).  A word may span several segments (styles)."
+  (let ((units nil) (cur nil) (cur-space nil) (cur-w 0))
+    (dolist (sg segs)
+      (let* ((text (seg-text sg)) (n (length text)) (pos 0))
+        (loop
+          (when (>= pos n) (return))
+          (let* ((sp (char= (char text pos) #\Space)) (end pos))
+            (loop (when (or (>= end n) (not (eq (char= (char text end) #\Space) sp))) (return)) (setq end (+ end 1)))
+            (unless (and cur (eq sp cur-space))
+              (when cur (setq units (cons (list cur-space cur-w (nreverse cur)) units)))
+              (setq cur nil cur-w 0 cur-space sp))
+            (let ((piece (subseq text pos end)))
+              (setq cur (cons (list piece (seg-style sg) (seg-pres sg)) cur))
+              (setq cur-w (+ cur-w (utf8-length piece))))
+            (setq pos end)))))
+    (when cur (setq units (cons (list cur-space cur-w (nreverse cur)) units)))
+    (nreverse units)))
+
+(defun %list-marker-p (text)
+  "True for a list bullet such as *, - or 12."
+  (let ((n (length text)))
+    (or (string= text "*") (string= text "-")
+        (and (> n 1) (char= (char text (- n 1)) #\.)
+             (let ((ok t)) (dotimes (i (- n 1)) (unless (digit-char-p (char text i)) (setq ok nil))) ok)))))
+
+(defun %hanging-indent (units width)
+  "Continuation-row indent for a wrapped line: its leading spaces, plus a list marker and its space."
+  (let ((ind 0) (u units))
+    (when (and u (first (car u))) (setq ind (second (car u)) u (cdr u)))
+    (when (and u (cdr u) (first (cadr u)) (= (length (third (car u))) 1) (%list-marker-p (first (car (third (car u))))))
+      (setq ind (+ ind (second (car u)) (second (cadr u)))))
+    (if (> (* ind 2) width) 0 ind)))
+
+(defun %layout-line-words (segs width)
+  "Lay out one logical line as word-wrapped rows; words too long for a row are broken by character."
+  (let* ((units (%line-units segs)) (indent (%hanging-indent units width))
+         (rows nil) (cur nil) (col 0) (row-start 0) (pending nil) (wrapped nil))
+    (flet ((newline () (setq rows (cons (nreverse cur) rows) cur nil col indent row-start indent pending nil wrapped t))
+           (place (pieces) (dolist (p pieces)
+                             (setq cur (cons (list (first p) (second p) (third p) col) cur))
+                             (setq col (+ col (utf8-length (first p)))))))
+      (dolist (u units)
+        (let ((w (second u)))
+          (cond ((first u)                      ; spaces: held until the next word lands on this row
+                 (unless (and wrapped (null cur)) (setq pending u)))
+                ((<= (+ col (if pending (second pending) 0) w) width)
+                 (when pending (place (third pending)) (setq pending nil))
+                 (place (third u)))
+                ((and (> col row-start) (<= w (- width indent)))
+                 (newline) (place (third u)))
+                (t                              ; too long for any row: break it by character
+                 (when (> col row-start) (newline))
+                 (setq pending nil)
+                 (dolist (p (third u))
+                   (let ((text (first p)) (pos 0))
+                     (loop
+                       (when (>= pos (length text)) (return))
+                       (when (>= col width) (newline))
+                       (let ((end (utf8-prefix-end text pos (- width col))))
+                         (setq cur (cons (list (subseq text pos end) (second p) (third p) col) cur))
+                         (setq col (+ col (utf8-length (subseq text pos end))))
+                         (setq pos end)))))))))
+      (when (and pending (null cur)) (place (third pending)))  ; a line of nothing but spaces
+      (setq rows (cons (nreverse cur) rows))
+      (nreverse rows))))
 
 (defun row-chunk-at (row col)
   (dolist (ch row nil)

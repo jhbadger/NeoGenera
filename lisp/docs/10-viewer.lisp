@@ -8,6 +8,7 @@
 (in-package :cl)
 
 (defclass doc-window (report-window) ())
+(defmethod window-word-wrap ((w doc-window)) t)
 
 ;; documents are read from the top: scroll all the way back (the draw clamps it)
 (defmethod report-refreshed ((w doc-window)) (setf (lw-scroll-back w) 1000000))
