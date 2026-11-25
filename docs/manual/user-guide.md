@@ -26,7 +26,7 @@ Lines that start with a colon are *commands*. They can be abbreviated word by wo
 
 | Command | What it does |
 |---|---|
-| `:help` | list the commands |
+| `:help` | list the commands, with the documentation commands (`:tutorial`, `:doc`, `:search-doc`) first |
 | `:doc topic` | show a manual topic, or the documentation of a symbol |
 | `:search-doc words` | search the documentation |
 | `:edit name` | open a file or the source of a function in the editor |

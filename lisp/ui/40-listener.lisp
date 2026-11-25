@@ -37,7 +37,7 @@
   (setf (lw-stream w) (make-instance 'pane-stream :obuf (lw-obuf w)))
   (setf (lw-pkg w) (find-package "COMMON-LISP-USER"))
   (with-style ((lw-stream w) :dim)
-    (format (lw-stream w) "NeoGenera ~A listener.  Type :help for commands; Tab completes; click results.~%" *ng-version*)))
+    (format (lw-stream w) "NeoGenera ~A listener.  Type :help for commands; :tutorial to learn; :doc for the manual; Tab completes; click results.~%" *ng-version*)))
 
 (defun %pending-prompt (pending)
   ;; PENDING = (:prompt command done specs rest); the prompt text is the 4th element of the first missing spec

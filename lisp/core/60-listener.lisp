@@ -30,7 +30,9 @@
 (defun %listener-command (cmd)
   (case cmd
     ((:quit :q :exit) (setq *listener-running* nil) t)
-    (:help (format t "~&Commands: :help  :quit  :package NAME  :apropos STRING  :time FORM~%") t)
+    (:help (format t "~&Commands: :help  :quit  :package NAME  :apropos STRING  :time FORM~%")
+           (format t "Documentation and tutorial (window system): :tutorial  :doc [TOPIC]  :search-doc WORDS~%")
+           t)
     (t nil)))
 
 (defun %listener-eval-and-print (form)
