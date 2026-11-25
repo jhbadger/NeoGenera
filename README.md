@@ -5,18 +5,26 @@ system written in Lisp itself. The long-term plan (text-mode window system, Zmac
 hypertext documentation, bioinformatics / statistics / mathematics libraries) is in
 [`ROADMAP.md`](ROADMAP.md).
 
-**Status:** roadmap phases 0–3 are complete. NeoGenera has a C kernel (tagged objects, copying garbage
-collector, reader, printer, stage-0 evaluator, bytecode VM, heap images), a core Common Lisp subset
-written in Lisp, a Lisp-to-bytecode compiler written in Lisp, and it **compiles itself to a fixed
-point**. See [`ROADMAP.md`](ROADMAP.md#status) for what is and is not done.
+**Status:** roadmap phases 0-6 are implemented. NeoGenera has a C kernel (tagged objects, bignums and ratios, a
+copying garbage collector, bytecode VM, heap images, terminal backend), a Common Lisp subset written in Lisp
+(CLOS, conditions and restarts, Gray streams, `loop`, `format`, `defstruct`), a bytecode compiler written in
+Lisp that **compiles itself to a fixed point**, an interactive debugger, a text-mode window system with
+mouse-sensitive output (presentations), an Emacs-style editor with an undo tree, and developer tools
+(Inspector, cross-reference, trace, stepper, profiler, browsers). See [`ROADMAP.md`](ROADMAP.md#status) for
+what is and is not done.
 
 ## Quick start
 
 ```sh
-make world          # build kernel + the self-hosted system image (needs a C compiler and make)
-bin/neogenera       # start the Listener
-make test           # C and Lisp test suites
+make world             # build kernel + the self-hosted system image (needs a C compiler and make)
+bin/neogenera          # line-mode Listener with the interactive debugger
+bin/neogenera --ui     # the window system: Listener, editor, Inspector, browsers (needs a terminal)
+make test              # C, Lisp and real-terminal (pty) tests
 ```
+
+In the window system: type Lisp forms or `:commands` (Tab completes, `:help`), click results (left = default
+action, middle = copy to input, right = menu), `:edit mapcar` opens the editor on a function's source,
+`:inspect expr`, `:who-calls fn`, `:browse-class name`. Keys: F6 next window, F7 tile, F8 theme, F10 quit.
 
 ```
 NeoGenera 0.3.0 -- type :help for help, :quit to leave.
@@ -34,10 +42,13 @@ CL-USER> (disassemble (compile nil '(lambda (x) (+ x 1))))
 | Path | Contents |
 |---|---|
 | `src/` | the C kernel |
-| `lisp/core/` | the Lisp library: macros, places, sequences, structures, hash tables, `format`, `loop`, errors, Listener, test framework |
+| `lisp/core/` | the Lisp library: macros, places, sequences, structures, hash tables, `format`, `loop`, CLOS, conditions, streams, debugger, Listener, test framework |
 | `lisp/compiler/` | the compiler, `compile-file`, fasl loader, build helpers |
-| `tests/c`, `tests/lisp` | kernel unit tests; Lisp test suites and benchmarks |
-| `docs/design/` | object model, GC, VM, compiler, bootstrap |
+| `lisp/ui/` | screen, window manager, presentations, command processor, Listener window, tool windows |
+| `lisp/editor/` | buffers with undo tree, the editor window, Lisp mode, files, Dired, version control |
+| `lisp/tools/` | cross reference, trace, stepper, profiler |
+| `tests/c`, `tests/lisp`, `tests/ui` | kernel unit tests; Lisp suites and benchmarks; a pty test with a VT emulator |
+| `docs/design/` | object model, GC, VM, compiler, bootstrap, window system, editor, tools |
 
 ## How it builds itself
 

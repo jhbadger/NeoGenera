@@ -235,6 +235,13 @@
         (when (and specials (null inner)) nil))
       (values params (length req) (length opt) (if restsym t nil) inner))))
 
+(defun %interned-tree-p (x)
+  "True when X contains no uninterned symbols (so it can be written to a fasl deterministically)."
+  (cond ((null x) t)
+        ((consp x) (and (%interned-tree-p (car x)) (%interned-tree-p (cdr x))))
+        ((symbolp x) (if (symbol-package x) t nil))
+        (t (or (numberp x) (stringp x) (characterp x)))))
+
 (defun an-lambda (name ll body env)
   (let* ((lam (make-clam name *lam*)))
     (multiple-value-bind (params nreq nopt restp wrapped) (expand-lambda-list ll body)
@@ -244,6 +251,7 @@
             (setq cvars (append cvars (list v)))
             (setf (aenv-vars env2) (acons p v (aenv-vars env2)))))
         (setf (clam-params lam) cvars (clam-nreq lam) nreq (clam-nopt lam) nopt (clam-rest lam) restp)
+        (setf (clam-arglist lam) (and (%interned-tree-p ll) ll))
         (setf (clam-body lam) (an-body wrapped env2))
         lam))))
 

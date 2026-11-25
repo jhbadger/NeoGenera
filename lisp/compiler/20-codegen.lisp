@@ -18,7 +18,11 @@
   (setq *cg-depth* (+ *cg-depth* (op-delta op args))))
 (defun emit-label (l) (setq *cg-items* (cons (list :label l) *cg-items*)))
 (defun new-label () (list nil))
-(defun finish (tail) (when tail (emit :ret)))
+(defun finish (tail)
+  ;; At a tail position every dynamic binding made in this lambda is still active (*CG-NSPEC*).
+  (when tail
+    (when (> *cg-nspec* 0) (emit :unbind *cg-nspec*))
+    (emit :ret)))
 
 (defun const-index (v)
   (let ((i 0))
@@ -133,9 +137,9 @@
         (base *cg-depth*))
     (dolist (i inits) (gen i nil))
     (let ((nspec (gen-bind-slots bindings base)) (nvars (length bindings)))
-      (if (and tail (= nspec 0))
-          (gen body t)
-          (progn (gen body nil) (gen-scope-exit nvars nspec tail))))))
+      (if tail
+          (progn (gen body t) (setq *cg-nspec* (- *cg-nspec* nspec)))
+          (progn (gen body nil) (gen-scope-exit nvars nspec nil))))))
 
 (defun gen-flet (node tail)
   (let ((vars (cadr node)) (lams (caddr node)) (body (cadddr node)) (base *cg-depth*))
@@ -186,7 +190,10 @@
            (finish tail))
           (t (gen fn nil)
              (dolist (a args) (gen a nil))
-             (if tail (emit :tailcall n) (emit :call n))))))
+             (cond ((not tail) (emit :call n))
+                   ((> *cg-nspec* 0)             ; cannot TAILCALL out of dynamic bindings: call, unbind, return all values
+                    (emit :call n) (emit :unbind *cg-nspec*) (emit :retv))
+                   (t (emit :tailcall n)))))))
 
 (defun gen-block (node tail)
   ;; A block in tail position is compiled in tail mode: a normal exit leaves via
@@ -214,7 +221,7 @@
           ((cblock-tailp blk)
            (gen (caddr node) nil)
            (let ((after-call (last-emitted-call-p)))
-             (emit :unbind (- *cg-nspec* (cblock-nspec blk)))
+             (when (> *cg-nspec* 0) (emit :unbind *cg-nspec*))
              (emit (if after-call :retv :ret)))
            (setq *cg-depth* (+ d0 1)))
           (t
@@ -281,4 +288,4 @@
                               words)))))
       (%make-code (if (and (symbolp name) name (null (symbol-package name))) nil name)
                   (clam-nreq lam) (clam-nopt lam) (clam-rest lam)
-                  (nreverse words) (%list-to-vector consts) nil))))
+                  (nreverse words) (%list-to-vector consts) (clam-arglist lam)))))

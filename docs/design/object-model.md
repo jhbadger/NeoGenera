@@ -46,9 +46,13 @@ as table indices and file streams as descriptor indices for this reason.
 
 ## Numbers
 
-Fixnums and flonums only. Fixnum overflow signals an error. Bignums and ratios are planned
-(roadmap Phases 4 and 8). `/` returns an integer when exact and a flonum otherwise, which is
-a documented deviation from ANSI Common Lisp until ratios exist.
+Fixnum (61 bit), **bignum**, **ratio** and double-float. Arithmetic on fixnums overflows into bignums and
+results are always normalized (a value that fits a fixnum is a fixnum). A bignum is a raw object:
+`payload[0] = (limb-count << 1) | sign`, then 32-bit limbs, two per word (`src/bignum.c`). Multiplication
+is the schoolbook algorithm (O(n*m)); division is Knuth's algorithm D. A ratio is an object with a
+numerator and a (positive, >1) denominator in lowest terms; `/` of integers is exact. There are no
+complex numbers (`sqrt` of a negative number is an error), no `rationalize`, and floats print and read
+as doubles only.
 
 ## Characters and strings
 

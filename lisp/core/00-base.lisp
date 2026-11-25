@@ -14,6 +14,13 @@
   (make-symbol (%string-concat (if (stringp prefix) prefix "G")
                                (%number-to-string *gensym-counter*))))
 
+(defun caadr (x) (car (car (cdr x))))
+(defun cdadr (x) (cdr (car (cdr x))))
+(defun cadar (x) (car (cdr (car x))))
+(defun cddar (x) (cdr (cdr (car x))))
+(defun caaar (x) (car (car (car x))))
+(defun cdaar (x) (cdr (car (car x))))
+(defun cdddar (x) (cdr (cdr (cdr (car x)))))
 (defun fourth (l) (cadddr l))
 (defun fifth (l) (car (cddddr l)))
 (defun sixth (l) (cadr (cddddr l)))
@@ -141,6 +148,13 @@
                (when (funcall f item (if key (funcall key (car l)) (car l)))
                  (return-from member l)))
              nil))))
+
+(defun member-if (pred list &key key)
+  (do-list-tails (l list) (when (funcall pred (if key (funcall key (car l)) (car l))) (return-from member-if l)))
+  nil)
+(defun member-if-not (pred list &key key) (member-if (lambda (x) (not (funcall pred x))) list :key key))
+(defun assoc-if (pred alist &key key)
+  (dolist (e alist nil) (when (and (consp e) (funcall pred (if key (funcall key (car e)) (car e)))) (return e))))
 
 (defun assoc (item alist &key key test test-not)
   (cond ((and (null key) (null test) (null test-not)) (assql item alist))

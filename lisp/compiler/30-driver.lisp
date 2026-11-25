@@ -22,14 +22,18 @@
   (%set-symbol-function (%fn-symbol name) fn)
   name)
 
+(defvar *record-lambda-expressions* nil)
 (defmacro defun (name ll &body body)
   (multiple-value-bind (decls doc forms) (%split-body body)
     (declare (ignore doc))
-    (list '%defun (list 'quote name)
-          (list 'function
-                (list* 'lambda ll
-                       (append decls
-                               (list (list* 'block (if (consp name) (cadr name) name) forms))))))))
+    (let ((def (list '%defun (list 'quote name)
+                     (list 'function
+                           (list* 'lambda ll
+                                  (append decls
+                                          (list (list* 'block (if (consp name) (cadr name) name) forms))))))))
+      (if (and *record-lambda-expressions* (symbolp name))
+          (list 'progn def (list '%put (list 'quote name) ''%lambda-expr (list 'quote (list* 'lambda ll body))) (list 'quote name))
+          def))))
 
 (defun %defmacro-install (name fn) (%set-macro-function name fn) name)
 
@@ -55,7 +59,8 @@
       ;; a bootstrap cycle through DESTRUCTURING-BIND when redefining macros
       ;; such as DOLIST that the destructuring code itself uses.
       (%eval (copy-tree (list* 'defmacro name ll body)))
-      (list '%defmacro-install (list 'quote name) (list 'function fn-form)))))
+      (list 'progn (list '%put (list 'quote name) ''%macro-ll (list 'quote ll2))
+            (list '%defmacro-install (list 'quote name) (list 'function fn-form))))))
 
 (defun %defvar-init (name thunk has-init always)
   (%proclaim-special name)
@@ -158,7 +163,8 @@
                     (cond ((%codep c) (list :c (%code->sexp c)))
                           ((eq c (%unsupplied)) (list :u))
                           (t (list :k c))))
-                  (%vector-to-list (nth 5 parts))))))
+                  (%vector-to-list (nth 5 parts)))
+          (nth 6 parts))))
 
 (defun %sexp->code (s)
   (%make-code (nth 1 s) (nth 2 s) (nth 3 s) (nth 4 s) (nth 5 s)
@@ -169,7 +175,7 @@
                            (:u (%unsupplied))
                            (t (cadr c))))
                        (nth 6 s)))
-              nil))
+              (nth 7 s)))
 
 (defvar *fasl-header* ";;; NeoGenera fasl 1")
 
@@ -179,7 +185,38 @@
 
 (defun %toplevel-compile-time-p (form)
   (and (consp form)
-       (member (car form) '(defstruct deftype defsetf in-package defconstant defmacro declaim proclaim))))
+       (member (car form) '(defstruct deftype defsetf in-package defconstant defmacro declaim proclaim defclass
+                            define-condition defgeneric))))
+
+;;; Definition source tracking: (%note-definition NAME KIND FILE POSITION) is recorded for every
+;;; definition form loaded from a file or compiled by COMPILE-FILE (the note is part of the fasl).
+(defvar *form-pos* 0)
+(defvar *compile-file-name* nil)
+
+(defun %definition-info (form)
+  "If FORM is a definition, returns (values name kind)."
+  (when (and (consp form) (symbolp (car form)) (consp (cdr form)))
+    (let ((kind (case (car form)
+                  (defun :function) (defmacro :macro) ((defvar defparameter defconstant) :variable)
+                  (defstruct :structure) (defclass :class) (defgeneric :generic) (defmethod :method)
+                  (define-condition :condition) (deftest :test) (define-command :command) (deftype :type)
+                  (t nil)))
+          (name (cadr form)))
+      (when (and kind (consp name))
+        (setq name (if (eq (car name) 'setf) name (car name))))
+      (when (and kind name (or (symbolp name) (and (consp name) (eq (car name) 'setf))))
+        (values (if (and (consp name) (eq (car name) 'setf)) (%fn-symbol name) name) kind)))))
+
+(defun %note-definition (name kind file pos)
+  (let ((entry (list kind file pos)))
+    (%put name '%source
+          (cons entry (remove-if (lambda (e) (and (eq (car e) kind) (equal (cadr e) file) (not (eq kind :method))))
+                                 (get name '%source))))
+    name))
+
+(defun definition-locations (name)
+  "Recorded source locations of NAME: a list of (kind file position)."
+  (get (if (consp name) (%fn-symbol name) name) '%source))
 
 (defun %process-toplevel (form stream)
   (cond ((and (consp form) (eq (car form) 'progn))
@@ -190,16 +227,23 @@
            (when (or (memq :load-toplevel sits) (memq :execute sits))
              (dolist (f (cddr form)) (%process-toplevel f stream)))))
         (t (when (%toplevel-compile-time-p form) (eval (copy-tree form)))
-           (let ((expanded (macroexpand form)))
-             (if (and (consp expanded) (eq (car expanded) 'progn) (not (eq expanded form)))
-                 (%process-toplevel expanded stream)
-                 (%write-fasl-entry stream (%compile-root expanded nil)))))))
+           (multiple-value-bind (name kind) (%definition-info form)
+             (let ((expanded (macroexpand form)))
+               (if (and (consp expanded) (eq (car expanded) 'progn) (not (eq expanded form)))
+                   (%process-toplevel expanded stream)
+                   (%write-fasl-entry stream (%compile-root expanded nil)))
+               ;; the note is written for the ORIGINAL form: macros, structures, classes and generic
+               ;; functions expand into PROGN and would otherwise lose their source location
+               (when (and name *compile-file-name*)
+                 (%write-fasl-entry stream
+                                    (%compile-root (list '%note-definition (list 'quote name) kind
+                                                         *compile-file-name* *form-pos*) nil))))))))
 
 (defun compile-file (path &key output-file)
   (let* ((out (or output-file
                   (let ((p (%string-position-char (reverse path) #\. 0)))
                     (if p (%string-concat (subseq path 0 (- (length path) p 1)) ".nfasl") (%string-concat path ".nfasl")))))
-         (*package* *package*))
+         (*package* *package*) (*compile-file-name* path))
     (with-open-file (in path)
       (with-open-file (o out :direction :output)
         (write-line *fasl-header* o)
@@ -208,7 +252,8 @@
             (tagbody top
                (let ((form (read in nil eof)))
                  (when (eq form eof) (return))
-                 (%process-toplevel form o))
+                 (let ((*form-pos* (%last-read-start)))
+                   (%process-toplevel form o)))
                (go top))))))
     out))
 
@@ -230,10 +275,22 @@
   (let ((n (length suffix)) (m (length s)))
     (and (>= m n) (string= (subseq s (- m n)) suffix))))
 
-(defvar *source-load-hook* nil)
-(let ((%old-load (symbol-function 'load)))
-  (%set-symbol-function 'load
-    (lambda (path &rest keys)
-      (if (%ends-with path ".nfasl")
-          (load-fasl path)
-          (apply %old-load path keys)))))
+(defun load (path &key verbose print if-does-not-exist)
+  (declare (ignore if-does-not-exist))
+  (if (%ends-with path ".nfasl")
+      (load-fasl path)
+      (let ((*package* *package*) (*load-pathname* path) (*compile-file-name* path))
+        (with-open-file (s path)
+          (let ((eof (list nil)))
+            (block nil
+              (tagbody top
+                 (let ((form (read s nil eof)))
+                   (when (eq form eof) (return))
+                   (let ((pos (%last-read-start)))
+                     (let ((v (eval form)))
+                       (multiple-value-bind (name kind) (%definition-info form)
+                         (when name (%note-definition name kind path pos)))
+                       (when print (format t "~&; ~S~%" v)))))
+                 (go top)))))
+        (when verbose (format *error-output* "~&; loaded ~A~%" path))
+        t)))

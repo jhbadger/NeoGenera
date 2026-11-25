@@ -121,6 +121,16 @@ def main():
 
     s.send(":help\r")
     check(":help lists commands", s.wait_for(":tile"))
+    # the editor: open the source of MAPCAR from the Listener, edit, and close the window again
+    s.send(":edit mapcar\r")
+    check("editor opens at the definition of MAPCAR", s.wait_for("(defun mapcar (fn list &rest more)") and s.term.has("Editor:"))
+    s.send("\x01XYZ")                                        # C-a then type: inserts at the start of the line
+    check("typing edits the buffer (modified flag shown)", s.wait_for("XYZ(defun mapcar") and s.term.has("**"))
+    s.send("\x1f")                                          # C-_ : undo
+    check("undo reverts the edit", s.wait_for("--") )
+    s.send("\x18\x03")                                      # C-x C-c: close the editor window
+    s.pump(0.6)
+    check("closing the editor returns to the Listener", s.wait_for("CL-USER>") and not s.term.has("Editor:"))
     s.send("\x1b[19~")                                        # F8: next theme
     s.pump(0.5)
     s.send("(+ 20 22)\r")

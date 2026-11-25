@@ -79,6 +79,16 @@
   "LINE is the text after the colon.  Returns (:done) or (:prompt command args spec rest) when an
 argument is missing, or signals an error for unknown/ambiguous commands."
   (let* ((tokens (mapcar #'string-upcase (%split-tokens line))) (hits (find-commands tokens)))
+    ;; the hyphenated spelling :who-calls means the two words WHO CALLS
+    (when (and (null hits) tokens (%string-position-char (car tokens) #\- 0))
+      (let* ((words (remove "" (%split-string (car tokens) #\-) :test #'string=)) (h2 (find-commands words)))
+        (when h2
+          (let ((best (remove-if-not (lambda (h) (= (cdr h) (length words))) h2)))
+            (when best (setq hits (mapcar (lambda (h) (cons (car h) 1)) best)))))))
+    ;; prefer the commands that matched the most words (:apropos-window over :apropos)
+    (when (and hits (cdr hits))
+      (let ((maxn (reduce #'max (mapcar #'cdr hits))))
+        (setq hits (remove-if-not (lambda (h) (= (cdr h) maxn)) hits))))
     (cond ((null tokens) (error "Empty command"))
           ((null hits) (error "Unknown command: ~A  (try :HELP)" (car tokens)))
           ((and (cdr hits) (> (length hits) 1)

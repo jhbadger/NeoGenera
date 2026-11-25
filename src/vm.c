@@ -82,12 +82,13 @@ static Obj vm_execute(int stop_vfp) {
     }
     case OP_POP: vsp--; break;
     case OP_DUP: { Obj v = vstack[vsp - 1]; PUSH(v); break; }
-    case OP_JMP: pc = ip[pc]; break;
+    case OP_JMP: { int t = ip[pc]; if (t < pc && prof_pending) { fr->pc = pc; prof_record(); } pc = t; break; }
     case OP_JNIL: { int t = ip[pc++]; if (vstack[--vsp] == NIL) pc = t; break; }
     case OP_JNNIL: { int t = ip[pc++]; if (vstack[--vsp] != NIL) pc = t; break; }
     case OP_CALL: {
       int n = ip[pc++];
       fr->pc = pc;
+      if (prof_pending) prof_record();
       if (gc_pending && !gc_inhibit) { gc(); RELOAD(); }
       Obj fn = vstack[vsp - n - 1];
       if (IS_TYPE(fn, T_CLOSURE)) { vm_enter(n); RELOAD(); break; }
@@ -99,6 +100,7 @@ static Obj vm_execute(int stop_vfp) {
     case OP_TAILCALL: {
       int n = ip[pc++];
       fr->pc = pc;
+      if (prof_pending) prof_record();
       if (gc_pending && !gc_inhibit) { gc(); RELOAD(); }
       Obj fn = vstack[vsp - n - 1];
       if (IS_TYPE(fn, T_CLOSURE)) {

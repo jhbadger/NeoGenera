@@ -118,6 +118,10 @@
   (is-equal '(1 2) (multiple-value-list (%compile-eval '(let ((*ct-special* :b)) (values 1 2)))))
   (is-equal '(1 2) (multiple-value-list (%compile-eval '(let ((*ct-special* :b)) (let ((*ct-special* :c)) (values 1 2))))))
   (is-equal '(7) (multiple-value-list (%compile-eval '(let ((a (values 1 2))) (let ((*ct-special* :b)) (+ a 6))))))
+  (is-equal '(1 2) (multiple-value-list (%compile-eval '(let ((*ct-special* :b)) (if t (values 1 2) 3)))))
+  (is-equal '(3 4) (multiple-value-list (%compile-eval '(let ((*ct-special* :b)) (cond ((null nil) (values 3 4)) (t 5))))))
+  (is-equal '(9) (multiple-value-list (%compile-eval '(let ((*ct-special* :b)) (if nil 1 9)))))
+  (is-equal '(:global) (progn (%compile-eval '(let ((*ct-special* :b)) (if t (values 1 2) 3))) (list (ct-read-special))))
   (is-equal :global (ct-read-special))
   (is-equal 100000 (%compile-eval '(labels ((f (n) (block nil (when (= n 0) (return 100000)) (return (f (- n 1)))))) (f 5000)))))
 

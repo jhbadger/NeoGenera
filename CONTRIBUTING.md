@@ -7,7 +7,8 @@ system written in Lisp itself. Start with `ROADMAP.md` and `docs/design/`.
 
 ```sh
 make world        # kernel, then stage0 -> stage1 -> stage2, fixed-point check, final image
-make test         # C unit tests + Lisp tests (run against build/neogenera.img)
+make test         # C unit tests + Lisp tests + pty tests (against build/neogenera.img)
+make test-pty     # the window system in a real pseudo-terminal (needs python3)
 make test-stress  # Lisp tests with a collection at every GC safe point (slow)
 SAN=1 sh tests/c/run.sh        # C unit tests under ASan/UBSan
 make asan                      # build/neogenera-asan, with dead-semispace poisoning
@@ -28,6 +29,8 @@ treat it as a bug, not as noise.
   definitions, so that load order matters only at call time.
 * Every new Lisp feature needs a test in `tests/lisp/`; every new C facility needs a check in
   `tests/c/kernel_tests.c`.
+* UI and editor code must work headless: drive it with `WM-FEED` and assert on the screen buffer; add a pty
+  check in `tests/ui/pty_test.py` for anything that depends on the real terminal.
 * Document design decisions in `docs/design/` when they change an invariant.
 
 See `STYLE.md` for formatting conventions.

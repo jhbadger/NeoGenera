@@ -33,7 +33,7 @@ static void init_all(void) {
   init_streams();
   init_vm();
   init_prims_core();
-  init_prims_data(); init_prims_num(); init_prims_term();
+  init_prims_data(); init_prims_num(); init_prims_term(); init_prims_sys();
   init_prims_io();
 }
 

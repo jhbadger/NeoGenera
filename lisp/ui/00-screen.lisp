@@ -167,10 +167,11 @@
     (%join-strings (nreverse lines) (string #\Newline))))
 
 (defun screen-find-text (s text)
-  "Returns (row . col) of the first occurrence of TEXT in the back buffer, or NIL."
+  "Returns (row . column) of the first occurrence of TEXT in the back buffer, or NIL."
   (dotimes (r (scr-rows s) nil)
-    (let ((p (%string-search text (screen-row-string s r nil) 0)))
-      (when p (return (cons r p))))))
+    (let* ((row (screen-row-string s r nil)) (p (%string-search text row 0)))
+      ;; P is a byte offset into the UTF-8 row; convert it to a screen column
+      (when p (return (cons r (let ((n 0)) (dotimes (i p) (unless (= (logand (char-code (char row i)) #xC0) #x80) (setq n (+ n 1)))) n)))))))
 
 (defun screen-cell (s r c)
   (let ((i (+ (* r (scr-cols s)) c)))

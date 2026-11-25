@@ -151,7 +151,7 @@
     (nreverse (cons (subseq s start) parts))))
 
 (defun %format-run (stream control args)
-  (let ((i 0) (n (length control)))
+  (let ((i 0) (n (length control)) (prev nil) (start-args nil))
     (block run
       (tagbody top
          (when (>= i n) (return-from run args))
@@ -192,6 +192,7 @@
                               ((char= ch #\@) (setq at t) (setq j (+ j 1)) (go mloop))))))
                  (setq dchar (char-upcase (char control j)))
                  (setq i (+ j 1))
+                 (setq start-args args)
                  (case dchar
                    (#\A (let ((s (if (and colon (null (car args))) "()" (princ-to-string (car args)))))
                           (setq args (cdr args))
@@ -218,6 +219,10 @@
                           (setq args (cdr args))
                           (%fmt-pad stream (%fmt-fixed v (or (car params) 2)) (cadr params) #\Space nil)))
                    (#\E (let ((v (car args))) (setq args (cdr args)) (write-string (princ-to-string (float v)) stream)))
+                   (#\P (let ((v (if colon (car prev) (let ((x (car args))) (setq args (cdr args)) x))))
+                          (if at
+                              (write-string (if (eql v 1) "y" "ies") stream)
+                              (unless (eql v 1) (write-char #\s stream)))))
                    (#\% (dotimes (k (or (car params) 1)) (write-char #\Newline stream)))
                    (#\& (fresh-line stream) (dotimes (k (- (or (car params) 1) 1)) (write-char #\Newline stream)))
                    (#\~ (dotimes (k (or (car params) 1)) (write-char #\~ stream)))
@@ -275,7 +280,8 @@
                                                           (and (> (length last) 0) (char= (char last 0) #\:) nil)))))))
                               (when clause
                                 (setq args (let ((r (%format-run stream clause args))) r)))))))
-                   (t (error "FORMAT: unknown directive ~~~A" dchar)))))
+                   (t (error "FORMAT: unknown directive ~~~A" dchar)))
+                 (setq prev start-args)))
            (go top))))))
 
 (defun %capitalize-first (s)

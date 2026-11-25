@@ -63,10 +63,24 @@ Text, one form per top-level form:
 It is printed with package-qualified symbols and read back with the normal reader, which keeps it
 diffable. The self-hosting check compares fasl files byte for byte.
 
+## Tail position and dynamic bindings
+
+At a tail position every dynamic (special) binding made in the lambda is still active. The generator
+therefore emits `UNBIND n` before `RET`, and for a call in that position `CALL; UNBIND n; RETV`
+(RETV returns without resetting the multiple-value count) instead of `TAILCALL`. A `RETURN-FROM` whose
+block is in tail position leaves the function directly. This preserves multiple values through
+`(let ((*special* ...)) (if x (values ..) ...))`. Only the dynamic-binding case loses proper tail
+calls.
+
+## Also compiled
+
+* `symbol-macrolet` (used by `with-slots`, `with-accessors`); setting a symbol macro expands to `setf`.
+* Lambda lists are stored in code objects when they contain only interned symbols, and
+  source locations are written to the fasl (see `tools.md`).
+
 ## Known gaps
 
-* `return-from` in compiled code forwards only the primary value, except when its argument is
-  literally `(values …)`.
+* A local `return-from` out of a scope that is **not** in tail position forwards only the primary value.
 * No type inference or inlining beyond the open-coded primitives, no native code.
 * `compile` of an evaluator closure loses its lexical environment.
-* `symbol-macrolet`, `declare ignore/type/optimize`, and `&environment` are accepted but ignored.
+* `declare ignore/type/optimize` and `&environment` are accepted but ignored.

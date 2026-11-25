@@ -27,4 +27,10 @@
     "lisp/ui/20-present.lisp"
     "lisp/ui/30-commands.lisp"
     "lisp/ui/40-listener.lisp"
-    "lisp/ui/50-ui.lisp"))
+    "lisp/ui/50-ui.lisp"
+    "lisp/tools/00-xref.lisp"
+    "lisp/tools/10-trace.lisp"
+    "lisp/editor/00-buffer.lisp"
+    "lisp/editor/10-editor.lisp"
+    "lisp/editor/20-files.lisp"
+    "lisp/ui/60-tools-ui.lisp"))

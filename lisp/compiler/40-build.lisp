@@ -20,5 +20,7 @@
 (defun ng-finalize-image ()
   ;; Called just before the final image is saved.
   (%set-export-all-cl nil)
+  (setq *source-root* (%getcwd))
+  (setq *record-lambda-expressions* t)
   (setq *package* (find-package "COMMON-LISP-USER"))
   t)

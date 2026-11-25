@@ -18,6 +18,8 @@ jobs:
         run: make world
       - name: Lisp tests
         run: make test-lisp
+      - name: Real-terminal (pty) tests
+        run: make test-pty
 
   sanitizers:
     runs-on: ubuntu-latest

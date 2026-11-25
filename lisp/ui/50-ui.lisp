@@ -27,6 +27,7 @@
 (defun ng-ui (&optional (theme :classic))
   "Run the NeoGenera window system on the terminal."
   (set-theme theme)
+  (%install-tool-hooks)
   (if (not (%term-isatty))
       (progn (format t "~&The window system needs an interactive terminal; starting the line Listener.~%")
              (ng-toplevel))

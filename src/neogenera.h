@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <setjmp.h>
+#include <signal.h>
 #include <stdarg.h>
 
 typedef struct { char *buf; size_t len, cap; } Buf;
@@ -298,6 +299,9 @@ void  init_prims_core(void);
 void  init_prims_data(void);
 void  init_prims_num(void);
 void  init_prims_term(void);
+void  init_prims_sys(void);
+void  prof_record(void);
+extern volatile sig_atomic_t prof_pending;
 void  term_cleanup(void);
 void  init_prims_io(void);
 Obj   values_list(Obj list);

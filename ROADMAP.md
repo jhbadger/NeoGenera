@@ -6,43 +6,71 @@ NeoGenera is a Lisp environment in the spirit of Symbolics Genera: a single, liv
 
 ## Status
 
-*Last updated 2026-11-25.* **Phases 0–3 are complete**; the self-hosting compiler reaches a fixed point
-(`make selfhost`). Everything below Phase 3 is still planned.
+*Last updated 2026-11-25.* **Phases 0-6 are implemented**; the compiler compiles itself to a byte-identical
+fixed point (`make selfhost`, 30 source files). Phases 7-10 are still planned.
 
 | Phase | State | Evidence |
 |---|---|---|
-| 0 Foundations | done | `docs/design/`, `Makefile`, CI workflow, `CONTRIBUTING.md`, `STYLE.md`, C and Lisp test harnesses |
-| 1 C kernel | done, with deviations | 60 C checks (also under ASan/UBSan); Lisp suites pass under a collection at *every* safe point |
-| 2 Core Lisp in Lisp | done, with deviations | 12 test groups / 132 checks for the library |
-| 3 Compiler, self-hosting | done, with deviations | stage 1 and stage 2 output identical: 13 files, ~232 KB |
+| 0 Foundations | done | `docs/design/`, `Makefile`, CI workflow, `CONTRIBUTING.md`, `STYLE.md`, test harnesses |
+| 1 C kernel | done | 74 C checks (also under ASan/UBSan); Lisp suites under ASan with dead-semispace poisoning |
+| 2 Core Lisp in Lisp | done, with deviations | core library tests |
+| 3 Compiler, self-hosting | done | stage 1 == stage 2 |
+| 4 Conditions, CLOS, streams | done, with deviations | `tests/lisp/phase4-tests.lisp` |
+| 5 Text window system | done, with deviations | `tests/lisp/ui-tests.lisp`, `tests/ui/pty_test.py` (real pty) |
+| 6 Editor and developer tools | done, with deviations | `tests/lisp/tools-tests.lisp`, pty test |
 
-Test counts as of this update: 23 Lisp test groups, 194 checks (interpreted *and* compiled), 60 C checks.
-Compiled code runs about 3-4x faster than the stage-0 evaluator on the micro-benchmarks in
-`tests/lisp/bench.lisp` (for example `fib 32` in about 0.17 s).
+Totals: 74 C checks, 71 Lisp test groups with 910 checks (run interpreted-and-compiled and under ASan),
+20 real-terminal checks. The Lisp suite takes about 1.5 seconds.
 
 ### Deviations from the plan above
 
-These are conscious scope decisions, not oversights; each is a candidate for a later phase.
+These are scope decisions, not oversights; each is a candidate for a later phase.
 
-* **Reader and printer are still written in C** and remain on the critical path. The roadmap's Phase 2
-  exit criterion ("the C reader and printer are removed from the critical path") is **not met**.
-  Reader macros are fixed rather than readtable-driven.
-* **Numbers:** fixnums (61-bit) and double-precision floats only. Overflow signals an error; there are no
-  bignums or ratios yet, and `/` returns a float for inexact division.
-* **Strings are byte vectors** (UTF-8 passes through; `length` counts bytes).
-* **Errors and conditions:** a minimal string-based scheme (`error`, `handler-case`, `ignore-errors`,
-  `unwind-protect`). The full condition system, restarts and the interactive debugger are Phase 4.
-* **Garbage collector:** a non-generational two-space copier (separate object and cons spaces). A
-  generational collector and weak tables remain Phase 4 work.
-* **Hash tables** are written in Lisp and hash conses structurally, so mutating a key of an `eq`/`eql`
-  table after insertion is unsupported.
-* **Compiler:** no type inference; open-coded primitives only; `return-from` in compiled code forwards only
-  the primary value unless its argument is literally `(values ...)`. Only a bytecode back end exists.
-* **`loop`, `format`, `defstruct`** are subsets (see the source headers).
-* **Platforms:** developed and tested on aarch64 Linux. The kernel is portable C (POSIX `mmap`, pthreads),
-  but x86-64 and macOS builds have **not been run yet**; CI is configured for both. Heap images require the
-  fixed-address mapping to succeed.
-* **Phase 1 exit criterion** asked for GC stress "for hours"; the stress suite runs for minutes.
+**Phase 2-3 (earlier)**
+* The reader and printer are still written in C (readtables are not extensible).
+* Strings are byte vectors (UTF-8 passes through; `length` counts bytes).
+* The collector is a non-generational two-space copier.
+
+**Phase 4**
+* **Not done:** a generational collector, weak hash tables, finalization hooks, and the `ansi-test`
+  conformance baseline (the suite is not available offline, so no pass rate is published).
+* Numbers: bignums and exact ratios are implemented (schoolbook multiplication; no fast multiplication
+  or complex numbers). `/` of integers is now exact.
+* Conditions: `handler-bind`/`handler-case`/`restart-case`/`signal`/`error`/`warn`/`cerror`/`ignore-errors`, a
+  standard hierarchy; kernel errors become typed conditions. Missing: `with-condition-restarts`,
+  `invoke-restart-interactively`, `define-condition` slot options beyond the usual ones.
+* CLOS: C3 precedence, multiple dispatch, EQL specializers, standard method combination, in-place class
+  redefinition (**existing instances are not updated**). No metaclasses, `:allocation :class`,
+  `change-class`, or non-standard method combinations; the MOP is a small subset.
+* Debugger: backtrace with arguments, restarts menu, frame selection, `:edit`. **Not done:** return from a
+  frame, retry, local variables (only argument values), and frames of the interpreter or C primitives.
+* `format`: no `~R ~E ~G ~<..~:>`; `pprint` is a simple line-filling printer (no `pprint-logical-block`).
+* Gray streams: `read` on a Gray stream consumes whole lines.
+
+**Phase 5**
+* No SDL or other GUI backend (the window abstraction is not tied to the terminal, but none exists).
+* Every code point is one column wide (no wide or combining characters).
+* The window Listener's error display is post-mortem (the evaluation is unwound first); evaluation blocks
+  the UI; the UI Listener cannot read from stdin. Only the line-mode Listener offers the interactive
+  debugger.
+
+**Phase 6**
+* The editor works on bytes (UTF-8 characters move as units; nothing else is Unicode-aware). No query-replace,
+  regexp search, multiple windows inside one editor, or syntax colouring beyond comment lines.
+* Undo is a real tree (`undo-tree-select`, text visualisation) but there is no interactive tree browser.
+* Source locations are definition-level: "jump from a backtrace frame to the source" opens the function's
+  definition, not the executing line.
+* Cross reference is read from bytecode, so open-coded primitives are not reported.
+* The stepper steps into functions only when their source was recorded (interactive definitions).
+* The profiler samples at calls and backward jumps of compiled code only.
+* Version control is `git` through a subprocess. Dired is basic.
+* GC stress (a collection at every safe point) was run for the Phase 4 groups and for the buffer, undo,
+  kill-ring and sexp groups; the cross-reference, profiler and window tests were checked under ASan only,
+  because they are too slow with a collection per safe point.
+
+**General**
+* Developed and tested on aarch64 Linux. The code is portable C (POSIX), but x86-64 and macOS builds have
+  **not been run**; CI is configured for both.
 
 ## Guiding principles
 

@@ -12,7 +12,7 @@
   name lam (captured nil) (mutated nil) (slot 0))
 
 (defstruct (clam (:constructor make-clam (name parent)))
-  name parent (nreq 0) (nopt 0) (rest nil) (params nil) (body nil) (free nil))
+  name parent (nreq 0) (nopt 0) (rest nil) (params nil) (body nil) (free nil) (arglist nil))
 
 (defstruct (cblock (:constructor make-cblock (name lam)))
   name lam label depth nspec (tailp nil))

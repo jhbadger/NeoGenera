@@ -27,6 +27,13 @@ Consequently a C primitive that only allocates can hold raw `Obj` values in loca
 protection. Only code that can call back into Lisp (`eval`, `apply_stack`, `funcall`,
 `mapcar`-style helpers) needs care.
 
+## Calling Lisp from the printer
+
+The C printer calls the Lisp function `%PRINT-HOOK` for structure instances (CLOS instances, conditions,
+`defstruct` objects with a `print-object` method). Because the printer holds raw pointers on the C
+stack, collection is **inhibited** (`gc_inhibit`, saved and restored by catch frames) for the duration
+of the call; an unusually allocation-heavy `print-object` method therefore grows the heap until it returns.
+
 ## Roots
 
 * registered global variables (`add_root`), including the interned `Q_*` symbols,

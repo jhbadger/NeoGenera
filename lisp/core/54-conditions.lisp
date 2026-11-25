@@ -66,14 +66,16 @@
 (define-condition parse-error (error) ())
 (define-condition reader-error (parse-error stream-error) ())
 
-;; classes for errors that originate in the C kernel (they carry a message)
-(define-condition %unbound-variable (unbound-variable simple-error) ())
-(define-condition %undefined-function (undefined-function simple-error) ())
-(define-condition %division-by-zero (division-by-zero simple-error) ())
-(define-condition %program-error (program-error simple-error) ())
-(define-condition %reader-error (reader-error simple-error) ())
-(define-condition %end-of-file (end-of-file simple-error) ())
-(define-condition %file-error (file-error simple-error) ())
+;; classes for errors that originate in the C kernel: the kernel's message is the report
+(defun %message-report (c s)
+  (apply #'format s (simple-condition-format-control c) (simple-condition-format-arguments c)))
+(define-condition %unbound-variable (unbound-variable simple-error) () (:report %message-report))
+(define-condition %undefined-function (undefined-function simple-error) () (:report %message-report))
+(define-condition %division-by-zero (division-by-zero simple-error) () (:report %message-report))
+(define-condition %program-error (program-error simple-error) () (:report %message-report))
+(define-condition %reader-error (reader-error simple-error) () (:report %message-report))
+(define-condition %end-of-file (end-of-file simple-error) () (:report %message-report))
+(define-condition %file-error (file-error simple-error) () (:report %message-report))
 
 (defun condition-report-string (c)
   (let ((report nil))
@@ -294,8 +296,16 @@
         ((or (%msg-has msg "Cannot open") (%msg-has msg "File not found")) '%file-error)
         (t 'simple-error)))
 
+(defun %name-in-message (msg prefix)
+  (let ((p (%string-search prefix msg 0)))
+    (when p
+      (let* ((start (+ p (length prefix))) (end (%string-search " is " msg start)))
+        (and end (subseq msg start end))))))
+
 (defun %signal-error (msg)
   (let ((c (make-condition (%condition-class-for msg) :format-control "~A" :format-arguments (list msg))))
+    (when (typep c 'cell-error)
+      (setf (slot-value c 'name) (or (%name-in-message msg "The function ") (%name-in-message msg "The variable "))))
     (let ((*in-error-signal* nil) (*signal-depth* (+ *signal-depth* 1)))
       (when (> *signal-depth* 6) (%error-to-top msg))
       (signal c)
