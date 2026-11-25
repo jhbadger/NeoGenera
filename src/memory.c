@@ -39,6 +39,11 @@ static char  *o_space[2], *c_space[2];
 static int    cur;                     /* which semispace is "from" */
 static Obj   *o_hp, *c_hp;
 static char  *o_base, *c_base, *o_limit, *c_limit;
+/* Allocation stops at the soft limits (a reserve below the real end of the space) until the next collection; the
+   reserve lets the error-handling code of an out-of-memory condition run.  o_limit/c_limit stay the true ends. */
+#define HEAP_RESERVE ((size_t)4 << 20)
+static char  *o_alloc, *c_alloc;
+static int    exhaust_count;
 static Obj   *o_trigger, *c_trigger;
 static Obj   *o_to_hp, *c_to_hp;
 int heap_fixed;
@@ -71,6 +76,7 @@ static void select_space(int which) {
   cur = which;
   o_base = o_space[cur]; o_limit = o_base + semi;
   c_base = c_space[cur]; c_limit = c_base + semi;
+  o_alloc = o_limit - HEAP_RESERVE; c_alloc = c_limit - HEAP_RESERVE; exhaust_count = 0;
 }
 
 void init_memory(void) {
@@ -108,9 +114,18 @@ static void heap_exhausted(void) {
   exit(3);
 }
 
+static void out_of_memory(size_t words) {
+  if (++exhaust_count > 3) heap_exhausted();        /* the error handling itself keeps failing */
+  lisp_error("Heap exhausted: cannot allocate %zu words", words);
+}
+
 static inline Obj *alloc_o(size_t n) {
   Obj *p = o_hp;
-  if ((char *)(p + n) > o_limit) heap_exhausted();
+  size_t avail = (size_t)(o_alloc - (char *)p) / sizeof(Obj);
+  if (n > avail) {
+    if (o_alloc != o_limit) { o_alloc = o_limit; gc_pending = 1; avail = (size_t)(o_limit - (char *)p) / sizeof(Obj); }
+    if (n > avail) out_of_memory(n);                 /* (n is compared before any pointer arithmetic: no overflow) */
+  }
   o_hp = p + n;
   if (o_hp > o_trigger) gc_pending = 1;
   return p;
@@ -118,7 +133,10 @@ static inline Obj *alloc_o(size_t n) {
 
 Obj cons(Obj a, Obj d) {
   Obj *p = c_hp;
-  if ((char *)(p + 2) > c_limit) heap_exhausted();
+  if ((char *)(p + 2) > c_alloc) {
+    if (c_alloc != c_limit) { c_alloc = c_limit; gc_pending = 1; }
+    if ((char *)(p + 2) > c_limit) out_of_memory(2);
+  }
   c_hp = p + 2;
   if (c_hp > c_trigger) gc_pending = 1;
   p[0] = a; p[1] = d;
@@ -281,37 +299,70 @@ int obj_valid(Obj o) {
 typedef struct {
   char magic[8];
   uint64_t obj_base, cons_base, obj_used, cons_used, nroots, semi;
+  uint64_t checksum;                       /* FNV-1a over everything after the header */
 } ImgHdr;
 
+static uint64_t fnv1a(uint64_t h, const void *data, size_t n) {
+  const unsigned char *p = data;
+  for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ULL; }
+  return h;
+}
+#define FNV_INIT 14695981039346656037ULL
+
+/* The image is written to PATH.tmp.<pid>, flushed to disk and renamed over PATH, so a crash (or a full disk)
+   in the middle of a save never damages an existing image. */
 int save_image(const char *path) {
   if (!heap_fixed) { fprintf(stderr, "image: heap not at fixed address\n"); return -1; }
   int saved_stress = gc_stress; gc_stress = 0;
   gc(); if (cur != 0) gc();
   gc_stress = saved_stress;
-  FILE *f = fopen(path, "wb");
+  char tmp[4096];
+  if (snprintf(tmp, sizeof tmp, "%s.tmp.%ld", path, (long)getpid()) >= (int)sizeof tmp) return -1;
+  FILE *f = fopen(tmp, "wb");
   if (!f) return -1;
-  ImgHdr h; memcpy(h.magic, "NGIMG003", 8);
+  ImgHdr h; memset(&h, 0, sizeof h); memcpy(h.magic, "NGIMG004", 8);
   h.obj_base = (uint64_t)(uintptr_t)o_base; h.cons_base = (uint64_t)(uintptr_t)c_base;
   h.obj_used = (uint64_t)((char *)o_hp - o_base); h.cons_used = (uint64_t)((char *)c_hp - c_base);
   h.nroots = (uint64_t)nglobal_roots; h.semi = semi;
+  uint64_t sum = FNV_INIT;
+  for (int i = 0; i < nglobal_roots; i++) sum = fnv1a(sum, global_roots[i], sizeof(Obj));
+  sum = fnv1a(sum, &nil_storage[1], sizeof(Obj) * SYM_SLOTS);
+  sum = fnv1a(sum, o_base, h.obj_used);
+  sum = fnv1a(sum, c_base, h.cons_used);
+  h.checksum = sum;
   fwrite(&h, sizeof h, 1, f);
   for (int i = 0; i < nglobal_roots; i++) fwrite(global_roots[i], sizeof(Obj), 1, f);
   fwrite(&nil_storage[1], sizeof(Obj), SYM_SLOTS, f);
   fwrite(o_base, 1, h.obj_used, f);
   fwrite(c_base, 1, h.cons_used, f);
-  int ok = ferror(f) == 0;
-  fclose(f);
+  int ok = fflush(f) == 0 && ferror(f) == 0 && fsync(fileno(f)) == 0;
+  if (fclose(f) != 0) ok = 0;
+  if (ok && rename(tmp, path) != 0) ok = 0;
+  if (!ok) unlink(tmp);
   return ok ? 0 : -1;
 }
 
+/* Returns 0, or: -1 cannot open, -2 truncated or not an image, -3 built for a different heap layout,
+   -4 corrupt (checksum mismatch) or an impossible header. */
 int load_image(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f) return -1;
   ImgHdr h;
-  if (fread(&h, sizeof h, 1, f) != 1 || memcmp(h.magic, "NGIMG003", 8) != 0) { fclose(f); return -2; }
+  if (fread(&h, sizeof h, 1, f) != 1 || memcmp(h.magic, "NGIMG004", 8) != 0) { fclose(f); return -2; }
   if (!heap_fixed || h.obj_base != (uint64_t)(uintptr_t)o_space[0] ||
       h.cons_base != (uint64_t)(uintptr_t)c_space[0] || h.semi != semi ||
       h.nroots != (uint64_t)nglobal_roots) { fclose(f); return -3; }
+  if (h.obj_used > semi || h.cons_used > semi || (h.obj_used & 7) || (h.cons_used & 7)) { fclose(f); return -4; }
+  /* first pass: verify the checksum before touching the live heap */
+  uint64_t sum = FNV_INIT, remaining = h.nroots * sizeof(Obj) + sizeof(Obj) * SYM_SLOTS + h.obj_used + h.cons_used;
+  static char chunk[1 << 16];
+  while (remaining > 0) {
+    size_t want = remaining < sizeof chunk ? (size_t)remaining : sizeof chunk;
+    if (fread(chunk, 1, want, f) != want) { fclose(f); return -2; }
+    sum = fnv1a(sum, chunk, want); remaining -= want;
+  }
+  if (sum != h.checksum) { fclose(f); return -4; }
+  if (fseek(f, (long)sizeof h, SEEK_SET) != 0) { fclose(f); return -2; }
   select_space(0);
   for (int i = 0; i < nglobal_roots; i++)
     if (fread(global_roots[i], sizeof(Obj), 1, f) != 1) { fclose(f); return -2; }

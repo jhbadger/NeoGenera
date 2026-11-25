@@ -132,8 +132,11 @@
              (setq i (+ i 1)))
          (go top)))))
 
+(defvar *fmt-default* nil "Index of the ~:; default clause found by the last %FMT-SPLIT-CLAUSES, or NIL.")
+
 (defun %fmt-split-clauses (s)
-  ;; split on ~; at nesting depth 0
+  ;; split on ~; and ~:; at nesting depth 0; ~:; marks the clause after it as the default
+  (setq *fmt-default* nil)
   (let ((parts nil) (start 0) (i 0) (n (length s)) (depth 0))
     (block nil
       (tagbody top
@@ -144,7 +147,11 @@
                      ((find c "]})") (setq depth (- depth 1)))
                      ((and (char= c #\;) (= depth 0))
                       (setq parts (cons (subseq s start i) parts))
-                      (setq start (+ i 2))))
+                      (setq start (+ i 2)))
+                     ((and (char= c #\:) (= depth 0) (< (+ i 2) n) (char= (char s (+ i 2)) #\;))
+                      (setq parts (cons (subseq s start i) parts))
+                      (setq start (+ i 3) *fmt-default* (length parts))
+                      (setq i (+ i 1))))
                (setq i (+ i 2)))
              (setq i (+ i 1)))
          (go top)))
@@ -214,11 +221,18 @@
                           (if at (prin1 ch stream) (write-char ch stream))))
                    (#\F (let ((v (car args)))
                           (setq args (cdr args))
-                          (%fmt-pad stream (%fmt-fixed v (cadr params)) (car params) #\Space nil)))
+                          (%fmt-pad stream (if (or (cadr params) (not (floatp v))) (%fmt-fixed v (cadr params)) (princ-to-string v)) (car params) #\Space nil)))
+                   (#\? (let ((ctl (car args)) (sub (cadr args))) (setq args (cddr args)) (%format-run stream ctl sub)))
+                   (#\R (let ((v (car args)))
+                          (setq args (cdr args))
+                          (write-string (cond ((car params) (%fmt-radix v (car params)))
+                                              (at (%roman v)) (colon (%ordinal-words v)) (t (%cardinal-words v)))
+                                        stream)))
                    (#\$ (let ((v (car args)))
                           (setq args (cdr args))
                           (%fmt-pad stream (%fmt-fixed v (or (car params) 2)) (cadr params) #\Space nil)))
-                   (#\E (let ((v (car args))) (setq args (cdr args)) (write-string (princ-to-string (float v)) stream)))
+                   (#\E (let ((v (car args))) (setq args (cdr args))
+                          (%fmt-pad stream (if (cadr params) (%fmt-exp v (cadr params)) (princ-to-string (float v))) (car params) #\Space nil)))
                    (#\P (let ((v (if colon (car prev) (let ((x (car args))) (setq args (cdr args)) x))))
                           (if at
                               (write-string (if (eql v 1) "y" "ies") stream)
@@ -266,7 +280,7 @@
                                    (go it))))
                             (when at (setq args nil)))))
                    (#\[ (let* ((m (%fmt-find-close control i #\[ #\])) (body (subseq control i (car m)))
-                               (clauses (%fmt-split-clauses body)))
+                               (clauses (%fmt-split-clauses body)) (dflt *fmt-default*))
                           (setq i (+ (cadr m) 1))
                           (let ((sel (cond (at (if (car args) 0 1))
                                            (colon (if (car args) 1 0))
@@ -274,7 +288,8 @@
                             (unless (or at (car params)) nil)
                             (unless (car params) (unless at (setq args (cdr args))))
                             (when (and at (= sel 1)) (setq args (cdr args)))   ; ~@[ consumes a false argument
-                            (let ((clause (cond ((and (integerp sel) (< sel (length clauses)) (>= sel 0)) (nth sel clauses))
+                            (let ((clause (cond ((and (integerp sel) (< sel (length clauses)) (>= sel 0) (not (eql sel dflt))) (nth sel clauses))
+                                                (dflt (nth dflt clauses))
                                                 (t (and (> (length clauses) 0)
                                                         (let ((last (car (last clauses))))
                                                           (and (> (length last) 0) (char= (char last 0) #\:) nil)))))))
@@ -296,6 +311,19 @@
       (setq k (+ k 1)))
     (%string-concat (if neg "-" "") (coerce acc 'string))))
 
+(defun %fmt-exp (v digits)
+  "V in exponential notation with DIGITS digits after the decimal point, e.g. 3.594e-12."
+  (let ((x (float v)))
+    (if (zerop x)
+        (format nil "0.~Ae0" (make-string digits #\0))
+        (let* ((a (abs x)) (e (floor (log a 10.0))) (scale (expt 10 digits)))
+          (when (>= (/ a (expt 10.0 e)) 10.0) (setq e (+ e 1)))
+          (when (< (/ a (expt 10.0 e)) 1.0) (setq e (- e 1)))
+          (let ((n (round (* (/ a (expt 10.0 e)) scale))))
+            (when (>= n (* 10 scale)) (setq n (round n 10) e (+ e 1)))
+            (let ((ds (princ-to-string n)))
+              (concatenate 'string (if (< x 0) "-" "") (subseq ds 0 1) (if (> digits 0) "." "") (subseq ds 1) "e" (princ-to-string e))))))))
+
 (defun %fmt-fixed (v d)
   (let* ((x (float v)) (d (or d 6))
          (scale (expt 10 d))
@@ -305,3 +333,53 @@
     (%string-concat (if (< x 0) "-" "") (%number-to-string int)
                     (if (> d 0) "." "")
                     (if (> d 0) (%string-concat (make-string (- d (length fs)) #\0) fs) ""))))
+
+;;; ---- ~R: English cardinals and ordinals, Roman numerals, other radixes -----------------------------
+
+(defvar %small-numbers '("zero" "one" "two" "three" "four" "five" "six" "seven" "eight" "nine" "ten" "eleven" "twelve" "thirteen"
+                          "fourteen" "fifteen" "sixteen" "seventeen" "eighteen" "nineteen"))
+(defvar %tens-words '("" "" "twenty" "thirty" "forty" "fifty" "sixty" "seventy" "eighty" "ninety"))
+(defvar %scale-words '("" " thousand" " million" " billion" " trillion" " quadrillion" " quintillion"))
+
+(defun %below-thousand (n)
+  (let ((h (floor n 100)) (r (mod n 100)) (parts nil))
+    (when (> h 0) (push (format nil "~A hundred" (nth h %small-numbers)) parts))
+    (cond ((zerop r) nil)
+          ((< r 20) (push (nth r %small-numbers) parts))
+          (t (push (let ((t10 (nth (floor r 10) %tens-words)) (u (mod r 10))) (if (zerop u) t10 (format nil "~A-~A" t10 (nth u %small-numbers)))) parts)))
+    (%join-strings (reverse parts) " ")))
+
+(defun %cardinal-words (n)
+  "N (an integer) spelled in English: 123 gives \"one hundred twenty-three\"."
+  (cond ((not (integerp n)) (princ-to-string n))
+        ((< n 0) (concatenate 'string "minus " (%cardinal-words (- n))))
+        ((zerop n) "zero")
+        (t (let ((groups nil) (k 0))
+             (loop while (> n 0) do (let ((g (mod n 1000))) (when (> g 0) (push (concatenate 'string (%below-thousand g) (nth k %scale-words)) groups))) (setq n (floor n 1000) k (+ k 1)))
+             (%join-strings groups " ")))))
+
+(defun %ordinal-words (n)
+  "N spelled as an English ordinal: 4 gives \"fourth\"."
+  (let* ((c (%cardinal-words n)) (sp (position #\Space c :from-end t)) (hy (position #\- c :from-end t)) (cut (max (or sp -1) (or hy -1)))
+         (head (subseq c 0 (+ cut 1))) (last (subseq c (+ cut 1))))
+    (concatenate 'string head
+                 (cond ((string= last "one") "first") ((string= last "two") "second") ((string= last "three") "third") ((string= last "five") "fifth")
+                       ((string= last "eight") "eighth") ((string= last "nine") "ninth") ((string= last "twelve") "twelfth")
+                       ((and (> (length last) 1) (char= (char last (- (length last) 1)) #\y)) (concatenate 'string (subseq last 0 (- (length last) 1)) "ieth"))
+                       (t (concatenate 'string last "th"))))))
+
+(defun %roman (n)
+  "N (1 to 3999) in Roman numerals."
+  (if (or (not (integerp n)) (< n 1) (> n 3999)) (princ-to-string n)
+      (let ((out nil))
+        (dolist (p '((1000 . "M") (900 . "CM") (500 . "D") (400 . "CD") (100 . "C") (90 . "XC") (50 . "L") (40 . "XL") (10 . "X") (9 . "IX") (5 . "V") (4 . "IV") (1 . "I")))
+          (loop while (>= n (car p)) do (push (cdr p) out) (setq n (- n (car p)))))
+        (apply #'concatenate 'string (reverse out)))))
+
+(defun %fmt-radix (n radix)
+  (if (integerp n)
+      (let ((digits "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") (neg (< n 0)) (m (abs n)) (out nil))
+        (if (zerop m) "0"
+            (progn (loop while (> m 0) do (push (char digits (mod m radix)) out) (setq m (floor m radix)))
+                   (concatenate 'string (if neg "-" "") (coerce out 'string)))))
+      (princ-to-string n)))

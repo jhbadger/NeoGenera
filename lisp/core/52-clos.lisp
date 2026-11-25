@@ -150,6 +150,10 @@
 (%make-builtin 'package '(t))
 (%make-builtin 'hash-table '(structure-object))
 
+(defun type-of (x)
+  "The name of the most specific type of X (the name of its class)."
+  (cond ((null x) 'null) ((eq x t) 'boolean) (t (%cls-name (class-of x)))))
+
 (defun class-of (x)
   (cond ((fixnump x) (find-class 'fixnum))
         ((null x) (find-class 'null))

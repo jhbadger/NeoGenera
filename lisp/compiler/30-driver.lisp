@@ -145,7 +145,10 @@
 ;;; ---- disassembler ---------------------------------------------------------------------
 
 (defun disassemble (fn)
-  (let* ((parts (%code-parts fn))
+  "Print the bytecode of FN, a function or the name of one; interpreted functions are compiled first."
+  (let* ((fn (let ((f (if (symbolp fn) (symbol-function fn) fn)))
+               (if (ignore-errors (%code-parts f)) f (compile nil f))))
+         (parts (%code-parts fn))
          (instrs (nth 4 parts)) (consts (nth 5 parts)) (pc 0))
     (format t "~&; code ~S  nreq=~D nopt=~D rest=~S~%" (nth 0 parts) (nth 1 parts) (nth 2 parts) (nth 3 parts))
     (block nil

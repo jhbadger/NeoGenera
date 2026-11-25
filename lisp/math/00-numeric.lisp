@@ -78,8 +78,6 @@
 (defun expm1 (x) "exp(X)-1, accurate for small X."
   (if (< (abs x) 1e-5) (+ x (/ (* x x) 2.0) (/ (* x x x) 6.0)) (- (exp x) 1.0)))
 
-(defun logtest (a b) "True when integers A and B have a 1 bit in common." (not (zerop (logand a b))))
-
 (defun sign (x) "-1, 0 or 1 according to the sign of X." (cond ((> x 0) 1) ((< x 0) -1) (t 0)))
 (defun square (x) "X multiplied by itself." (* x x))
 (defun cube (x) "X cubed." (* x x x))

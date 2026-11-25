@@ -75,3 +75,5 @@ Listener the error is shown with a clickable backtrace instead. See [Developer T
 * [Developer Tools](topic:tools-manual) for the Inspector, cross-reference, trace, stepper and profiler.
 * [The Language](topic:language-reference) for what NeoGenera implements of Common Lisp.
 * [The Documentation System](topic:documentation-system) for writing and exporting documentation.
+* [Mathematics and Statistics](topic:math-manual) for linear algebra, distributions, tests, models, data frames and plots.
+* [Bioinformatics](topic:bio-manual) for sequences, file formats, alignment, search, phylogenetics and the clickable viewers.

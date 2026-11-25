@@ -1,0 +1,65 @@
+.TH NEOGENERA 1 "2026" "NeoGenera 1.0" "User Commands"
+.SH NAME
+neogenera \- a Lisp environment in the spirit of the Symbolics Genera workstations
+.SH SYNOPSIS
+.B neogenera
+[\fB\-i\fR \fIIMAGE\fR] [\fB\-\-ui\fR] [\fB\-\-load\fR \fIFILE\fR] [\fB\-\-eval\fR \fIFORM\fR] [\fB\-\-save\-image\fR \fIFILE\fR] [\fB\-\-no\-toplevel\fR]
+.SH DESCRIPTION
+NeoGenera is a Common Lisp subset with a bytecode compiler written in itself, a text-mode window system with
+mouse-sensitive output, an Emacs-style editor, developer tools (Inspector, cross-reference, trace, stepper,
+profiler), an integrated hypertext documentation system, and libraries for mathematics, statistics and
+bioinformatics.
+.PP
+Without options it starts a line-mode Listener with the interactive debugger. With
+.B \-\-ui
+it starts the window system, which needs a terminal.
+.SH OPTIONS
+.TP
+.BI \-i " IMAGE"
+Start from the heap image IMAGE (default: the world image installed with the program).
+.TP
+.B \-\-ui
+Run the window system.
+.TP
+.BI \-\-load " FILE"
+Load FILE before the Listener starts. May be repeated.
+.TP
+.BI \-\-eval " FORM"
+Evaluate FORM before the Listener starts. May be repeated.
+.TP
+.BI \-\-save\-image " FILE"
+Save the heap as an image after the loads and evaluations (written atomically).
+.TP
+.B \-\-no\-toplevel
+Exit after processing the options instead of starting a Listener.
+.TP
+.B \-\-gc\-stress
+Collect garbage at every safe point (testing).
+.SH ENVIRONMENT
+.TP
+.B NG_IMAGE
+Image to use when \-i is not given.
+.TP
+.B NG_SOURCE_ROOT
+Directory holding the lisp/ and docs/ trees, used by the editor and documentation viewer to find source files.
+Set by the neogenera wrapper script.
+.TP
+.B NEOGENERA_HOME
+Directory for the settings file (default ~/.neogenera).
+.SH FILES
+.TP
+.I <prefix>/lib/neogenera/neogenera.img
+The world image. It is tied to the binary beside it and checked with a checksum when loaded.
+.TP
+.I <prefix>/share/doc/neogenera/html
+The manuals and API reference (also available inside the system with :doc).
+.SH EXAMPLES
+.nf
+neogenera --ui
+neogenera --no-toplevel --eval '(print (expt 2 100))'
+neogenera --no-toplevel --load analysis.lisp
+.fi
+.SH SECURITY
+Images and Lisp files are programs: only load ones you trust. See docs/SECURITY.md in the source tree.
+.SH SEE ALSO
+Inside the system: :help, :doc, :tutorial.

@@ -142,6 +142,7 @@ static void print_char(Buf *b, int c, int escape) {
 }
 
 static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
+  STACK_CHECK();
   if (depth > 2000) { buf_puts(b, "..."); return; }
   if (FIXP(o)) { char t[32]; snprintf(t, sizeof t, "%ld", (long)UNFIX(o)); buf_puts(b, t); return; }
   if (CHARP(o)) { print_char(b, CHAR_CODE(o), escape); return; }

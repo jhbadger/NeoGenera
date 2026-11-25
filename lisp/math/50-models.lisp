@@ -22,10 +22,8 @@
 
 (defun %inverse-xtx (x)
   "(X^T X)^-1 computed from the R factor of a QR decomposition."
-  (multiple-value-bind (q r) (qr-decompose x)
-    (declare (ignore q))
-    (let* ((p (matrix-cols x)) (r1 (submatrix r 0 p 0 p)) (ri (matrix-inverse r1)))
-      (mat* ri (matrix-transpose ri)))))
+  (let* ((r1 (%qr-reduce x nil)) (ri (matrix-inverse r1)))
+    (mat* ri (matrix-transpose ri))))
 
 (defun lm (y predictors &key (intercept t) names)
   "Fit an ordinary least squares linear model of the response Y on PREDICTORS (a column, a list of columns, or a matrix)."

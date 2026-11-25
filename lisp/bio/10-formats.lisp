@@ -14,7 +14,7 @@
 
 (defun read-gzip-string (path)
   "The decompressed bytes of the gzip (or BGZF) file PATH as a string."
-  (multiple-value-bind (out status) (run-program "gzip" (list "-dc" path))
+  (multiple-value-bind (out status) (run-program "gzip" (list "-dc" "--" path))
     (unless (eql status 0) (error "gzip could not decompress ~A" path))
     out))
 
@@ -372,16 +372,25 @@ named \"source\", \"score\" and \"phase\"."
 (defun parse-bam-bytes (data)
   "Parse the decompressed bytes of a BAM file; returns (values records header-text references) where references is a list of (name . length)."
   (unless (string= (subseq data 0 4) (format nil "BAM~C" (code-char 1))) (error "Not a BAM file"))
-  (let* ((l-text (%u32 data 4)) (text (subseq data 8 (+ 8 l-text))) (p (+ 8 l-text)) (n-ref (%u32 data p)) (refs nil) (records nil))
+  (let* ((l-text (%u32 data 4)) (n-data (length data)))
+    (when (> (+ 12 l-text) n-data) (error "BAM: header text exceeds the file"))
+    (parse-bam-body data l-text n-data)))
+
+(defun parse-bam-body (data l-text n-data)
+  (let* ((text (subseq data 8 (+ 8 l-text))) (p (+ 8 l-text)) (n-ref (%u32 data p)) (refs nil) (records nil))
     (incf p 4)
+    (when (> (* n-ref 9) (- n-data p)) (error "BAM: reference count exceeds the file"))
     (dotimes (k n-ref)
       (let* ((ln (%u32 data p)) (name (subseq data (+ p 4) (+ p 4 ln -1))) (len (%u32 data (+ p 4 ln))))
         (push (cons name len) refs) (setq p (+ p 8 ln))))
     (setq refs (nreverse refs))
     (loop while (< (+ p 4) (length data))
-          do (let* ((bs (%u32 data p)) (q (+ p 4)) (ref-id (%i32 data q)) (pos (%i32 data (+ q 4))) (lname (%u8 data (+ q 8))) (mapq (%u8 data (+ q 9)))
+          do (let* ((bs (let ((v (%u32 data p))) (when (or (< v 32) (> (+ p 4 v) n-data)) (error "BAM: record exceeds the file")) v))
+                    (q (+ p 4)) (ref-id (%i32 data q)) (pos (%i32 data (+ q 4))) (lname (%u8 data (+ q 8))) (mapq (%u8 data (+ q 9)))
                     (ncig (%u16 data (+ q 12))) (flag (%u16 data (+ q 14))) (lseq (%i32 data (+ q 16))) (nref (%i32 data (+ q 20))) (npos (%i32 data (+ q 24)))
                     (tlen (%i32 data (+ q 28))) (r (+ q 32)) (name (subseq data r (+ r lname -1))) (c (+ r lname))
+                    (check (when (or (> (+ r lname) (+ p 4 bs)) (> (+ r lname (* 4 ncig)) (+ p 4 bs)) (< lseq 0) (> (+ r lname (* 4 ncig) (floor (+ lseq 1) 2) lseq) (+ p 4 bs)))
+                             (error "BAM: record fields exceed the record")))
                     (cigar (loop for k from 0 below ncig collect (let ((v (%u32 data (+ c (* 4 k))))) (cons (ash v -4) (char "MIDNSHP=X" (logand v 15))))))
                     (soff (+ c (* 4 ncig))) (qq (+ soff (floor (+ lseq 1) 2))) (tg (+ qq lseq))
                     (seq (let ((o (make-string lseq #\N))) (dotimes (k lseq) (let* ((b (%u8 data (+ soff (floor k 2)))) (nib (if (evenp k) (ash b -4) (logand b 15)))) (setf (char o k) (char "=ACMGRSVTWYHKDBN" nib)))) o))

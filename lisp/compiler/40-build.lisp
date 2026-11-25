@@ -20,7 +20,7 @@
 (defun ng-finalize-image ()
   ;; Called just before the final image is saved.
   (%set-export-all-cl nil)
-  (setq *source-root* (%getcwd))
+  (setq *source-root* nil)   ; not baked in: the image must not depend on where it was built (see NG_SOURCE_ROOT)
   (setq *record-lambda-expressions* t)
   (setq *package* (find-package "COMMON-LISP-USER"))
   t)

@@ -39,6 +39,11 @@
 (defun %place-parts (place)
   (cond ((symbolp place) (list nil place (lambda (v) (list 'setq place v))))
         ((not (consp place)) (error "Bad SETF place: ~S" place))
+        ((eq (car place) 'getf)          ; (getf place key [default]): the plist itself is the place
+         (let* ((inner (%place-parts (cadr place))) (k (gensym)) (tmp (gensym)))
+           (list (append (car inner) (list (list k (caddr place))))
+                 `(getf ,(cadr inner) ,k ,@(cdddr place))
+                 (lambda (v) `(let ((,tmp ,v)) ,(funcall (caddr inner) `(%plist-put ,(cadr inner) ,k ,tmp)) ,tmp)))))
         (t (let* ((head (car place))
                   (macro (and (symbolp head) (macro-function head)))
                   (setter (get head '%setf-fn)))

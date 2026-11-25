@@ -1,0 +1,127 @@
+;;;; fuzz-tests.lisp -- deterministic fuzzing of the reader, printer, parsers and numeric kernels.
+;;;;
+;;;; Random and mutated inputs are fed to every parser and C primitive.  A function may succeed or signal an
+;;;; ordinary error; what it must never do is crash the process (run this file under the ASan build:
+;;;; `make asan` then see CONTRIBUTING.md), loop forever, or violate a mathematical identity.
+
+(in-package :cl)
+
+(defvar *fuzz-rng* (make-rng 20260101))
+(defvar *fuzz-chars* (coerce "abcxyz ABCXYZ 0123456789 ()'`,;\"#|\\:.-+*/<>=@[]{}~%&^$!?_
+" 'list))
+
+(defun fuzz-string (&optional (max 60))
+  (let* ((n (rand-int (+ max 1) *fuzz-rng*)) (s (make-string n #\a)))
+    (dotimes (i n s)
+      (setf (char s i) (if (< (rand-uniform *fuzz-rng*) 0.9) (rand-choice *fuzz-chars* *fuzz-rng*) (code-char (+ 1 (rand-int 126 *fuzz-rng*))))))))
+
+(defun fuzz-mutate (s)
+  "A copy of S with a few random edits (delete, insert, replace, truncate, duplicate a slice)."
+  (let ((out (copy-seq s)))
+    (dotimes (k (+ 1 (rand-int 4 *fuzz-rng*)) out)
+      (let ((n (length out)))
+        (when (> n 0)
+          (let ((p (rand-int n *fuzz-rng*)))
+            (case (rand-int 5 *fuzz-rng*)
+              (0 (setq out (%string-concat (subseq out 0 p) (subseq out (min n (+ p 1))))))
+              (1 (setq out (%string-concat (subseq out 0 p) (string (rand-choice *fuzz-chars* *fuzz-rng*)) (subseq out p))))
+              (2 (setf (char out p) (rand-choice *fuzz-chars* *fuzz-rng*)))
+              (3 (setq out (subseq out 0 p)))
+              (t (setq out (%string-concat out (subseq out p (min n (+ p 8)))))))))))))
+
+(defun fuzz-lines (text) (split-lines text))
+
+(defmacro fuzz-each ((var count generator) &body body)
+  "Run BODY COUNT times with VAR bound to fresh inputs from GENERATOR; ordinary errors are fine, crashes are not."
+  `(let ((ok 0) (errors 0))
+     (dotimes (i ,count)
+       (let ((,var ,generator))
+         (handler-case (progn ,@body (incf ok)) (error (e) (declare (ignore e)) (incf errors)))))
+     (values ok errors)))
+
+(defun seed-text (name) (join-lines (read-file-lines (fixture name))))
+
+(deftest fuzz-reader-and-printer
+  (let ((*read-eval* nil))
+    (multiple-value-bind (ok errors) (fuzz-each (s 4000 (fuzz-string 50)) (read-from-string s))
+      (is (> (+ ok errors) 3999)) (is (> ok 100)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 2000 (fuzz-mutate "(defun f (x &key (y 2)) \"doc\" #'(lambda (z) `(a ,b ,@c)) #(1 2 3) #\\a 1/2 -1.5e3 'sym :key |Odd Sym| #x1F)")) (read-from-string s))
+      (is (> (+ ok errors) 1999)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 40)) (with-input-from-string (in s) (loop (let ((x (read in nil :eof))) (when (eq x :eof) (return))))))
+      (is (> (+ ok errors) 1499)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 40)) (format nil s))
+      (is (> (+ ok errors) 1499)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 800 (fuzz-string 12)) (parse-integer s :junk-allowed (evenp (length s))))
+      (is (> (+ ok errors) 799))))
+  ;; print/read round trip of random data
+  (labels ((gen (depth)
+             (case (rand-int (if (> depth 3) 6 8) *fuzz-rng*)
+               (0 (- (rand-int 2000000 *fuzz-rng*) 1000000)) (1 (rand-int (expt 10 25) *fuzz-rng*)) (2 (/ (+ 1 (rand-int 99 *fuzz-rng*)) (+ 2 (rand-int 99 *fuzz-rng*))))
+               (3 (rand-choice '("" "abc" "with \"quote\"" "back\\slash" "line
+break" "ünï") *fuzz-rng*)) (4 (rand-choice '(foo bar |Hello World| :key nil t) *fuzz-rng*)) (5 (rand-choice '(#\a #\Space #\Newline #\λ) *fuzz-rng*))
+               (6 (loop repeat (rand-int 4 *fuzz-rng*) collect (gen (+ depth 1)))) (t (coerce (loop repeat (rand-int 4 *fuzz-rng*) collect (gen (+ depth 1))) 'vector)))))
+    (dotimes (i 600)
+      (let ((x (gen 0))) (is (equalp x (read-from-string (prin1-to-string x))))))))
+
+(deftest fuzz-text-parsers
+  (let ((fa (seed-text "tiny.fa")) (fq (seed-text "tiny.fq")) (gb (seed-text "tiny.gb")) (gff (seed-text "tiny.gff3")) (vcf (seed-text "tiny.vcf")) (sam (seed-text "tiny.sam")) (bed (seed-text "tiny.bed")))
+    (dolist (case (list (cons "fasta" (cons fa #'parse-fasta)) (cons "fastq" (cons fq #'parse-fastq)) (cons "genbank" (cons gb #'parse-genbank)) (cons "gff" (cons gff #'parse-gff))
+                        (cons "vcf" (cons vcf #'parse-vcf)) (cons "sam" (cons sam #'parse-sam)) (cons "bed" (cons bed #'parse-bed))))
+      (multiple-value-bind (ok errors) (fuzz-each (s 500 (fuzz-mutate (cadr case))) (funcall (cddr case) (fuzz-lines s)))
+        (is-equal 500 (+ ok errors)) (is (> ok 20))))
+    (multiple-value-bind (ok errors) (fuzz-each (s 500 (fuzz-string 80)) (parse-fasta (fuzz-lines s)) (parse-fastq (fuzz-lines s)) (parse-genbank (fuzz-lines s)) (parse-sam (fuzz-lines s)))
+      (is-equal 500 (+ ok errors))))
+  (multiple-value-bind (ok errors) (fuzz-each (s 800 (fuzz-mutate "((A:0.1,B:0.2):0.3,(C:0.4,D:0.5):0.6);")) (parse-newick s)) (is-equal 800 (+ ok errors)) (is (> ok 10)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 800 (fuzz-mutate "a,\"b,c\",d
+1,2.5,\"x \"\"y\"\"\"
+")) (parse-delimited s #\,)) (is-equal 800 (+ ok errors)) (is (> ok 400)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 800 (fuzz-string 40)) (parse-delimited s #\Tab) (dframe-from-records (parse-delimited s #\,))) (is-equal 800 (+ ok errors)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 800 (fuzz-mutate (seed-text "../../docs/manual/user-guide.md"))) (markdown->nodes (subseq s 0 (min 400 (length s))))) (is-equal 800 (+ ok errors)) (is (> ok 400)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 800 (fuzz-string 30)) (parse-genbank-location s) (parse-cigar s)) (is-equal 800 (+ ok errors))))
+
+(deftest fuzz-binary-parsers
+  (let ((good (read-gzip-string (fixture "tiny.bam"))))
+    (multiple-value-bind (ok errors) (fuzz-each (s 600 (fuzz-mutate good)) (parse-bam-bytes s)) (is-equal 600 (+ ok errors)) (is (>= ok 0)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 400 (let ((n (rand-int (length good) *fuzz-rng*))) (subseq good 0 n))) (parse-bam-bytes s)) (is-equal 400 (+ ok errors)) (is (> errors 300)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 400 (let ((m (copy-seq good))) (dotimes (k 6) (setf (char m (rand-int (length m) *fuzz-rng*)) (code-char (rand-int 256 *fuzz-rng*)))) m)) (parse-bam-bytes s)) (is-equal 400 (+ ok errors)))))
+
+(deftest fuzz-regex-and-motifs
+  (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 12)) (regex-find-all s "ACGTACGTTTGACAGGATCC")) (is-equal 1500 (+ ok errors)) (is (> ok 100)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 800 (let ((a (coerce (loop repeat 6 collect (rand-choice '("A" "C" "G" "T" "." "[AC]" "(A|C)" "A*" "G+" "T?" "N" "{2}" "^" "$") *fuzz-rng*)) 'list))) (apply #'%string-concat a)))
+      (regex-find-all s "ACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGC")) (is-equal 800 (+ ok errors)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 800 (random-string (rand-int 8 *fuzz-rng*) "ACGTRYSWKMBDHVN-X" *fuzz-rng*)) (find-iupac-motif s "ACGTAGCTAGCTAGGATC" :both-strands t)) (is-equal 800 (+ ok errors))))
+
+(deftest fuzz-kernels
+  ;; the C alignment fill and suffix array with arbitrary strings, modes and gap parameters
+  (let ((alphabets '("ACGT" "ACGTN" "AC" "A" "ARNDCQEGHILKMFPSTWYV" "acgt")))
+    (multiple-value-bind (ok errors)
+        (fuzz-each (job 1500 (list (random-string (rand-int 40 *fuzz-rng*) (rand-choice alphabets *fuzz-rng*) *fuzz-rng*) (random-string (rand-int 40 *fuzz-rng*) (rand-choice alphabets *fuzz-rng*) *fuzz-rng*)
+                                   (rand-choice '(:global :local :semiglobal) *fuzz-rng*) (+ 1 (rand-int 15 *fuzz-rng*)) (+ 1 (rand-int 5 *fuzz-rng*)) (rand-choice '(-1 -1 0 1 3 10) *fuzz-rng*)))
+          (let* ((al (align (first job) (second job) :mode (third job) :gap-open (fourth job) :gap-extend (fifth job) :band (sixth job))))
+            (assert (= (length (alignment-aligned-a al)) (length (alignment-aligned-b al))))
+            (assert (string= (remove #\- (alignment-aligned-a al)) (subseq (string-upcase (first job)) (alignment-a-start al) (alignment-a-end al))))))
+      (is-equal 1500 (+ ok errors)) (is (> ok 1000))))
+  (dolist (text (list "" "a" "aaaa" "abab" (random-string 500 "AC" *fuzz-rng*) (random-string 300 "ACGTN" *fuzz-rng*) (coerce (loop for i from 0 below 100 collect (code-char (+ 1 (mod (* i 37) 250)))) 'string)))
+    (let* ((sa (coerce (%suffix-array text) 'list)) (naive (sort (loop for i from 0 below (length text) collect i) (lambda (a b) (string< (subseq text a) (subseq text b))))))
+      (is-equal naive sa)))
+  ;; bignum identities across the schoolbook / Karatsuba boundary
+  (let ((bad 0))
+    (dotimes (i 300)
+      (let* ((na (+ 1 (rand-int 90 *fuzz-rng*))) (nb (+ 1 (rand-int 90 *fuzz-rng*)))
+             (a (let ((n 0)) (dotimes (k na n) (setq n (+ (ash n 30) (rand-int (ash 1 30) *fuzz-rng*)))))) (b (let ((n 0)) (dotimes (k nb n) (setq n (+ (ash n 30) (rand-int (ash 1 30) *fuzz-rng*))))))
+             (a (if (zerop (rand-int 5 *fuzz-rng*)) (- a) a)) (ab (* a b)))
+        (unless (and (= (* a b) (* b a)) (or (zerop b) (= (floor ab b) a)) (= (* (+ a 1) b) (+ ab b)) (= (- (* (+ a b) (+ a b)) (* a a) (* b b)) (* 2 ab))
+                     (= (mod ab 1000000007) (mod (* (mod a 1000000007) (mod b 1000000007)) 1000000007)))
+          (incf bad))))
+    (is-equal 0 bad))
+  ;; numeric kernels with extreme arguments must give an answer or an error
+  (multiple-value-bind (ok errors) (fuzz-each (x 400 (rand-choice (list 0.0 1.0 -1.0 1e300 -1e300 1e-300 +infinity+ -infinity+ +nan+ 12345678.9 (expt 2 70) 1/3) *fuzz-rng*))
+                                              (sqrt x) (exp x) (log x) (sin x) (atan x) (floor x) (round x) (float x) (* x x) (/ x 3))
+    (is-equal 400 (+ ok errors))))
+
+(deftest fuzz-tools-and-settings
+  ;; arbitrary text through the data-oriented helpers must never crash
+  (multiple-value-bind (ok errors) (fuzz-each (s 400 (fuzz-string 30)) (parse-blast-tabular (list s)) (parse-paf (list s)) (parse-samtools-depth (list s))) (is-equal 400 (+ ok errors)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 200 (fuzz-string 30)) (run-tool s nil)) (is-equal 200 (+ ok errors)) (is-equal 0 ok))
+  (multiple-value-bind (ok errors) (fuzz-each (s 300 (fuzz-string 40)) (search-documentation s) (resolve-topic s)) (is-equal 300 (+ ok errors)))
+  (multiple-value-bind (ok errors) (fuzz-each (s 300 (fuzz-mutate "(+ x (* 3 y) (expt z 2) (sin (* 2 x)))")) (let ((e (read-from-string s))) (simplify e) (differentiate e 'x) (expr->string e))) (is-equal 300 (+ ok errors))))

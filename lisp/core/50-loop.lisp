@@ -34,6 +34,7 @@
   (let ((rest forms)
         (name nil)
         (bindings nil)      ; reversed list of (var init)
+        (tails nil)         ; alist accumulator -> tail variable (several COLLECT clauses share one tail)
         (prologue nil)      ; reversed
         (tests nil)         ; reversed forms run at top of every iteration
         (steps nil)         ; reversed forms run at end of every iteration
@@ -156,9 +157,10 @@
                       (nreverse fs)))
                    ((%lk-any k "COLLECT" "COLLECTING" "APPEND" "APPENDING" "NCONC" "NCONCING")
                     (let* ((form (next)) (into (when (%lk (peek) "INTO") (next) (next)))
-                           (acc (acc-var into :list)) (tail (gensym)) (v (gensym))
+                           (acc (acc-var into :list)) (v (gensym))
+                           (tail (let ((cell (assoc acc tails)))
+                                   (if cell (cdr cell) (let ((g (gensym))) (setq tails (cons (cons acc g) tails)) (bind g nil) g))))
                            (app (%lk-any k "APPEND" "APPENDING" "NCONC" "NCONCING")))
-                      (bind tail nil)
                       (when into (unless (member into (mapcar #'car bindings)) (bind into nil)))
                       (list `(let ((,v ,(if app `(copy-list ,form) `(list ,form))))
                                (if ,acc

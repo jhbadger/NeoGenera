@@ -5,7 +5,7 @@
 
 (in-package :cl)
 
-(defvar *ng-version* "0.7.0")
+(defvar *ng-version* "1.0.0")
 (defvar * nil)
 (defvar ** nil)
 (defvar *** nil)

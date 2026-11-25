@@ -1,5 +1,9 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '17 3 * * *'
 
 jobs:
   build-and-test:
@@ -20,6 +24,10 @@ jobs:
         run: make test-lisp
       - name: Real-terminal (pty) tests
         run: make test-pty
+      - name: Example gallery
+        run: make examples
+      - name: Conformance cases
+        run: make conformance
 
   sanitizers:
     runs-on: ubuntu-latest
@@ -27,15 +35,36 @@ jobs:
       - uses: actions/checkout@v4
       - name: C unit tests under ASan+UBSan
         run: SAN=1 sh tests/c/run.sh
-      - name: Build world and run Lisp tests under ASan
-        run: |
-          make world asan
-          ASAN_OPTIONS=detect_leaks=0 build/neogenera-asan -i build/neogenera.img --no-toplevel --load tests/lisp/run-all.lisp
+      - name: Whole Lisp suite, fuzzers included, under ASan and UBSan
+        run: make fuzz
 
-  gc-stress:
+  reproducible:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Two clean builds in different directories are identical
+        run: make repro-check
+
+  soak:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - name: Every safe point collects
-        run: make test-stress
+      - name: Ten-minute soak
+        run: NG_SOAK_SECONDS=600 make soak
+      - name: Benchmarks (informational)
+        run: make bench
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tarball and Debian package
+        run: make dist deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            build/dist/*.tar.gz
+            build/dist/SHA256SUMS
+            build/deb/*.deb

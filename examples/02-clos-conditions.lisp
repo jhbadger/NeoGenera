@@ -1,0 +1,20 @@
+;;; Classes, generic functions with call-next-method, conditions and restarts.
+;;; expect: recovered with 0
+(defclass shape () ((name :initarg :name :reader shape-name)))
+(defclass circle (shape) ((r :initarg :r :reader radius)))
+(defclass rect (shape) ((w :initarg :w :reader width) (h :initarg :h :reader height)))
+(defgeneric area (s))
+(defmethod area ((c circle)) (* pi (radius c) (radius c)))
+(defmethod area ((r rect)) (* (width r) (height r)))
+(defgeneric describe-shape (s))
+(defmethod describe-shape ((s shape)) (format nil "~A" (shape-name s)))
+(defmethod describe-shape ((c circle)) (format nil "circle ~A, area ~,2F" (call-next-method) (area c)))
+(dolist (s (list (make-instance 'circle :name "c1" :r 2) (make-instance 'rect :name "r1" :w 3 :h 4)))
+  (format t "~A: area ~,3F~%" (describe-shape s) (area s)))
+(define-condition bad-input (error) ((value :initarg :value :reader bad-value)))
+(defun checked-sqrt (x)
+  (restart-case (if (< x 0) (error 'bad-input :value x) (sqrt x))
+    (use-value (v) v)))
+(format t "recovered with ~A~%"
+        (handler-bind ((bad-input (lambda (c) (declare (ignore c)) (invoke-restart 'use-value 0))))
+          (checked-sqrt -4)))

@@ -1,9 +1,24 @@
 #!/bin/sh
 # Start NeoGenera with the default world image.  Arguments are passed through.
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-IMG="${NG_IMAGE:-$ROOT/build/neogenera.img}"
+#
+# Works from a source checkout (build/neogenera, build/neogenera.img) and from an installed tree
+# (<prefix>/lib/neogenera/neogenera and neogenera.img, sources in <prefix>/share/neogenera).
+SELF="$0"
+while [ -h "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+if [ -x "$ROOT/lib/neogenera/neogenera" ]; then
+  BIN="$ROOT/lib/neogenera/neogenera"; IMG="${NG_IMAGE:-$ROOT/lib/neogenera/neogenera.img}"
+  : "${NG_SOURCE_ROOT:=$ROOT/share/neogenera}"
+else
+  BIN="$ROOT/build/neogenera"; IMG="${NG_IMAGE:-$ROOT/build/neogenera.img}"
+  : "${NG_SOURCE_ROOT:=$ROOT}"
+fi
+export NG_SOURCE_ROOT
 if [ ! -f "$IMG" ]; then
   echo "neogenera: no image at $IMG; run 'make world' first" >&2
   exit 2
 fi
-exec "$ROOT/build/neogenera" -i "$IMG" "$@"
+exec "$BIN" -i "$IMG" "$@"

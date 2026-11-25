@@ -32,7 +32,7 @@ The bit score uses the BLOSUM62 gapped parameters lambda = 0.267 and K = 0.041."
 (defun genome-report (genome &key (min-length 60))
   "A plist summary of GENOME: length, GC content, GC skew, ORF counts, coding fraction and the longest ORF."
   (let* ((features (annotate-orfs genome :min-length min-length)) (n (seq-length genome))
-         (coding (reduce #'+ (mapcar #'feature-length features)))
+         (coding (reduce #'+ (mapcar (lambda (i) (- (cdr i) (car i))) (merge-intervals (apply #'append (mapcar #'bio-feature-intervals features))))))
          (longest (and features (reduce (lambda (a b) (if (> (feature-length a) (feature-length b)) a b)) features))))
     (list :length n :gc (gc-content genome) :gc-skew (gc-skew genome) :orfs (length features)
           :forward (count 1 features :key #'bio-feature-strand) :reverse (count -1 features :key #'bio-feature-strand)

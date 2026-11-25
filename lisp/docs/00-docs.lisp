@@ -344,8 +344,12 @@
 
 (defun %make-entry (key kind title table) (list key kind title table))
 
+(defstruct (doc-search-index (:copier nil) (:constructor %make-doc-search-index (entries postings vocabulary)))
+  entries postings vocabulary)
+
 (defun doc-index-build ()
-  "Index every document (title 5, keywords 3, headings 3, body 1) and every documented symbol."
+  "Index every document (title 5, keywords 3, headings 3, body 1) and every documented symbol, as an inverted index:
+word -> postings (entry . weight), plus a sorted vocabulary for prefix matching."
   (let ((entries nil))
     (dolist (d *documents*)
       (let ((table (make-hash-table :test 'equal)))
@@ -355,34 +359,54 @@
           (dolist (w (%node-words n)) (%index-add table w (if (eq (car n) :h) 3 1))))
         (setq entries (cons (%make-entry (doc-name d) :document (doc-title d) table) entries))))
     (dolist (p (list-all-packages))
-      (dolist (s (%package-symbols p nil))
-        (when (and (eq (symbol-package s) p) (symbol-documented-p s))
-          (let ((table (make-hash-table :test 'equal)) (name (symbol-name s)))
+      (dolist (sym (%package-symbols p nil))
+        (when (and (eq (symbol-package sym) p) (symbol-documented-p sym))
+          (let ((table (make-hash-table :test 'equal)) (name (symbol-name sym)))
             (%index-add table (string-downcase name) 6)
             (dolist (w (doc-tokenize name)) (%index-add table w 4))
             (dolist (ind '(%doc-function %doc-variable %doc-type))
-              (let ((d (get s ind))) (when d (dolist (w (doc-tokenize d)) (%index-add table w 1)))))
-            (setq entries (cons (%make-entry s :symbol (%fname s) table) entries))))))
-    (setq *doc-index* (nreverse entries))))
+              (let ((d (get sym ind))) (when d (dolist (w (doc-tokenize d)) (%index-add table w 1)))))
+            (setq entries (cons (%make-entry sym :symbol (%fname sym) table) entries))))))
+    (let* ((vec (coerce (nreverse entries) 'vector)) (postings (make-hash-table :test 'equal)) (vocab nil))
+      (dotimes (i (length vec))
+        (maphash (lambda (word weight) (setf (gethash word postings) (cons (cons i weight) (gethash word postings)))) (fourth (aref vec i))))
+      (maphash (lambda (word list) (declare (ignore list)) (push word vocab)) postings)
+      (setq *doc-index* (%make-doc-search-index vec postings (coerce (sort vocab #'string<) 'vector))))))
 
-(defun %entry-score (entry words)
-  (let ((table (fourth entry)) (score 0) (hits 0))
-    (dolist (w words)
-      (let ((exact (gethash w table)))
-        (if exact
-            (progn (setq score (+ score (min exact 12))) (setq hits (+ hits 1)))
-            (let ((best 0))
-              (maphash (lambda (k v) (when (and (> (length k) (length w)) (string= (subseq k 0 (length w)) w)) (setq best (max best v)))) table)
-              (when (> best 0) (setq score (+ score (floor (min best 12) 2))) (setq hits (+ hits 1)))))))
-    (if (= hits (length words)) (+ score (* 2 hits)) (if (> hits 0) (floor score 2) 0))))
+(defun %vocab-prefix-range (vocab prefix)
+  "Indices [lo, hi) of the words of the sorted vector VOCAB that start with PREFIX."
+  (let ((n (length vocab)) (lo 0) (hi 0) (plen (length prefix)))
+    (let ((a 0) (b n))
+      (loop while (< a b) do (let ((mid (floor (+ a b) 2))) (if (string< (aref vocab mid) prefix) (setq a (+ mid 1)) (setq b mid))))
+      (setq lo a hi a))
+    (loop while (and (< hi n) (let ((w (aref vocab hi))) (and (>= (length w) plen) (string= (subseq w 0 plen) prefix)))) do (setq hi (+ hi 1)))
+    (values lo hi)))
 
 (defun search-documentation (query &optional (limit 30))
-  "Ranked results for QUERY: a list of (score key kind title)."
+  "Ranked results for QUERY: a list of (score key kind title).  An entry scores the capped weight of each query word
+(an exact word, else the best longer word with that prefix at half weight); matching every word earns a bonus."
   (unless *doc-index* (doc-index-build))
-  (let ((words (doc-tokenize query)) (results nil))
+  (let* ((words (doc-tokenize query)) (index *doc-index*) (entries (doc-search-index-entries index)) (vocab (doc-search-index-vocabulary index))
+         (postings (doc-search-index-postings index)) (n (length entries))
+         (scores (make-array n :initial-element 0)) (hits (make-array n :initial-element 0)) (touched nil) (results nil))
+    (dolist (w words)
+      (let ((exact (make-hash-table :test 'eql)) (prefix (make-hash-table :test 'eql)))
+        (dolist (p (gethash w postings)) (setf (gethash (car p) exact) (min (cdr p) 12)))
+        (multiple-value-bind (lo hi) (%vocab-prefix-range vocab w)
+          (loop for k from lo below hi
+                do (let ((word (aref vocab k)))
+                     (when (> (length word) (length w))
+                       (dolist (p (gethash word postings))
+                         (let ((half (floor (min (cdr p) 12) 2)))
+                           (when (> half (gethash (car p) prefix -1)) (setf (gethash (car p) prefix) half))))))))
+        (flet ((credit (e v) (when (zerop (aref hits e)) (push e touched)) (incf (aref scores e) v) (incf (aref hits e))))
+          (maphash (lambda (e v) (credit e v)) exact)
+          (maphash (lambda (e v) (unless (gethash e exact) (credit e v))) prefix))))
     (when words
-      (dolist (e *doc-index*)
-        (let ((s (%entry-score e words))) (when (> s 0) (setq results (cons (list s (first e) (second e) (third e)) results))))))
+      (dolist (e touched)
+        (let* ((h (aref hits e)) (score (if (= h (length words)) (+ (aref scores e) (* 2 h)) (floor (aref scores e) 2))))
+          (when (> score 0)
+            (let ((entry (aref entries e))) (push (list score (first entry) (second entry) (third entry)) results))))))
     (let ((sorted (sort results (lambda (a b) (or (> (car a) (car b)) (and (= (car a) (car b)) (string< (fourth a) (fourth b))))))))
       (if (> (length sorted) limit) (subseq sorted 0 limit) sorted))))
 

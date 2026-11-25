@@ -18,6 +18,12 @@ Obj mv_vals[MAX_MV];
 int mv_count = 1;
 Frame *frame_top;
 int eval_depth;
+char *ng_stack_limit = NULL;
+int ng_vfp_limit = VFRAME_SIZE - 8192, ng_vsp_limit = VSTACK_SIZE - 32768;
+void ng_vm_overflow(void) { ng_vfp_limit = VFRAME_SIZE - 2; ng_vsp_limit = VSTACK_SIZE - 4096; lisp_error("Control stack exhausted (VM)"); }
+int ng_root_limit = MAX_ROOTS - 8192;
+void ng_root_overflow(void) { eval_depth = 0; ng_root_limit = MAX_ROOTS - 16; lisp_error("Control stack exhausted (root stack)"); }
+void ng_stack_overflow(void) { eval_depth = 0; lisp_error("Control stack exhausted (C stack)"); }
 
 #define MAX_EVAL_DEPTH 60000
 
@@ -51,6 +57,8 @@ Frame *find_frame(int kind, Obj tag) {
 }
 
 static void restore_state(Frame *f) {
+  ng_root_limit = MAX_ROOTS - 8192;          /* closes the error-handling reserves again */
+  ng_vfp_limit = VFRAME_SIZE - 8192; ng_vsp_limit = VSTACK_SIZE - 32768;
   unbind_to(f->spsp); vsp = f->vsp; vfp = f->vfp; nroots = f->nroots; eval_depth = f->eval_depth; gc_inhibit = f->gci;
 }
 
@@ -354,7 +362,7 @@ Obj apply_stack(int n) {
     return r;
   }
   case T_EVALFN: {
-    if (++eval_depth > MAX_EVAL_DEPTH) { eval_depth = 0; lisp_error("Control stack exhausted"); }
+    STACK_CHECK(); if (++eval_depth > MAX_EVAL_DEPTH) { eval_depth = 0; lisp_error("Control stack exhausted"); }
     Obj r = apply_evalfn(n);
     eval_depth--;
     return r;
@@ -801,7 +809,7 @@ Obj eval(Obj form, Obj vars, Obj funs) {
   }
   int saved = nroots;
   PROTECT(form); PROTECT(vars); PROTECT(funs);
-  if (++eval_depth > MAX_EVAL_DEPTH) { eval_depth = 0; lisp_error("Control stack exhausted (evaluator depth)"); }
+  STACK_CHECK(); if (++eval_depth > MAX_EVAL_DEPTH) { eval_depth = 0; lisp_error("Control stack exhausted (evaluator depth)"); }
   if (gc_pending && !gc_inhibit) gc();
   Obj head = CAR(form), f = NIL, r;
   if (SYMBOLP(head)) {

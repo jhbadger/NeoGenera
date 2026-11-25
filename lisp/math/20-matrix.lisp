@@ -204,10 +204,34 @@
     (dotimes (j n) (loop for i from (+ j 1) below m do (setf (mref r i j) 0.0)))
     (values q r)))
 
+(defun %qr-reduce (a rhs)
+  "Householder reduction of the m x n matrix A (m >= n) without forming Q: returns (values R Q^T*RHS) where R is the
+n x n upper triangle and the vector is the first n entries of Q^T RHS.  Memory and time are O(m n) and O(m n^2)."
+  (let* ((m (matrix-rows a)) (n (matrix-cols a)) (r (matrix-copy a)) (y (when rhs (map 'vector #'float rhs))) (rd (matrix-data r)) (v (make-array m :initial-element 0.0)))
+    (dotimes (k (min (- m 1) n))
+      (let ((norm 0.0))
+        (loop for i from k below m do (let ((x (aref rd (+ (* i n) k)))) (setq norm (+ norm (* x x)))))
+        (setq norm (sqrt norm))
+        (unless (zerop norm)
+          (let ((alpha (if (> (aref rd (+ (* k n) k)) 0) (- norm) norm)) (vn 0.0))
+            (loop for i from k below m do (setf (aref v i) (aref rd (+ (* i n) k))))
+            (decf (aref v k) alpha)
+            (loop for i from k below m do (setq vn (+ vn (* (aref v i) (aref v i)))))
+            (unless (zerop vn)
+              (loop for j from k below n
+                    do (let ((sum 0.0)) (loop for i from k below m do (setq sum (+ sum (* (aref v i) (aref rd (+ (* i n) j))))))
+                         (let ((f (/ (* 2.0 sum) vn))) (loop for i from k below m do (decf (aref rd (+ (* i n) j)) (* f (aref v i)))))))
+              (when y
+                (let ((sum 0.0)) (loop for i from k below m do (setq sum (+ sum (* (aref v i) (aref y i)))))
+                  (let ((f (/ (* 2.0 sum) vn))) (loop for i from k below m do (decf (aref y i) (* f (aref v i))))))))))))
+    (let ((top (make-matrix n n)))
+      (dotimes (i n) (loop for j from i below n do (setf (mref top i j) (aref rd (+ (* i n) j)))))
+      (values top y))))
+
 (defun least-squares (a b)
-  "The vector x minimising |A x - b| (A is m x n, m >= n) using Householder QR."
-  (multiple-value-bind (q r) (qr-decompose a)
-    (let* ((n (matrix-cols a)) (qtb (mat-vec (matrix-transpose q) b)) (x (make-array n :initial-element 0.0)))
+  "The vector x minimising |A x - b| (A is m x n, m >= n) using Householder QR (Q is never formed)."
+  (multiple-value-bind (r qtb) (%qr-reduce a b)
+    (let* ((n (matrix-cols a)) (x (make-array n :initial-element 0.0)))
       (loop for i from (- n 1) downto 0
             do (let ((s (aref qtb i)))
                  (loop for j from (+ i 1) below n do (decf s (* (mref r i j) (aref x j))))
@@ -275,34 +299,38 @@ Returns (values eigenvalues eigenvectors): a vector sorted in decreasing order a
 
 (defun svd (a)
   "Singular value decomposition of the m x n matrix A.  Returns (values U S V) with A = U diag(S) V^T,
-S a vector in decreasing order, U m x n and V n x n.  (For m < n the transpose is decomposed and swapped.)"
+S a vector in decreasing order, U m x n and V n x n.  (For m < n the transpose is decomposed and swapped.)
+One-sided Jacobi on column vectors: each rotation touches two contiguous vectors."
   (if (< (matrix-rows a) (matrix-cols a))
       (multiple-value-bind (u s v) (svd (matrix-transpose a)) (values v s u))
-      (let* ((m (matrix-rows a)) (n (matrix-cols a)) (u (matrix-copy a)) (v (identity-matrix n)))
+      (let* ((m (matrix-rows a)) (n (matrix-cols a)) (u (make-array n :initial-element nil)) (v (make-array n :initial-element nil)))
+        (dotimes (j n)
+          (setf (aref u j) (matrix-col a j))
+          (let ((e (make-array n :initial-element 0.0))) (setf (aref e j) 1.0) (setf (aref v j) e)))
         (dotimes (sweep 60)
           (let ((rotated nil))
             (dotimes (p n)
               (loop for q from (+ p 1) below n
-                    do (let ((alpha 0.0) (beta 0.0) (gamma 0.0))
-                         (dotimes (i m) (let ((up (mref u i p)) (uq (mref u i q))) (setq alpha (+ alpha (* up up)) beta (+ beta (* uq uq)) gamma (+ gamma (* up uq)))))
+                    do (let ((up (aref u p)) (uq (aref u q)) (alpha 0.0) (beta 0.0) (gamma 0.0))
+                         (dotimes (i m) (let ((x (aref up i)) (y (aref uq i))) (setq alpha (+ alpha (* x x)) beta (+ beta (* y y)) gamma (+ gamma (* x y)))))
                          (when (> (abs gamma) (* 1e-15 (sqrt (* alpha beta))))
                            (setq rotated t)
                            (let* ((zeta (/ (- beta alpha) (* 2.0 gamma)))
                                   (tt (/ (if (>= zeta 0) 1.0 -1.0) (+ (abs zeta) (sqrt (+ 1.0 (* zeta zeta))))))
-                                  (c (/ 1.0 (sqrt (+ 1.0 (* tt tt))))) (s (* c tt)))
-                             (dotimes (i m) (let ((up (mref u i p)) (uq (mref u i q))) (setf (mref u i p) (- (* c up) (* s uq))) (setf (mref u i q) (+ (* s up) (* c uq)))))
-                             (dotimes (i n) (let ((vp (mref v i p)) (vq (mref v i q))) (setf (mref v i p) (- (* c vp) (* s vq))) (setf (mref v i q) (+ (* s vp) (* c vq))))))))))
+                                  (c (/ 1.0 (sqrt (+ 1.0 (* tt tt))))) (s (* c tt)) (vp (aref v p)) (vq (aref v q)))
+                             (dotimes (i m) (let ((x (aref up i)) (y (aref uq i))) (setf (aref up i) (- (* c x) (* s y))) (setf (aref uq i) (+ (* s x) (* c y)))))
+                             (dotimes (i n) (let ((x (aref vp i)) (y (aref vq i))) (setf (aref vp i) (- (* c x) (* s y))) (setf (aref vq i) (+ (* s x) (* c y))))))))))
             (unless rotated (return))))
-        (let* ((sv (make-array n :initial-element 0.0)))
-          (dotimes (j n) (setf (aref sv j) (sqrt (reduce #'+ (map 'list (lambda (x) (* x x)) (matrix-col u j)) :initial-value 0.0))))
+        (let ((sv (make-array n :initial-element 0.0)))
+          (dotimes (j n) (let ((col (aref u j)) (sum 0.0)) (dotimes (i m) (setq sum (+ sum (* (aref col i) (aref col i))))) (setf (aref sv j) (sqrt sum))))
           (let* ((order (sort (loop for i from 0 below n collect i) (lambda (i j) (> (aref sv i) (aref sv j)))))
-                 (s (make-array n :initial-element 0.0)) (uu (make-matrix m n)) (vv (make-matrix n n)) (c 0))
+                 (s (make-array n :initial-element 0.0)) (ucols nil) (vcols nil) (c 0))
             (dolist (j order)
               (setf (aref s c) (aref sv j))
-              (dotimes (i m) (setf (mref uu i c) (if (> (aref sv j) 1e-300) (/ (mref u i j) (aref sv j)) 0.0)))
-              (dotimes (i n) (setf (mref vv i c) (mref v i j)))
+              (push (let ((col (aref u j)) (nv (aref sv j))) (map 'vector (lambda (x) (if (> nv 1e-300) (/ x nv) 0.0)) col)) ucols)
+              (push (aref v j) vcols)
               (setq c (+ c 1)))
-            (values uu s vv))))))
+            (values (matrix-from-columns (reverse ucols)) s (matrix-from-columns (reverse vcols))))))))
 
 (defun matrix-rank (a &optional (tol nil))
   "Numerical rank of A: the number of singular values above TOL (default eps * max(m,n) * largest)."

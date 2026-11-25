@@ -1,0 +1,18 @@
+;;; Simulate an experiment, test it and fit a model; print a text plot and write an SVG.
+;;; expect: Welch Two Sample t-test
+(rng-seed 2026)
+(let* ((control (loop repeat 30 collect (rand-normal 10.0 2.0)))
+       (treated (loop repeat 30 collect (rand-normal 12.0 2.0))))
+  (format t "~%control mean ~,2F, treated mean ~,2F~%" (mean control) (mean treated))
+  (princ (t-test control :y treated))
+  (format t "~%Mann-Whitney p = ~,5F~%" (htest-p-value (mann-whitney control treated)))
+  (princ (plot-boxplot (list control treated) :labels '("control" "treated") :width 50))
+  (terpri))
+(let* ((x (loop for i from 1 to 40 collect (float i)))
+       (y (mapcar (lambda (v) (+ 3.0 (* 0.5 v) (rand-normal 0.0 1.0))) x))
+       (fit (lm y x :names '("x"))))
+  (princ fit)
+  (princ (plot-scatter x y :width 50 :height 10 :title "y = 3 + 0.5 x + noise"))
+  (terpri)
+  (write-svg (svg-scatter x y :title "regression") "/tmp/ng-example-scatter.svg")
+  (format t "wrote /tmp/ng-example-scatter.svg~%"))

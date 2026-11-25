@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>NeoGenera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+ body{font-family:Georgia,serif;max-width:46em;margin:3em auto;padding:0 1em;line-height:1.55;color:#222}
+ h1{font-size:2.4em;margin-bottom:.1em} .tag{color:#666;font-size:1.15em;margin-top:0}
+ pre{background:#10151a;color:#cfe3d4;padding:1em;border-radius:6px;overflow:auto;font-size:.92em}
+ a{color:#1a5fb4} nav a{margin-right:1.2em} code{background:#eee;padding:0 .25em}
+</style></head><body>
+<h1>NeoGenera</h1>
+<p class="tag">A Lisp environment evoking the Symbolics Genera workstations: one live, introspectable system.</p>
+<nav><a href="manual/index.html">Manuals</a><a href="manual/reference.html">API reference</a><a href="examples/index.html">Examples</a><a href="tour.cast">Tour (asciicast)</a><a href="LICENSE">MIT license</a></nav>
+<p>NeoGenera is a Common Lisp subset with a bytecode compiler that compiles itself, a text-mode window system with mouse-sensitive output,
+an Emacs-style editor, an Inspector, cross-reference, trace, stepper and profiler, integrated hypertext documentation, and libraries for
+mathematics, statistics and bioinformatics. It is implemented in C and in itself.</p>
+<pre>$ make world            # build the kernel and the self-hosted system image
+$ bin/neogenera --ui    # the window system: Listener, editor, Inspector, documentation viewer
+CL-USER&gt; (translate "ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG")
+#&lt;PROTEIN 13aa MAIVMGR*KGAR*&gt;
+CL-USER&gt; (t-test control :y treated)
+Welch Two Sample t-test ... p-value = 0.00178
+CL-USER&gt; :doc user-guide</pre>
+<h2>What is in it</h2>
+<ul>
+<li><b>A Lisp you can read.</b> A small C kernel (about 8,000 lines) and a system written in Lisp; the compiler reaches a byte-identical fixed point.</li>
+<li><b>Click on results.</b> Every printed object is a presentation: click a sequence, an alignment or a tree for commands that apply to it.</li>
+<li><b>Documentation inside the system.</b> Manuals, docstrings and cross-references in one viewer, exported to HTML and PDF.</li>
+<li><b>Quantitative work.</b> Linear algebra, distributions, tests and models validated against R and NIST reference values.</li>
+<li><b>Bioinformatics.</b> FASTA, FASTQ, GenBank, GFF, VCF, SAM and BAM; alignment, search, motifs and trees.</li>
+<li><b>Hardened.</b> Fuzzed parsers, recoverable memory and stack exhaustion, checksummed crash-safe images, reproducible builds.</li>
+</ul>
+<h2>Get it</h2>
+<p>Build from source (a C compiler and <code>make</code> are enough), or use the Debian package, Homebrew formula or Docker image described in the README.
+See <code>docs/COMPATIBILITY.md</code> for how NeoGenera differs from ANSI Common Lisp.</p>
+</body></html>

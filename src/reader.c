@@ -386,6 +386,7 @@ static Obj read_hash(Obj s) {
 }
 
 static Obj rd(Obj s) {
+  STACK_CHECK();
   int c = skip_ws(s);
   if (c < 0) { reader_error("unexpected EOF"); }
   c = stream_getc(s);

@@ -11,10 +11,16 @@
 
 ;;; ---- file access ---------------------------------------------------------------------------------
 
+(defun source-root ()
+  "The directory holding the NeoGenera sources (lisp/, docs/), used to find system source files: the variable
+*SOURCE-ROOT*, else the environment variable NG_SOURCE_ROOT (set by bin/neogenera), else NIL."
+  (or *source-root* (getenv "NG_SOURCE_ROOT")))
+
 (defun resolve-source-path (file)
-  (cond ((probe-file file) file)
-        ((and *source-root* (probe-file (%string-concat *source-root* "/" file))) (%string-concat *source-root* "/" file))
-        (t file)))
+  (let ((root (source-root)))
+    (cond ((probe-file file) file)
+          ((and root (probe-file (%string-concat root "/" file))) (%string-concat root "/" file))
+          (t file))))
 
 (defun read-file-lines (path)
   (with-open-file (s path)

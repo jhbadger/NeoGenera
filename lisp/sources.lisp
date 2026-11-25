@@ -16,6 +16,7 @@
     "lisp/core/58-pprint.lisp"
     "lisp/core/59-debugger.lisp"
     "lisp/core/60-listener.lisp"
+    "lisp/core/61-extras.lisp"
     "lisp/core/90-test.lisp"
     "lisp/compiler/00-defs.lisp"
     "lisp/compiler/10-analyze.lisp"

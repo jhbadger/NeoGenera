@@ -1,5 +1,9 @@
 /* prims_sys.c -- file-system, subprocess and profiling primitives for the developer tools. */
 #include "neogenera.h"
+#include <poll.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <signal.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -67,12 +71,35 @@ PRIM(p_run_program) {
   }
   free(av);
   close(in[0]); close(out[1]);
-  if (ilen) { size_t off = 0; while (off < ilen) { ssize_t w = write(in[1], input + off, ilen - off); if (w <= 0) break; off += (size_t)w; } }
-  close(in[1]);
+  /* Feed stdin and drain stdout at the same time (poll), so a child that writes a lot before reading
+     everything cannot deadlock us, and ignore SIGPIPE if the child closes its stdin early. */
+  struct sigaction ign, oldpipe; memset(&ign, 0, sizeof ign); ign.sa_handler = SIG_IGN; sigemptyset(&ign.sa_mask);
+  sigaction(SIGPIPE, &ign, &oldpipe);
+  fcntl(in[1], F_SETFL, fcntl(in[1], F_GETFL) | O_NONBLOCK);
   Buf b; buf_init(&b);
-  char tmp[4096]; ssize_t r;
-  while ((r = read(out[0], tmp, sizeof tmp)) > 0) buf_put(&b, tmp, (size_t)r);
-  close(out[0]);
+  char tmp[4096];
+  size_t off = 0; int in_open = 1, out_open = 1;
+  if (ilen == 0) { close(in[1]); in_open = 0; }
+  while (in_open || out_open) {
+    struct pollfd fds[2]; int n = 0, wi = -1, ri = -1;
+    if (in_open) { fds[n].fd = in[1]; fds[n].events = POLLOUT; wi = n++; }
+    if (out_open) { fds[n].fd = out[0]; fds[n].events = POLLIN; ri = n++; }
+    if (poll(fds, (nfds_t)n, -1) < 0) { if (errno == EINTR) continue; break; }
+    if (wi >= 0 && (fds[wi].revents & (POLLOUT | POLLERR | POLLHUP))) {
+      ssize_t w = write(in[1], input + off, ilen - off);
+      if (w > 0) off += (size_t)w;
+      if (w < 0 && errno != EAGAIN && errno != EINTR) off = ilen;
+      if (off >= ilen) { close(in[1]); in_open = 0; }
+    }
+    if (ri >= 0 && (fds[ri].revents & (POLLIN | POLLERR | POLLHUP))) {
+      ssize_t r = read(out[0], tmp, sizeof tmp);
+      if (r > 0) buf_put(&b, tmp, (size_t)r);
+      else if (r == 0 || (errno != EINTR && errno != EAGAIN)) { close(out[0]); out_open = 0; }
+    }
+  }
+  if (in_open) close(in[1]);
+  if (out_open) close(out[0]);
+  sigaction(SIGPIPE, &oldpipe, NULL);
   int status = 0; waitpid(pid, &status, 0);
   Obj s = make_string(b.buf ? b.buf : "", b.len);
   buf_free(&b);

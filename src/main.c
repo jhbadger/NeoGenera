@@ -24,7 +24,7 @@ static void crash_handler(int sig) {
   _exit(128 + sig);
 }
 
-typedef struct { int argc; char **argv; int rc; } MainArgs;
+typedef struct { int argc; char **argv; int rc; size_t stack_bytes; } MainArgs;
 
 static void init_all(void) {
   init_memory();
@@ -39,6 +39,7 @@ static void init_all(void) {
 
 static void *real_main(void *p) {
   MainArgs *a = p;
+  { char here; ng_stack_limit = &here - a->stack_bytes + a->stack_bytes / 8; }   /* keep an eighth of the stack as margin */
   static char altstack2[1 << 16];
   stack_t ss2 = { .ss_sp = altstack2, .ss_size = sizeof altstack2, .ss_flags = 0 };
 #if !defined(__SANITIZE_ADDRESS__)
@@ -116,7 +117,7 @@ static void *real_main(void *p) {
 }
 
 int main(int argc, char **argv) {
-  MainArgs a = { argc, argv, 0 };
+  MainArgs a = { argc, argv, 0, 0 };
 #if !defined(__SANITIZE_ADDRESS__)
   static char altstack[1 << 16];
   stack_t ss = { .ss_sp = altstack, .ss_size = sizeof altstack, .ss_flags = 0 };
@@ -133,7 +134,8 @@ int main(int argc, char **argv) {
   pthread_attr_init(&attr);
   pthread_attr_setstacksize(&attr, (size_t)1 << 30);
   pthread_t th;
-  if (pthread_create(&th, &attr, real_main, &a) != 0) { real_main(&a); return a.rc; }
+  a.stack_bytes = (size_t)1 << 30;
+  if (pthread_create(&th, &attr, real_main, &a) != 0) { a.stack_bytes = (size_t)6 << 20 ; real_main(&a); return a.rc; }
   pthread_join(th, NULL);
   return a.rc;
 }

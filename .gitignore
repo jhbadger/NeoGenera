@@ -3,3 +3,4 @@ build/
 *.o
 *.img
 .DS_Store
+examples/gallery.html

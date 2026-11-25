@@ -11,8 +11,8 @@
 (defun %residues (x) (if (bioseq-p x) (bioseq-residues x) x))
 
 (defun %detect-alphabet (s)
-  (cond ((every (lambda (c) (find c "ACGTNRYSWKMBDHV-.")) s) :dna)
-        ((and (not (find #\T s)) (every (lambda (c) (find c "ACGUNRYSWKMBDHV-.")) s)) :rna)
+  (cond ((%string-all-in s "ACGTNRYSWKMBDHV-.") :dna)
+        ((and (not (find #\T s)) (%string-all-in s "ACGUNRYSWKMBDHV-.")) :rna)
         (t :protein)))
 
 (defun make-bioseq (residues &key id description alphabet quality)
@@ -40,17 +40,8 @@
 
 ;;; ---- complement, transcription -----------------------------------------------------------------------------------
 
-(defun %translate-string (s from to)
-  (let* ((n (length s)) (out (make-string n #\N)))
-    (dotimes (i n)
-      (let* ((c (char s i)) (p (position c from)))
-        (setf (char out i) (if p (char to p) c))))
-    out))
-
-(defun %reverse-string (s)
-  (let* ((n (length s)) (out (make-string n #\N)))
-    (dotimes (i n) (setf (char out (- n 1 i)) (char s i)))
-    out))
+(defun %translate-string (s from to) (%string-translate s from to))
+(defun %reverse-string (s) (%string-reverse s))
 
 (defvar *dna-complement-from* "ACGTRYSWKMBDHVNacgtn")
 (defvar *dna-complement-to*   "TGCAYRSWMKVHDBNtgcan")
@@ -78,9 +69,7 @@
 
 (defun gc-content (s &optional (start 0) end)
   "Fraction of G and C among the unambiguous residues of S[START, END)."
-  (let ((r (%residues s)) (gc 0) (n 0))
-    (loop for i from start below (or end (length r))
-          do (let ((c (char r i))) (cond ((or (char= c #\G) (char= c #\C)) (incf gc) (incf n)) ((or (char= c #\A) (char= c #\T) (char= c #\U)) (incf n)))))
+  (let* ((r (%residues s)) (end (or end (length r))) (gc (%count-chars r "GCgc" start end)) (n (+ gc (%count-chars r "ATUatu" start end))))
     (if (zerop n) 0.0 (/ (float gc) n))))
 
 (defun gc-skew (s &optional (start 0) end)
@@ -183,14 +172,9 @@
 (defun translate (s &key (table 1) (frame 0) to-stop)
   "Translate nucleotide sequence S in reading FRAME (0, 1 or 2) with genetic code TABLE.  With TO-STOP translation ends
 at the first stop codon.  Incomplete trailing codons are ignored."
-  (let* ((r (substitute #\T #\U (%residues s))) (code (genetic-code-aminos (find-genetic-code table)))
-         (n (floor (- (length r) frame) 3)) (out (make-string n #\X)) (len 0))
-    (dotimes (k n)
-      (let* ((p (+ frame (* 3 k))) (a (let ((i (%codon-index (subseq r p (+ p 3))))) (if i (char code i) #\X))))
-        (when (and to-stop (char= a #\*)) (return))
-        (setf (char out k) a) (setq len (+ len 1))))
-    (let ((protein (subseq out 0 len)))
-      (if (bioseq-p s) (make-bioseq protein :id (bioseq-id s) :alphabet :protein) protein))))
+  (let* ((code (genetic-code-aminos (find-genetic-code table)))
+         (protein (%translate-codons (%residues s) frame code to-stop)))
+    (if (bioseq-p s) (make-bioseq protein :id (bioseq-id s) :alphabet :protein) protein)))
 
 ;;; ---- k-mers -----------------------------------------------------------------------------------------------------------------------
 
@@ -218,24 +202,22 @@ at the first stop codon.  Incomplete trailing codons are ignored."
 
 (defun orf-length (o) "Length of the ORF in amino acids." (length (orf-protein o)))
 
+(defun %start-flags (code start-codons)
+  "A 64-character string with 1 at the index of every start codon (TCAG order)."
+  (declare (ignore code))
+  (let ((flags (make-string 64 #\0)))
+    (dolist (c start-codons flags) (let ((i (%codon-index (substitute #\T #\U (string-upcase c))))) (when i (setf (char flags i) #\1))))))
+
 (defun %scan-orfs (r strand total table min-length start-codons)
-  (let ((orfs nil) (code (find-genetic-code table)))
+  (let* ((orfs nil) (code (find-genetic-code table)) (aminos (genetic-code-aminos code)) (flags (%start-flags code start-codons)))
     (dotimes (frame 3)
-      (let ((i frame) (open nil))
-        (loop while (<= (+ i 3) (length r))
-              do (let* ((codon (subseq r i (+ i 3))) (a (codon-amino codon code)))
-                   (cond ((and (null open) (member codon start-codons :test #'string=)) (setq open i))
-                         ((and open (char= a #\*))
-                          (let ((aa-len (floor (- i open) 3)))
-                            (when (>= aa-len min-length)
-                              (let ((protein (translate (subseq r open i) :table code)))
-                                (setq protein (%string-concat "M" (subseq protein 1)))
-                                (push (if (> strand 0)
-                                          (%make-orf open (+ i 3) 1 frame protein)
-                                          (%make-orf (- total (+ i 3)) (- total open) -1 frame protein))
-                                      orfs))))
-                          (setq open nil))))
-                 (setq i (+ i 3)))))
+      (dolist (span (%orf-scan r frame aminos flags min-length))
+        (let* ((open (car span)) (i (cdr span)) (protein (translate (subseq r open i) :table code)))
+          (setq protein (%string-concat "M" (subseq protein 1)))
+          (push (if (> strand 0)
+                    (%make-orf open (+ i 3) 1 frame protein)
+                    (%make-orf (- total (+ i 3)) (- total open) -1 frame protein))
+                orfs))))
     orfs))
 
 (defun find-orfs (s &key (min-length 30) (table 11) both-strands (start-codons '("ATG")))

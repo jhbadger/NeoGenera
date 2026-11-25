@@ -12,6 +12,7 @@
 #include "neogenera.h"
 
 static void vm_enter(int n) {
+  STACK_CHECK();
   Obj fn = vstack[vsp - n - 1];
   Obj code = SLOT(fn, 0);
   int nreq = (int)UNFIX(SLOT(code, C_NREQ)), nopt = (int)UNFIX(SLOT(code, C_NOPT));
@@ -22,7 +23,7 @@ static void vm_enter(int n) {
     lisp_error("Wrong number of arguments to %s: got %d (takes %d to %s)",
                STR_DATA(print_to_string(SLOT(code, C_NAME), 1, 0)), n, nreq,
                rest ? "any number" : STR_DATA(print_to_string(FIX(fixed), 0, 0)));
-  if (vfp >= VFRAME_SIZE - 2 || vsp > VSTACK_SIZE - 4096) lisp_error("Control stack exhausted (VM)");
+  if (vfp >= ng_vfp_limit || vsp > ng_vsp_limit) ng_vm_overflow();
   if (n >= fixed) {
     if (rest) {
       Obj l = NIL;

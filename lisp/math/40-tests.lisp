@@ -14,7 +14,7 @@
 
 (defun %fmt-num (x)
   (cond ((null x) "NA") ((integerp x) (format nil "~D" x)) ((not (floatp x)) (format nil "~A" x))
-        ((and (/= x 0.0) (< (abs x) 1e-4)) (format nil "~E" x)) (t (format nil "~,5F" x))))
+        ((and (/= x 0.0) (< (abs x) 1e-4)) (format nil "~,3E" x)) (t (format nil "~,5F" x))))
 
 (defmethod print-object ((h htest) stream)
   (format stream "~%~A~%" (htest-method h))

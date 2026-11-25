@@ -110,9 +110,17 @@
     (and (>= (length s) n) (string= (subseq s 0 n) prefix))))
 
 (defun parse-integer (s &key (start 0) end (radix 10) junk-allowed)
+  "Parse an integer from S[START, END).  With JUNK-ALLOWED the longest numeric prefix is parsed (NIL when there is none)
+instead of signalling an error."
   (let ((v (%parse-integer s start end radix)))
     (cond (v v)
-          (junk-allowed nil)
+          (junk-allowed
+           (let* ((e (or end (length s))) (i start) (neg nil) (n 0) (digits 0))
+             (loop while (and (< i e) (member (char s i) '(#\Space #\Tab #\Newline))) do (setq i (+ i 1)))
+             (when (and (< i e) (member (char s i) '(#\+ #\-))) (setq neg (char= (char s i) #\-) i (+ i 1)))
+             (loop while (and (< i e) (digit-char-p (char s i) radix))
+                   do (setq n (+ (* n radix) (digit-char-p (char s i) radix)) digits (+ digits 1) i (+ i 1)))
+             (and (> digits 0) (if neg (- n) n))))
           (t (error "Not an integer: ~S" s)))))
 
 (defun string-to-list (s) (%vector-to-list s))

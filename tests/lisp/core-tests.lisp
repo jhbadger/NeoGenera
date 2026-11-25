@@ -39,7 +39,8 @@
   (is-equal '(3 2 1) (reduce (lambda (acc x) (cons x acc)) '(1 2 3) :initial-value nil))
   (is-equal '(1 2 3 4) (sort (list 3 1 4 2) #'<))
   (is-equal '("a" "b" "c") (sort (list "c" "a" "b") #'string<))
-  (is-equal '(1 2 3) (remove-duplicates '(1 2 1 3 2)))
+  (is-equal '(1 3 2) (remove-duplicates '(1 2 1 3 2)))                ; the last of equal elements is kept, as in Common Lisp
+  (is-equal '(1 2 3) (remove-duplicates '(1 2 1 3 2) :from-end t))
   (is-equal '(3 2 1) (union '(1 2) '(3 2 1) :test #'eql) )
   (is (every #'numberp '(1 2 3)))
   (is (some #'evenp '(1 2 3)))

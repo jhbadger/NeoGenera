@@ -293,6 +293,13 @@
 (defun iota (n &optional (start 0) (step 1))
   (let ((acc nil) (v start)) (dotimes (i n) (setq acc (cons v acc)) (setq v (+ v step))) (nreverse acc)))
 
+(defun %plist-put (plist key value)
+  "PLIST with KEY set to VALUE: the cell is changed in place when KEY is present, otherwise a new pair is added in front."
+  (do-list-tails (l plist)
+    (when (eq (car l) key) (setf (car (cdr l)) value) (return-from %plist-put plist))
+    (setq l (cdr l)))
+  (cons key (cons value plist)))
+
 (defun getf (plist key &optional default)
   (do-list-tails (l plist)
     (when (eq (car l) key) (return-from getf (cadr l)))
@@ -316,10 +323,13 @@
 (defun adjoin (item list &key key test)
   (if (member (if key (funcall key item) item) list :key key :test test) list (cons item list)))
 (defun remove-duplicates (seq &key key test from-end)
-  (declare (ignore from-end))
-  (let ((acc nil) (f (%test-fn test nil)))
-    (dolist (x (%elt-list seq))
-      (unless (member-by f (if key (funcall key x) x) acc key) (setq acc (cons x acc))))
+  "Remove duplicates from SEQ.  By default the last of equal elements is kept (as in Common Lisp); with FROM-END the first."
+  (let* ((f (%test-fn test nil)) (items (%elt-list seq)) (acc nil))
+    (if from-end
+        (dolist (x items) (unless (member-by f (if key (funcall key x) x) acc key) (setq acc (cons x acc))))
+        (do-list-tails (l items)
+          (let ((x (car l)))
+            (unless (member-by f (if key (funcall key x) x) (cdr l) key) (setq acc (cons x acc))))))
     (let ((r (nreverse acc)))
       (if (listp seq) r (coerce r (if (stringp seq) 'string 'vector))))))
 (defun member-by (f item list key)

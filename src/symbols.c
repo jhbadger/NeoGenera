@@ -74,6 +74,7 @@ int eql(Obj a, Obj b) {
 }
 
 int equal(Obj a, Obj b) {
+  STACK_CHECK();
   for (;;) {
     if (eql(a, b)) return 1;
     if (CONSP(a) && CONSP(b)) { if (!equal(CAR(a), CAR(b))) return 0; a = CDR(a); b = CDR(b); continue; }
@@ -86,6 +87,7 @@ int equal(Obj a, Obj b) {
 static int char_eqi(int a, int b) { return tolower(a) == tolower(b); }
 
 int equalp(Obj a, Obj b) {
+  STACK_CHECK();
   for (;;) {
     if (eql(a, b)) return 1;
     if (is_number(a) && is_number(b)) return num_cmp(a, b) == 0;

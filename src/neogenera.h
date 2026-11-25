@@ -126,10 +126,14 @@ int   save_image(const char *path);
 int   load_image(const char *path);
 
 /* root stack for C locals */
-#define MAX_ROOTS 65536
+#define MAX_ROOTS (1 << 20)       /* well above what the evaluator depth limit (60000 levels) can use */
 extern Obj *root_stack[MAX_ROOTS];
 extern int  nroots;
-#define PROTECT(v)   (root_stack[nroots++] = &(v))
+extern int  ng_root_limit;        /* MAX_ROOTS minus a reserve for error handling; the reserve opens after an overflow */
+void ng_root_overflow(void) __attribute__((noreturn));
+extern int ng_vfp_limit, ng_vsp_limit;       /* VM frame and value-stack limits; a reserve above them opens after an overflow */
+void ng_vm_overflow(void) __attribute__((noreturn));
+#define PROTECT(v)   do { if (nroots >= ng_root_limit) ng_root_overflow(); root_stack[nroots++] = &(v); } while (0)
 #define UNPROTECT(n) (nroots -= (n))
 
 /* ---- symbols & packages ----------------------------------------------- */
@@ -203,6 +207,12 @@ uint64_t sxhash(Obj o, int depth);
 /* ---- errors, dynamic state, non-local exit ---------------------------- */
 void  lisp_error(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 void  type_error(const char *what, Obj got) __attribute__((noreturn));
+
+/* Guard against overflowing the C stack in recursive kernel code (evaluator, VM calls, reader, printer, EQUAL):
+   NG_STACK_LIMIT is a safe distance above the end of the kernel thread's stack; crossing it signals a Lisp error. */
+extern char *ng_stack_limit;
+void ng_stack_overflow(void) __attribute__((noreturn));
+#define STACK_CHECK() do { char c_probe_; if ((char *)&c_probe_ < ng_stack_limit) ng_stack_overflow(); } while (0)
 
 #define VSTACK_SIZE (8 * 1024 * 1024)
 #define SPEC_SIZE   (1024 * 1024)
