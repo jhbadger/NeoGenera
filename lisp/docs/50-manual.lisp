@@ -17,5 +17,8 @@
 
 (import-markdown :math-manual "docs/manual/math-manual.md" :category :manual
                  :keywords (math statistics matrix linear-algebra random distribution regression plot data-frame symbolic))
+(import-markdown :bio-manual "docs/manual/bio-manual.md" :category :manual
+                 :keywords (bioinformatics sequence dna protein fasta alignment blast phylogeny genome))
+
 ;;; Coverage is measured over what exists now; symbols defined later (user code, tests) are not counted.
 (snapshot-core-symbols)

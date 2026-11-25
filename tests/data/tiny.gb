@@ -1,0 +1,21 @@
+LOCUS       TESTSEQ                   60 bp    DNA     linear   BCT 01-JAN-2020
+DEFINITION  Test sequence with two genes.
+ACCESSION   TS000001
+SOURCE      Testus organismus
+  ORGANISM  Testus organismus
+            Bacteria.
+FEATURES             Location/Qualifiers
+     source          1..60
+                     /organism="Testus organismus"
+     gene            1..18
+                     /gene="geneA"
+     CDS             1..18
+                     /gene="geneA"
+                     /product="hypothetical
+                     protein A"
+                     /translation="MKVLAA"
+     CDS             complement(join(25..36,40..51))
+                     /gene="geneB"
+ORIGIN
+        1 atgaaagtac tggcggcgta aggcatcgat tggatcctga cgttagcgat ctagctagca
+//

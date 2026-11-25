@@ -48,4 +48,11 @@
     "lisp/math/50-models.lisp"
     "lisp/math/60-dataframe.lisp"
     "lisp/math/70-plot.lisp"
-    "lisp/math/80-symbolic.lisp"))
+    "lisp/math/80-symbolic.lisp"
+    "lisp/bio/00-seq.lisp"
+    "lisp/bio/10-formats.lisp"
+    "lisp/bio/20-align.lisp"
+    "lisp/bio/30-phylo.lisp"
+    "lisp/bio/40-external.lisp"
+    "lisp/bio/50-present.lisp"
+    "lisp/bio/60-workflows.lisp"))

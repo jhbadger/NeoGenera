@@ -273,7 +273,7 @@
                                            (t (let ((v (or (car params) (car args)))) v)))))
                             (unless (or at (car params)) nil)
                             (unless (car params) (unless at (setq args (cdr args))))
-                            (when (and at (car args)) nil)
+                            (when (and at (= sel 1)) (setq args (cdr args)))   ; ~@[ consumes a false argument
                             (let ((clause (cond ((and (integerp sel) (< sel (length clauses)) (>= sel 0)) (nth sel clauses))
                                                 (t (and (> (length clauses) 0)
                                                         (let ((last (car (last clauses))))

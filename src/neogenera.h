@@ -298,6 +298,7 @@ Obj   defprim_mv(const char *name, PrimFn fn, int min, int max);
 void  init_prims_core(void);
 void  init_prims_data(void);
 void  init_prims_num(void);
+void  init_prims_bio(void);
 void  init_prims_term(void);
 void  init_prims_sys(void);
 void  prof_record(void);
