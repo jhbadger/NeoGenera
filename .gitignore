@@ -1,0 +1,5 @@
+build/
+*.nfasl
+*.o
+*.img
+.DS_Store

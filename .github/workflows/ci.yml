@@ -1,0 +1,39 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build kernel
+        run: make kernel
+      - name: C unit tests
+        run: make test-c
+      - name: World (stage0, stage1, stage2, fixed point)
+        run: make world
+      - name: Lisp tests
+        run: make test-lisp
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: C unit tests under ASan+UBSan
+        run: SAN=1 sh tests/c/run.sh
+      - name: Build world and run Lisp tests under ASan
+        run: |
+          make world asan
+          ASAN_OPTIONS=detect_leaks=0 build/neogenera-asan -i build/neogenera.img --no-toplevel --load tests/lisp/run-all.lisp
+
+  gc-stress:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every safe point collects
+        run: make test-stress

@@ -4,6 +4,46 @@ NeoGenera is a Lisp environment in the spirit of Symbolics Genera: a single, liv
 
 **Assumptions:** one developer, roughly 2–3 years (about 10 phases of 3 months), small C kernel with everything else written in NeoGenera Lisp, Common Lisp compatibility as the language target. Dates are relative (Month 1 = project start) and should be treated as budgets, not promises.
 
+## Status
+
+*Last updated 2026-11-25.* **Phases 0–3 are complete**; the self-hosting compiler reaches a fixed point
+(`make selfhost`). Everything below Phase 3 is still planned.
+
+| Phase | State | Evidence |
+|---|---|---|
+| 0 Foundations | done | `docs/design/`, `Makefile`, CI workflow, `CONTRIBUTING.md`, `STYLE.md`, C and Lisp test harnesses |
+| 1 C kernel | done, with deviations | 60 C checks (also under ASan/UBSan); Lisp suites pass under a collection at *every* safe point |
+| 2 Core Lisp in Lisp | done, with deviations | 12 test groups / 132 checks for the library |
+| 3 Compiler, self-hosting | done, with deviations | stage 1 and stage 2 output identical: 13 files, ~232 KB |
+
+Test counts as of this update: 23 Lisp test groups, 194 checks (interpreted *and* compiled), 60 C checks.
+Compiled code runs about 3-4x faster than the stage-0 evaluator on the micro-benchmarks in
+`tests/lisp/bench.lisp` (for example `fib 32` in about 0.17 s).
+
+### Deviations from the plan above
+
+These are conscious scope decisions, not oversights; each is a candidate for a later phase.
+
+* **Reader and printer are still written in C** and remain on the critical path. The roadmap's Phase 2
+  exit criterion ("the C reader and printer are removed from the critical path") is **not met**.
+  Reader macros are fixed rather than readtable-driven.
+* **Numbers:** fixnums (61-bit) and double-precision floats only. Overflow signals an error; there are no
+  bignums or ratios yet, and `/` returns a float for inexact division.
+* **Strings are byte vectors** (UTF-8 passes through; `length` counts bytes).
+* **Errors and conditions:** a minimal string-based scheme (`error`, `handler-case`, `ignore-errors`,
+  `unwind-protect`). The full condition system, restarts and the interactive debugger are Phase 4.
+* **Garbage collector:** a non-generational two-space copier (separate object and cons spaces). A
+  generational collector and weak tables remain Phase 4 work.
+* **Hash tables** are written in Lisp and hash conses structurally, so mutating a key of an `eq`/`eql`
+  table after insertion is unsupported.
+* **Compiler:** no type inference; open-coded primitives only; `return-from` in compiled code forwards only
+  the primary value unless its argument is literally `(values ...)`. Only a bytecode back end exists.
+* **`loop`, `format`, `defstruct`** are subsets (see the source headers).
+* **Platforms:** developed and tested on aarch64 Linux. The kernel is portable C (POSIX `mmap`, pthreads),
+  but x86-64 and macOS builds have **not been run yet**; CI is configured for both. Heap images require the
+  fixed-address mapping to succeed.
+* **Phase 1 exit criterion** asked for GC stress "for hours"; the stress suite runs for minutes.
+
 ## Guiding principles
 
 1. **Small C kernel, large Lisp system.** C holds only what must be native: memory, GC, the VM or native-code emitter, I/O primitives, and the bootstrap. Everything else (compiler, reader extensions, editor, windows, docs, science libraries) is Lisp, so the system can inspect and modify itself.
