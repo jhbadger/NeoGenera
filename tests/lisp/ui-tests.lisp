@@ -432,6 +432,23 @@
       (is (<= (+ (window-x m) (window-w m)) 80))
       (is (<= (+ (window-y m) (window-h m)) 24)))))
 
+(deftest command-buttons-clickable
+  (multiple-value-bind (wm lw) (make-test-wm)
+    (declare (ignorable lw))
+    (let* ((row (- (wm-rows wm) 2)) (th (theme-name *theme*)))
+      (let ((sp (cadr (wm-button-spans))) (before (wm-layout wm)))          ; F7 tile
+        (wm-feed wm (mouse-bytes :press (car sp) row))
+        (wm-feed wm (mouse-bytes :release (car sp) row))
+        (is (not (eq before (wm-layout wm)))))
+      (let ((sp (caddr (wm-button-spans))))         ; F8 theme
+        (wm-feed wm (mouse-bytes :press (car sp) row))
+        (wm-feed wm (mouse-bytes :release (car sp) row))
+        (is (not (eq th (theme-name *theme*)))))
+      (set-theme :classic)
+      (let ((sp (cadddr (wm-button-spans))))        ; F10 quit
+        (wm-feed wm (mouse-bytes :press (car sp) row))
+        (is (wm-quit wm))))))
+
 (deftest who-line-and-resize
   (multiple-value-bind (wm lw) (make-test-wm)
     (declare (ignorable lw))

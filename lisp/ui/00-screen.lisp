@@ -43,7 +43,10 @@
   :menu-fg (rgb 20 20 20) :menu-bg (rgb 255 255 235) :sel-fg (rgb 248 247 240) :sel-bg (rgb 20 20 20)
   :hi-fg (rgb 248 247 240) :hi-bg (rgb 30 70 160) :link (rgb 20 60 150) :error (rgb 170 20 20)
   :scroll-track (rgb 200 200 190) :scroll-thumb (rgb 90 90 90) :desktop-bg (rgb 215 214 205) :desktop-fg (rgb 190 189 180)
-  :prompt (rgb 120 40 120) :value (rgb 20 100 40))
+  :prompt (rgb 120 40 120) :value (rgb 20 100 40)
+  ;; the terminal's own cursor is not visible on this light background, so the window
+  ;; manager paints a black block at the cursor cell (themes without :cursor use the terminal's)
+  :cursor (rgb 0 0 0) :cursor-fg (rgb 248 247 240))
 (define-theme :green
   :fg (rgb 60 255 90) :bg (rgb 0 14 0) :dim (rgb 30 140 50)
   :title-fg (rgb 0 14 0) :title-bg (rgb 60 255 90) :inactive-fg (rgb 60 255 90) :inactive-bg (rgb 0 50 10)

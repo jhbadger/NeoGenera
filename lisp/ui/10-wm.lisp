@@ -285,13 +285,41 @@
 
 (defun %pad-to (str n) (if (>= (length str) n) (subseq str 0 n) (%string-concat str (make-string (- n (length str)) #\Space))))
 
+(defvar *wm-buttons*
+  '(("F6 next window" . :f6) ("F7 tile" . :f7) ("F8 theme" . :f8) ("F10 quit" . :f10))
+  "Clickable commands shown on the mouse-documentation line: (label . key it stands for).")
+
+(defun wm-button-spans ()
+  "List of (start-col end-col key label) for the buttons, laid out from column 1 with 3 spaces between."
+  (let ((col 1) (spans nil))
+    (dolist (b *wm-buttons*)
+      (setq spans (cons (list col (+ col (length (car b))) (cdr b) (car b)) spans))
+      (setq col (+ col (length (car b)) 3)))
+    (nreverse spans)))
+
+(defun wm-button-at (wm x y)
+  "The key of the command button at screen cell X,Y, or NIL."
+  (when (= y (- (wm-rows wm) 2))
+    (dolist (sp (wm-button-spans) nil)
+      (when (and (>= x (car sp)) (< x (cadr sp))) (return (caddr sp))))))
+
 (defun draw-bottom-lines (wm)
   (let* ((s (wm-screen wm)) (rows (wm-rows wm)) (cols (wm-cols wm)) (r1 (- rows 2)) (r2 (- rows 1))
          (reverse-attr (if (= -1 (tc :wholine-bg)) +reverse+ 0)))
     ;; mouse documentation line
     (screen-fill s r1 0 1 cols 32 (tc :doc-fg) (tc :doc-bg) (if (= -1 (tc :doc-bg)) +dim+ 0))
-    (let ((text (or (wm-message wm) (wm-doc wm) "F6 next window   F7 tile   F8 theme   F10 quit   mouse: click presentations")))
-      (screen-draw-string s r1 1 text (tc :doc-fg) (tc :doc-bg) (if (= -1 (tc :doc-bg)) +dim+ 0) 0 (min (length text) (max 0 (- cols 2)))))
+    (let ((text (or (wm-message wm) (wm-doc wm))))
+      (if text
+          (screen-draw-string s r1 1 text (tc :doc-fg) (tc :doc-bg) (if (= -1 (tc :doc-bg)) +dim+ 0) 0 (min (length text) (max 0 (- cols 2))))
+          ;; default: clickable command buttons, then a hint
+          (let ((battr (if (= -1 (tc :sel-bg)) +reverse+ 0)) (end 1))
+            (dolist (sp (wm-button-spans))
+              (when (<= (cadr sp) cols)
+                (screen-draw-string s r1 (car sp) (cadddr sp) (tc :sel-fg) (tc :sel-bg) (logior battr +bold+))
+                (setq end (cadr sp))))
+            (let ((hint "   mouse: click presentations"))
+              (screen-draw-string s r1 end hint (tc :doc-fg) (tc :doc-bg) (if (= -1 (tc :doc-bg)) +dim+ 0)
+                                  0 (min (length hint) (max 0 (- cols end 1))))))))
     ;; who-line
     (screen-fill s r2 0 1 cols 32 (tc :wholine-fg) (tc :wholine-bg) reverse-attr)
     (let* ((spin (if (wm-busy wm) (string (char "|/-\\" (mod (wm-ticks wm) 4))) " "))
@@ -311,7 +339,14 @@
     (draw-bottom-lines wm)
     (let* ((fw (wm-focus wm)) (cur (and fw (null (wm-popups wm)) (window-cursor fw))))
       (if cur
-          (setf (scr-cursor-row s) (car cur) (scr-cursor-col s) (cdr cur) (scr-cursor-visible s) t)
+          (progn
+            (setf (scr-cursor-row s) (car cur) (scr-cursor-col s) (cdr cur) (scr-cursor-visible s) t)
+            ;; themes that define :cursor get a software block cursor in that colour
+            (when (>= (tc :cursor) 0)
+              (let ((r (car cur)) (c (cdr cur)))
+                (when (and (>= r 0) (< r (scr-rows s)) (>= c 0) (< c (scr-cols s)))
+                  (let ((cell (screen-cell s r c)))
+                    (screen-put s r c (car cell) (tc :cursor-fg) (tc :cursor) 0))))))
           (setf (scr-cursor-visible s) nil)))
     (setf (wm-dirty wm) nil)
     wm))
@@ -375,6 +410,8 @@
                (multiple-value-bind (lx ly) (%inner-coords p x y) (window-mouse p kind lx ly button mods))
                (when (eq kind :press) (wm-close-popups wm)))))
         ((and (wm-drag wm) (member kind '(:drag :release))) (wm-drag-update wm kind x y))
+        ((and (eq kind :press) (= button 0) (wm-button-at wm x y))
+         (wm-global-key wm (make-key (wm-button-at wm x y) 0)))
         ((eq kind :press) (wm-press wm x y button mods))
         ((member kind '(:wheel-up :wheel-down))
          (let ((w (wm-window-at wm x y))) (when w (window-scroll-by w (if (eq kind :wheel-up) 3 -3)))))
