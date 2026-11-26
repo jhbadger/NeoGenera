@@ -367,6 +367,7 @@ void  proc_attention(void);                    /* called by the VM at a safe poi
 int   proc_blocking_begin(void);               /* release the lock for a blocking call (no unprotected Objs!) */
 void  proc_blocking_end(int token);
 void  init_prims_proc(void);
+void  init_prims_gfx(void);
 
 /* ---- repl ------------------------------------------------------------- */
 int   run_toplevel(const char *name);

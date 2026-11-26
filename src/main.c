@@ -34,7 +34,7 @@ static void init_all(void) {
   init_vm();
   init_prims_core();
   init_prims_data(); init_prims_num(); init_prims_term(); init_prims_sys();
-  init_prims_io(); init_prims_bio(); init_prims_proc();
+  init_prims_io(); init_prims_bio(); init_prims_proc(); init_prims_gfx();
   init_proc();
 }
 

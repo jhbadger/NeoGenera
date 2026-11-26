@@ -38,6 +38,19 @@ from `COLORTERM`/`TERM`. Themes: `:classic` (black on white), `:green`, `:amber`
 **Limitation:** every code point is assumed to be one column wide (no East Asian wide or combining
 characters).
 
+**Images** (`05-graphics.lisp`, `src/prims_gfx.c`). An image is an RGB byte string drawn by C primitives
+(coverage anti-aliased lines and discs, rectangles). In an output buffer an image row is a segment of
+private-use characters U+F0000+column with the style `(:image key row)`, where the key names a *placement*
+(an image shown on a given number of cells); wrapping, scrolling and hit-testing treat it like text. When it is
+drawn, kitty and Ghostty (`*graphics*` is `:kitty`, set by `DETECT-GRAPHICS` from the terminal's answer to a
+graphics query, XTVERSION and the environment) get cells whose code is above Unicode; `SCREEN-FLUSH` turns each
+into U+10EEEE with the terminal's image number as a 256-colour foreground and the row and column as combining
+marks (the kitty protocol's Unicode placeholders), sending the image first with a virtual placement
+(`a=T,U=1`) if the terminal does not have it. 255 image numbers are recycled least-recently-used, never taking
+one that is on screen. Other terminals get half-block cells with the average colours of each half cell.
+Detection only runs where the environment points at kitty or Ghostty (or `NG_GRAPHICS=on`), so other terminals
+never see the queries; replies that arrive late are dropped by the input parser.
+
 ## Windows
 
 `WINDOW` is a CLOS class; subclasses implement `WINDOW-DRAW-CONTENT`, `WINDOW-KEY`, `WINDOW-MOUSE`,

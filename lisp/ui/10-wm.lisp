@@ -535,6 +535,8 @@ one, or is NIL when the activity cannot be started from the key."
 (defun wm-run (wm &optional on-start)
   (unless (%term-init) (error "The NeoGenera window system needs an interactive terminal"))
   (setq *color-mode* (detect-color-mode))
+  (graphics-reset)
+  (ignore-errors (detect-graphics))
   (unwind-protect
        (progn
          (multiple-value-bind (r c) (%term-size) (wm-resize wm r c))
@@ -551,4 +553,5 @@ one, or is NIL when the activity cannot be started from the key."
                          (setq ev (and (< n 60) (not (wm-quit wm)) (%term-read-event 0)))
                          (unless ev (return))))
                  (wm-handle-event wm (list :tick))))))
+    (when (eq *graphics* :kitty) (%term-image-delete 0) (graphics-reset))
     (%term-restore)))

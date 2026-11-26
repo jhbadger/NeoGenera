@@ -75,7 +75,7 @@
      (set-setting :tile-mode :main)
      (set-setting :history nil)
      (set-setting :bookmarks nil)
-     (is-equal '(:theme :tile-mode :save-history :history :bookmarks) (settings-load))
+     (is-equal '(:theme :tile-mode :graphics :save-history :history :bookmarks) (settings-load))
      (is-equal :green (theme-name *theme*))
      (is-equal :grid *tile-mode*)
      (is-equal '("(+ 1 2)" "second line") (setting-value :history))

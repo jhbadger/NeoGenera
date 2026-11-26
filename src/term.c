@@ -134,6 +134,13 @@ static int parse_one(Obj *out) {
   }
   if (ilen == 1) return 2;
   unsigned char c = ibuf[1];
+  /* replies the terminal sends on its own (kitty graphics APC "ESC _ G ... ESC \", DCS "ESC P > | ... ESC \"):
+     swallow them so they never turn into keys */
+  if ((c == '_' && ilen >= 3 && ibuf[2] == 'G') || (c == 'P' && ilen >= 3 && (ibuf[2] == '>' || ibuf[2] == '1' || ibuf[2] == '0'))) {
+    for (size_t i = 2; i + 1 < ilen; i++)
+      if (ibuf[i] == 0x1b && ibuf[i + 1] == '\\') { consume(i + 2); return 1; }
+    return ilen >= sizeof ibuf / 2 ? (consume(ilen), 1) : 0;
+  }
   if (c == '[') {
     size_t i = 2;
     while (i < ilen && !(ibuf[i] >= 0x40 && ibuf[i] <= 0x7e)) i++;
@@ -242,9 +249,148 @@ PRIM(p_term_read_event) {
   }
 }
 
+/* ---- graphics: probing the terminal, sending images (kitty graphics protocol) -------------------------- */
+
+static long now_ms2(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; }
+
+static const char *mem_find(const unsigned char *h, size_t hn, const char *needle) {
+  size_t nn = strlen(needle);
+  for (size_t i = 0; i + nn <= hn; i++) if (memcmp(h + i, needle, nn) == 0) return (const char *)h + i;
+  return NULL;
+}
+
+PRIM(p_term_graphics_probe) {
+  /* (%term-graphics-probe timeout-ms) -> (graphics-ok terminal-name cell-width cell-height)
+     Asks the terminal (in raw mode) whether it accepts kitty graphics, what it is (XTVERSION) and its cell size
+     in pixels, then waits for the primary device attributes reply, which every terminal sends, as the end
+     marker.  Anything else that arrives meanwhile (keys typed) is kept for the input parser. */
+  UNUSED_ARGS;
+  if (!term_active) return NIL;
+  long timeout = FIXP(argv[0]) ? (long)UNFIX(argv[0]) : 500;
+  const char *q = "\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\033\\\033[>q\033[16t\033[c";
+  write_all(q, strlen(q));
+  static unsigned char rb[4096]; size_t rn = 0;
+  long deadline = now_ms2() + timeout;
+  int done = 0;
+  while (!done && rn < sizeof rb) {
+    long wait = deadline - now_ms2(); if (wait <= 0) break;
+    struct pollfd pf = { 0, POLLIN, 0 };
+    if (poll(&pf, 1, (int)wait) <= 0) continue;
+    ssize_t n = read(0, rb + rn, sizeof rb - rn);
+    if (n <= 0) break;
+    rn += (size_t)n;
+    for (size_t i = 0; i + 2 < rn; i++)            /* DA1 reply: ESC [ ? ... c */
+      if (rb[i] == 0x1b && rb[i + 1] == '[' && rb[i + 2] == '?') {
+        size_t j = i + 3; while (j < rn && ((rb[j] >= '0' && rb[j] <= '9') || rb[j] == ';')) j++;
+        if (j < rn && rb[j] == 'c') { done = 1; break; }
+      }
+  }
+  int ok = mem_find(rb, rn, "\033_Gi=31;OK") != NULL;
+  char name[128] = "";
+  const char *v = mem_find(rb, rn, "\033P>|");
+  if (v) {
+    v += 4; size_t k = 0;
+    while ((const unsigned char *)v < rb + rn && *v != 0x1b && k < sizeof name - 1) name[k++] = *v++;
+    name[k] = 0;
+  }
+  int cw = 0, ch = 0;
+  struct winsize ws;
+  if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0 && ws.ws_xpixel > 0 && ws.ws_ypixel > 0) {
+    cw = ws.ws_xpixel / ws.ws_col; ch = ws.ws_ypixel / ws.ws_row;
+  } else {
+    const char *t = mem_find(rb, rn, "\033[6;");
+    if (t) { int h = 0, w = 0; if (sscanf(t + 4, "%d;%dt", &h, &w) == 2) { ch = h; cw = w; } }
+  }
+  /* keep whatever is not a reply (keys typed during the probe) for the input parser */
+  for (size_t i = 0; i < rn; ) {
+    if (rb[i] == 0x1b && i + 1 < rn && (rb[i + 1] == '_' || rb[i + 1] == 'P')) {     /* APC / DCS reply */
+      size_t j = i + 2; while (j + 1 < rn && !(rb[j] == 0x1b && rb[j + 1] == '\\')) j++;
+      i = j + 2; continue;
+    }
+    if (rb[i] == 0x1b && i + 2 < rn && rb[i + 1] == '[' && (rb[i + 2] == '?' || rb[i + 2] == '6')) {   /* DA1, cell size */
+      size_t j = i + 2; while (j < rn && !(rb[j] >= 0x40 && rb[j] <= 0x7e && rb[j] != '?')) j++;
+      if (j < rn && (rb[j] == 'c' || rb[j] == 't')) { i = j + 1; continue; }
+    }
+    if (ilen < sizeof ibuf) ibuf[ilen++] = rb[i];
+    i++;
+  }
+  Obj nm = make_cstring(name);
+  return cons(BOOL(ok), cons(nm, cons(FIX(cw), cons(FIX(ch), NIL))));
+}
+
+static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static void send_image(long id, const unsigned char *px, long w, long h, long cols, long rows, int placeholder) {
+  size_t n = (size_t)(w * h * 3);
+  size_t enc_len = (n + 2) / 3 * 4;
+  char *enc = malloc(enc_len + 1);
+  size_t k = 0;
+  for (size_t i = 0; i < n; i += 3) {
+    unsigned v = (unsigned)px[i] << 16 | (i + 1 < n ? (unsigned)px[i + 1] << 8 : 0) | (i + 2 < n ? px[i + 2] : 0);
+    enc[k++] = b64[(v >> 18) & 63]; enc[k++] = b64[(v >> 12) & 63];
+    enc[k++] = i + 1 < n ? b64[(v >> 6) & 63] : '='; enc[k++] = i + 2 < n ? b64[v & 63] : '=';
+  }
+  char head[256];
+  const size_t chunk = 4096;
+  for (size_t off = 0; off < k || off == 0; off += chunk) {
+    size_t len = k - off < chunk ? k - off : chunk;
+    int more = off + len < k;
+    int hl;
+    if (off == 0) {
+      if (placeholder)
+        hl = snprintf(head, sizeof head, "\033_Ga=T,U=1,q=2,f=24,i=%ld,s=%ld,v=%ld,c=%ld,r=%ld,m=%d;", id, w, h, cols, rows, more);
+      else
+        hl = snprintf(head, sizeof head, "\033_Ga=T,q=2,f=24,s=%ld,v=%ld,c=%ld,r=%ld,m=%d;", w, h, cols, rows, more);
+    } else hl = snprintf(head, sizeof head, "\033_Gm=%d;", more);
+    write_all(head, (size_t)hl);
+    write_all(enc + off, len);
+    write_all("\033\\", 2);
+    if (!more) break;
+  }
+  free(enc);
+}
+
+static void need_image(Obj s, Obj w, Obj h) {
+  if (!STRINGP(s)) type_error("STRING", s);
+  if (!FIXP(w) || !FIXP(h) || UNFIX(w) <= 0 || UNFIX(h) <= 0) lisp_error("image size must be positive fixnums");
+  if ((long)STR_LEN(s) < UNFIX(w) * UNFIX(h) * 3) lisp_error("image pixel string too short");
+}
+
+PRIM(p_term_image_send) {
+  /* (%term-image-send id pixels width height cols rows): transmit an RGB image and give it a virtual placement
+     of COLS x ROWS cells, for Unicode placeholder cells to show */
+  UNUSED_ARGS;
+  need_image(argv[1], argv[2], argv[3]);
+  if (term_active) send_image((long)UNFIX(argv[0]), (const unsigned char *)STR_DATA(argv[1]), (long)UNFIX(argv[2]), (long)UNFIX(argv[3]),
+                              (long)UNFIX(argv[4]), (long)UNFIX(argv[5]), 1);
+  return NIL;
+}
+
+PRIM(p_term_image_inline) {
+  /* (%term-image-inline pixels width height cols rows): show an image at the cursor (line mode, no window system) */
+  UNUSED_ARGS;
+  need_image(argv[0], argv[1], argv[2]);
+  fflush(stdout);
+  send_image(0, (const unsigned char *)STR_DATA(argv[0]), (long)UNFIX(argv[1]), (long)UNFIX(argv[2]), (long)UNFIX(argv[3]), (long)UNFIX(argv[4]), 0);
+  return NIL;
+}
+
+PRIM(p_term_image_delete) {
+  /* (%term-image-delete id) frees an image in the terminal; id 0 frees all of them */
+  UNUSED_ARGS;
+  char buf[64]; long id = FIXP(argv[0]) ? (long)UNFIX(argv[0]) : 0;
+  int n = id ? snprintf(buf, sizeof buf, "\033_Ga=d,d=I,i=%ld,q=2\033\\", id) : snprintf(buf, sizeof buf, "\033_Ga=d,d=A,q=2\033\\");
+  if (term_active || !id) write_all(buf, (size_t)n);
+  return NIL;
+}
+
 void init_prims_term(void) {
   defprim("%TERM-ISATTY", p_term_isatty, 0, 0); defprim("%TERM-INIT", p_term_init, 0, 0);
   defprim("%TERM-RESTORE", p_term_restore, 0, 0); defprim_mv("%TERM-SIZE", p_term_size, 0, 0);
   defprim("%TERM-WRITE-CODES", p_term_write_codes, 1, 1); defprim("%TERM-PARSE", p_term_parse, 1, 1);
   defprim("%TERM-READ-EVENT", p_term_read_event, 1, 1);
+  defprim("%TERM-GRAPHICS-PROBE", p_term_graphics_probe, 1, 1);
+  defprim("%TERM-IMAGE-SEND", p_term_image_send, 6, 6);
+  defprim("%TERM-IMAGE-INLINE", p_term_image_inline, 5, 5);
+  defprim("%TERM-IMAGE-DELETE", p_term_image_delete, 1, 1);
 }

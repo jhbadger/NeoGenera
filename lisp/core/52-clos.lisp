@@ -119,11 +119,17 @@
 (defun %register-class (c) (%put (%cls-name c) '%class c) c)
 
 (defun %make-builtin (name supers)
-  (let ((c (%make-class :name name :kind :builtin :supers (mapcar #'find-class supers))))
-    (setf (%cls-id c) (setq *class-counter* (+ *class-counter* 1)))
-    (%register-class c)
-    (%finalize-class c)
-    c))
+  ;; When the system is loaded a second time (the self-hosting build loads it into the stage-1 image), keep the
+  ;; existing class: structure classes made by the first load hold it in their precedence lists, and a new T would
+  ;; leave them out of every method specialized on T.
+  (let ((old (get name '%class)))
+    (if (and old (eq (%cls-kind old) :builtin))
+        old
+        (let ((c (%make-class :name name :kind :builtin :supers (mapcar #'find-class supers))))
+          (setf (%cls-id c) (setq *class-counter* (+ *class-counter* 1)))
+          (%register-class c)
+          (%finalize-class c)
+          c))))
 
 (%make-builtin 't nil)
 (%make-builtin 'standard-object '(t))

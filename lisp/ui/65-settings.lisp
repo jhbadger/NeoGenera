@@ -220,6 +220,16 @@ other entries of an existing file are kept.  Returns PATH."
   :get (lambda () (if (and *wm* (not (eq (wm-layout *wm*) :overlap))) (wm-layout *wm*) *tile-mode*))
   :set (lambda (v) (setq *tile-mode* v) (when *wm* (wm-tile *wm* v))))
 
+(define-setting :graphics :choice "Show images and graphs with the terminal's graphics: auto (kitty, Ghostty), on, off."
+  :default :auto :choices '(:auto :on :off)
+  :get (lambda () *graphics-preference*)
+  :set (lambda (v)
+         (setq *graphics-preference* v)
+         (when *wm* (detect-graphics) (screen-invalidate (wm-screen *wm*)) (setf (wm-dirty *wm*) t))))
+
+(define-command (graphics :documentation "Say how images and graphs are shown (see the graphics setting)") ()
+  (format t "~&Images: ~A~%" (graphics-status)))
+
 (define-setting :save-history :boolean "Keep your command history between sessions."
   :default t
   :get (lambda () *save-history*)

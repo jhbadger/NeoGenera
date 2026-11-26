@@ -176,12 +176,43 @@ where a piece is (text style pres).  A word may span several segments (styles)."
        (setf (pane-stream-pres ,s) (make-pres ,object ,type))
        (unwind-protect (progn ,@body) (setf (pane-stream-pres ,s) ,old)))))
 
+(defgeneric present-graphically (object stream)
+  (:documentation "Draw OBJECT on the pane STREAM as a picture and return true, or return NIL to have it printed."))
+(defmethod present-graphically ((object t) stream) (declare (ignore stream)) nil)
+
 (defun present (object &key (type (presentation-type-of object)) (stream *standard-output*) (escape t))
   (if (typep stream 'pane-stream)
       (with-output-as-presentation (stream object type)
-        (write-string (if escape (prin1-to-string object) (princ-to-string object)) stream))
+        (unless (present-graphically object stream)
+          (write-string (if escape (prin1-to-string object) (princ-to-string object)) stream)))
       (if escape (prin1 object stream) (princ object stream)))
   object)
+
+;;; ---- images in output ----------------------------------------------------------------------------------------
+
+(defun draw-image (image &key (stream *standard-output*) cols rows)
+  "Show IMAGE on STREAM, COLS x ROWS cells (by default its pixel size in cells).  On a window pane the image
+becomes part of the output (drawn by the terminal in kitty and Ghostty, with half blocks elsewhere); on the
+terminal of the line Listener in kitty or Ghostty it is shown at the cursor; on other streams it is printed."
+  (multiple-value-bind (c r) (image-cells-for image cols rows)
+    (cond ((typep stream 'pane-stream)
+           (let ((key (image-placement-key image c r)) (b (pane-stream-obuf stream)) (text (%image-row-text c)))
+             (unless (= 0 (ob-current-column b)) (ob-write b (string #\Newline) :normal nil))
+             (dotimes (i r)
+               (ob-write b text (list :image key i) (pane-stream-pres stream))
+               (ob-write b (string #\Newline) :normal nil))))
+          ((and (%stream-terminal-p stream) (%kitty-like-p ""))
+           (fresh-line stream) (finish-output stream)
+           (%term-image-inline (image-pixels image) (image-width image) (image-height image) c r)
+           (terpri stream))
+          (t (prin1 image stream) (terpri stream))))
+  image)
+
+(defmethod present-graphically ((object image) stream) (draw-image object :stream stream) t)
+
+(defun draw-image-row (stream image row cols rows)
+  "Write row ROW of IMAGE shown on COLS x ROWS cells to the pane STREAM, at the current column (no newline)."
+  (ob-write (pane-stream-obuf stream) (%image-row-text cols) (list :image (image-placement-key image cols rows) row) (pane-stream-pres stream)))
 
 ;;; ---- presentation types ----------------------------------------------------------------------------------
 

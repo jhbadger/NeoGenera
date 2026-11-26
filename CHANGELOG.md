@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+* **Graphics in kitty and Ghostty.** The window system detects terminals that show images (kitty graphics protocol) and draws images
+  there at full resolution through Unicode placeholder cells, so they scroll, clip and overlap like text; elsewhere images use colour
+  half blocks. New images API (`make-image`, `image-line`, `image-disc`, `image-fill-rect`, `draw-image`) and pixel graphs
+  (`graph-scatter`, `graph-line`, `graph-function`, `graph-histogram`, `graph-heatmap`) that fall back to text plots. `graphics` setting,
+  `:graphics` command, `NG_GRAPHICS`.
+* Fixed: methods specialized on `T` did not apply to instances of structures defined in the system image (the second load of the
+  self-hosting build replaced the built-in classes).
+
 * **Local time.** The who-line clock showed UTC; it now shows local time. Added `decode-universal-time`, `encode-universal-time` and
   `get-decoded-time`, using the operating system's time zone and daylight saving rules (or a given `time-zone`).
 

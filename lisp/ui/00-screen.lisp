@@ -156,7 +156,8 @@
       (setq col (+ col 1)))
     col))
 
-(defun %cell-string (code) (if (< code 128) (string (code-char code)) (%utf8-encode code)))
+(defun %cell-string (code)
+  (cond ((< code 128) (string (code-char code))) ((>= code #x110000) " ") (t (%utf8-encode code))))   ; image cells read as spaces
 
 (defun screen-row-string (s r &optional (trim t))
   (let ((parts nil) (cols (scr-cols s)))
@@ -208,11 +209,22 @@
   (%emit-color out 48 bg mode)
   (vector-push-extend 109 out))
 
+(defun %screen-image-keys (s)
+  "A hash table of the image placements the back buffer shows, or NIL if it shows none."
+  (let ((tab nil) (chars (scr-chars s)))
+    (dotimes (i (length chars))
+      (let ((ch (aref chars i)))
+        (when (>= ch #x200000)
+          (unless tab (setq tab (make-hash-table)))
+          (setf (gethash (floor (- ch #x200000) 1048576) tab) t))))
+    tab))
+
 (defun screen-flush (s &optional (write t) (mode *color-mode*))
   "Emit the cells that differ from what the terminal shows.  Returns the vector of output codes."
   (let* ((out (make-array 4096 :adjustable t :fill-pointer 0))
          (rows (scr-rows s)) (cols (scr-cols s))
-         (cur-fg -3) (cur-bg -3) (cur-attr -3) (pos-r -1) (pos-c -1))
+         (cur-fg -3) (cur-bg -3) (cur-attr -3) (pos-r -1) (pos-c -1)
+         (visible (and (eq *graphics* :kitty) (%screen-image-keys s))))     ; placements on screen (not to be evicted)
     (dotimes (r rows)
       (let ((base (* r cols)))
         (dotimes (c cols)
@@ -223,10 +235,15 @@
                 (unless (and (= pos-r r) (= pos-c c))
                   (%emit-csi out) (%emit-num out (+ r 1)) (%emit-str out ";") (%emit-num out (+ c 1))
                   (vector-push-extend 72 out))
-                (unless (and (eql fg cur-fg) (eql bg cur-bg) (eql at cur-attr))
-                  (%emit-sgr out fg bg at mode)
-                  (setq cur-fg fg cur-bg bg cur-attr at))
-                (vector-push-extend ch out)
+                (if (>= ch #x110000)
+                    (if (eq *graphics* :kitty)
+                        (setq cur-fg (%emit-image-cell out ch bg mode visible) cur-bg bg cur-attr 0)
+                        (progn (%emit-sgr out -1 bg 0 mode) (setq cur-fg -1 cur-bg bg cur-attr 0) (vector-push-extend 32 out)))
+                    (progn
+                      (unless (and (eql fg cur-fg) (eql bg cur-bg) (eql at cur-attr))
+                        (%emit-sgr out fg bg at mode)
+                        (setq cur-fg fg cur-bg bg cur-attr at))
+                      (vector-push-extend ch out)))
                 (setq pos-r r pos-c (+ c 1))
                 (setf (aref (scr-fchars s) i) ch) (setf (aref (scr-ffgs s) i) fg)
                 (setf (aref (scr-fbgs s) i) bg) (setf (aref (scr-fattrs s) i) at)))))))

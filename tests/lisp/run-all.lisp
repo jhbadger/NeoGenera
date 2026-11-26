@@ -6,6 +6,7 @@
 (load "tests/lisp/ui-tests.lisp")
 (load "tests/lisp/tools-tests.lisp")
 (load "tests/lisp/process-tests.lisp")
+(load "tests/lisp/graphics-tests.lisp")
 (load "tests/lisp/docs-tests.lisp")
 (load "tests/lisp/settings-tests.lisp")
 (load "tests/lisp/math-tests.lisp")

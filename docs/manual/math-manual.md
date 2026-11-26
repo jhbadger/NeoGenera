@@ -90,6 +90,13 @@ Text plots use Unicode braille and block characters: [plot-scatter](fn:plot-scat
 [plot-boxplot](fn:plot-boxplot) and [plot-heatmap](fn:plot-heatmap) return strings; [show-plot](fn:show-plot) puts one in a window and `:histogram expr` plots a histogram from the Listener.
 [svg-scatter](fn:svg-scatter), [svg-line](fn:svg-line), [svg-histogram](fn:svg-histogram) and [svg-heatmap](fn:svg-heatmap) produce SVG documents that [write-svg](fn:write-svg) saves.
 
+**Graphs in pixels.** [graph-scatter](fn:graph-scatter), [graph-line](fn:graph-line), [graph-function](fn:graph-function),
+[graph-histogram](fn:graph-histogram) and [graph-heatmap](fn:graph-heatmap) draw the same kinds of plot as real images (anti-aliased
+lines and points, filled bars, colour scales) and return a graph. In the window system on a terminal that shows images (kitty or
+Ghostty) a graph returned to the Listener, or given to [show-plot](fn:show-plot), appears as the picture with its title and ranges
+around it; anywhere else it prints as the matching text plot, so code that makes graphs works on every terminal.
+`(graph-function #'sin 0 10 :title "sine")` is a quick try. `graph-image` is the picture, an image you can also draw on.
+
 ## Symbolic mathematics
 
 Expressions are ordinary Lisp lists such as `(+ (expt x 2) (* 3 x))`. [simplify](fn:simplify), [expand](fn:expand), [differentiate](fn:differentiate), [integrate](fn:integrate), [definite-integral](fn:definite-integral),

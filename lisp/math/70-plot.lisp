@@ -148,10 +148,15 @@
   (write-string plot stream) (terpri stream) (values))
 
 (defun show-plot (plot &key (title "Plot"))
-  "Show the plot string PLOT in a window when the window system is running, otherwise print it."
-  (if (and (boundp '*wm*) (symbol-value '*wm*))
-      (open-report (symbol-value '*wm*) title (lambda (w out) (declare (ignore w)) (write-string plot out) (terpri out)) :w 76 :h (min 30 (+ 4 (length (split-lines plot)))))
-      (print-plot plot))
+  "Show PLOT (a plot string, or a graph from GRAPH-SCATTER and friends) in a window when the window system is
+running, otherwise print it."
+  (let ((text (if (stringp plot) plot (graph-text plot))))
+    (if (and (boundp '*wm*) (symbol-value '*wm*))
+        (open-report (symbol-value '*wm*) title
+                     (lambda (w out) (declare (ignore w)) (if (stringp plot) (write-string plot out) (present plot :stream out)) (terpri out))
+                     :w (if (stringp plot) 76 (min 120 (+ (graph-cols plot) 12)))
+                     :h (min 40 (+ 4 (if (stringp plot) (length (split-lines plot)) (+ 4 (graph-rows plot))))))
+        (if (stringp plot) (print-plot plot) (progn (prin1 plot) (terpri)))))
   (values))
 
 (define-command (histogram :documentation "Show a histogram of the data a Lisp expression returns") ((expr string :prompt "Expression"))

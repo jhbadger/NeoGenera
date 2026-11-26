@@ -346,3 +346,20 @@ world")))
 
 (defvar *test-sink-stream* nil)
 (defvar *test-sink* nil)
+
+(defgeneric %t-dispatch-probe (x))
+(defmethod %t-dispatch-probe ((x t)) :t)
+(defmethod %t-dispatch-probe ((x restart)) :restart)
+
+(deftest classes-share-one-t
+  ;; the self-hosting build loads the system twice; built-in classes must survive the second load, or structure
+  ;; classes made by the first one fall outside methods specialized on T
+  (let ((tc (find-class t)) (bad nil))
+    (dolist (p (list-all-packages))
+      (dolist (s (%package-symbols p nil))
+        (let ((c (and (symbolp s) (get s '%class))))
+          (when (and c (not (eq (car (last (%cls-cpl c))) tc))) (setq bad (cons s bad))))))
+    (is-equal nil bad))
+  (is-equal :t (%t-dispatch-probe (current-process)))   ; a structure from the system image
+  (is-equal :t (%t-dispatch-probe (make-lock)))
+  (is-equal :t (%t-dispatch-probe 42)))

@@ -69,4 +69,22 @@ history. Command history can contain anything you typed, so check who can read y
 The output uses truecolor when the terminal supports it, 256 colours otherwise, and plain attributes in the
 `mono` theme. Only the cells that changed are redrawn. Every character is assumed to be one column wide.
 
+## Images and graphics
+
+When the window system starts in **kitty** or **Ghostty**, it asks the terminal whether it accepts the kitty graphics
+protocol and how big its cells are in pixels. If it does, images and graphs (see `graph-function` and the other graph
+functions in the [Mathematics manual](topic:math-manual)) are drawn by the terminal at full resolution. They are part
+of the window's text, so they scroll with it, are clipped by the window and are hidden by windows in front of them.
+In other terminals an image is drawn with half-block characters, two coloured pixels per cell, and a graph prints as
+a text plot. `:graphics` says which is in use.
+
+The `graphics` setting chooses: `auto` (the default: kitty and Ghostty), `on` (any terminal that answers the kitty
+protocol's query) or `off`. The environment variable `NG_GRAPHICS=on` or `off` overrides it, for example when the
+terminal is not recognized over ssh. Inside tmux graphics stay off.
+
+Images can be made and drawn on directly: `(make-image 200 100)`, then `image-line`, `image-disc`,
+`image-fill-rect` and `image-polyline` with colours from `(rgb r g b)`; `image-pixel` reads a pixel back. Return an
+image to the Listener, or call `(draw-image img)`, to see it. In the line-mode Listener in kitty or Ghostty, `draw-image`
+shows it at the cursor.
+
 See also the [Editor Manual](topic:editor-manual) and the [Developer Tools](topic:tools-manual).

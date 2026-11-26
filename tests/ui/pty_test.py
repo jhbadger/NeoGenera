@@ -5,14 +5,14 @@ A small VT100/xterm emulator replays the exact bytes the program writes (cursor 
 clear, UTF-8 text; colours are ignored), so this validates the screen diffing, the input parser
 (keys, mouse, resize) and terminal setup/restore against a real tty.
 """
-import os, pty, sys, time, select, struct, fcntl, termios, signal, re, tempfile, shutil
+import os, pty, sys, time, select, struct, fcntl, termios, signal, re, tempfile, shutil, unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class Term:
     def __init__(self, rows, cols):
         self.resize(rows, cols); self.buf = b""; self.cursor_visible = None
-        self.alt_screen = False; self.mouse = False; self.raw = b""
+        self.alt_screen = False; self.mouse = False; self.raw = b""; self.apcs = []
     def resize(self, rows, cols):
         self.rows, self.cols = rows, cols
         self.grid = [[" "] * cols for _ in range(rows)]; self.r = self.c = 0
@@ -27,6 +27,10 @@ class Term:
         i = 0
         while i < len(s):
             ch = s[i]
+            if ch == "\x1b" and i + 1 < len(s) and s[i + 1] in "_P":      # APC / DCS (kitty graphics, XTVERSION)
+                end = s.find("\x1b\\", i + 2)
+                if end < 0: self.buf = s[i:].encode("utf-8"); return
+                self.apcs.append(s[i + 2:end]); i = end + 2; continue
             if ch == "\x1b":
                 m = re.compile(r"\x1b\[([?0-9;]*)([A-Za-z])").match(s, i)
                 if not m:
@@ -47,6 +51,8 @@ class Term:
                 continue
             if ch == "\r": self.c = 0
             elif ch == "\n": self.r = min(self.rows - 1, self.r + 1)
+            elif unicodedata.combining(ch):                         # a combining mark joins the previous cell
+                if 0 < self.c <= self.cols: self.grid[self.r][self.c - 1] += ch
             elif ch >= " ":
                 if self.c < self.cols: self.grid[self.r][self.c] = ch
                 self.c += 1
@@ -55,11 +61,14 @@ class Term:
     def has(self, s): return s in self.text()
 
 class Session:
-    def __init__(self, rows=30, cols=100, home=None):
+    def __init__(self, rows=30, cols=100, home=None, env_extra=None, kitty=False):
         self.term = Term(rows, cols)
+        self.kitty = kitty                     # answer the graphics probes the way kitty does
         # NEOGENERA_HOME keeps the settings file away from the real ~/.neogenera
         env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor", USER="tester",
                    NEOGENERA_HOME=home or tempfile.mkdtemp(prefix="ng-pty-"))
+        for k in ("KITTY_WINDOW_ID", "GHOSTTY_RESOURCES_DIR", "TERM_PROGRAM", "NG_GRAPHICS", "TMUX"): env.pop(k, None)
+        env.update(env_extra or {})
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(ROOT); os.execvpe(os.path.join(ROOT, "bin/neogenera"), ["neogenera", "--ui"], env)
@@ -75,7 +84,13 @@ class Session:
                 except OSError: return False
                 if not data: return False
                 self.term.feed(data)
+                if self.kitty: self.answer(data)
         return True
+    def answer(self, data):
+        if b"\x1b_Gi=31," in data: self.send("\x1b_Gi=31;OK\x1b\\")
+        if b"\x1b[>q" in data: self.send("\x1bP>|kitty(0.35.2)\x1b\\")
+        if b"\x1b[16t" in data: self.send("\x1b[6;20;10t")
+        if b"\x1b[c" in data: self.send("\x1b[?62;22c")
     def wait_for(self, text, timeout=8):
         end = time.time() + timeout
         while time.time() < end:
@@ -154,6 +169,31 @@ def settings_persistence(home):
     check("saved history is recalled with Up", found)
     s.send("\x15")
     check("second session exits cleanly", clean_exit(quit_session(s)))
+
+def graphics_session():
+    """A terminal that answers like kitty: a graph is sent with the kitty graphics protocol and shown as placeholder cells."""
+    s = Session(30, 100, env_extra={"TERM": "xterm-kitty"}, kitty=True)
+    check("starts in a kitty-like terminal", s.wait_for("CL-USER>"))
+    s.send(":graphics\r")
+    check("graphics are detected (kitty, cell size from the terminal)", s.wait_for("kitty graphics protocol") and s.wait_for("kitty(0.35.2)"))
+    s.send("(graph-function (function sin) 0 6 :title \"Wave\")\r")
+    check("a graph is drawn", s.wait_for("Wave"))
+    s.pump(0.5)
+    sent = [a for a in s.term.apcs if a.startswith("Ga=T,U=1")]
+    check("the image is transmitted with a virtual placement", len(sent) > 0 and "f=24" in sent[0] and "c=60" in sent[0] and "r=16" in sent[0])
+    check("its cells are Unicode placeholders", "\U0010EEEE" in s.term.text())
+    check("the image is not drawn as text", "\u28ff" not in s.term.text())
+    status = quit_session(s)
+    check("graphics session exits cleanly", clean_exit(status))
+    check("the images are freed at exit", any(a.startswith("Ga=d,d=A") for a in s.term.apcs))
+
+    # a plain terminal is not probed and gets the text plot
+    s = Session(30, 100)
+    s.wait_for("CL-USER>")
+    s.send("(graph-function (function sin) 0 6 :title \"Plain\")\r")
+    check("elsewhere a graph prints as a text plot", s.wait_for("Plain") and not any(a.startswith("G") for a in s.term.apcs))
+    check("a plain terminal is not probed", b"\x1b_Gi=31" not in s.term.raw)
+    check("plain session exits cleanly", clean_exit(quit_session(s)))
 
 def main():
     home = tempfile.mkdtemp(prefix="ng-pty-")
@@ -254,6 +294,7 @@ def main():
     final_screen = s.term.text()
     try: settings_persistence(home)
     finally: shutil.rmtree(home, ignore_errors=True)
+    graphics_session()
     print("\n%d failure(s)" % len(failures))
     if failures:
         print("--- final screen ---"); print(final_screen)
