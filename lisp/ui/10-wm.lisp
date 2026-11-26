@@ -549,7 +549,11 @@ nested event loop (the window debugger) takes its input from the same script.")
   (wm-draw wm)
   wm)
 
-(defun %ms-now () (floor (get-internal-real-time) (floor internal-time-units-per-second 1000)))
+(defun %term-sync (begin)
+  "Begin or end a synchronized update: the terminal holds what it shows until the update ends."
+  (%term-write-codes (map 'vector #'char-code (format nil "~C[?2026~C" (code-char 27) (if begin #\h #\l)))))
+
+(defun %ms-now ()(floor (get-internal-real-time) (floor internal-time-units-per-second 1000)))
 
 (defun wm-animating-windows (wm)
   (remove-if-not #'window-frame-interval (wm-windows wm)))
@@ -573,22 +577,30 @@ no window is animated."
 (defun wm-serve (wm)
   "One turn of the event loop on the terminal: redraw if needed, then wait for input (up to 250 ms, or until an
 animated window's next frame) and handle it."
-  (when (wm-dirty wm) (wm-draw wm) (screen-flush (wm-screen wm)))
-  (unless (wm-quit wm)
-    (let* ((wait (wm-animate wm)) (ev (%term-read-event (if wait (max 1 (min 250 wait)) 250))))
-      (cond (ev
-             (let ((n 0))
-               (loop (wm-handle-event wm ev)
-                     (setq n (+ n 1))
-                     (setq ev (and (< n 60) (not (wm-quit wm)) (%term-read-event 0)))
-                     (unless ev (return)))))
-            ((null wait) (wm-handle-event wm (list :tick))))
-      ;; while windows are animated the wait is shorter than a tick, so ticks go by the clock
-      (when wait
-        (let ((now (%ms-now)))
-          (when (>= (- now (wm-last-tick wm)) 250)
-            (setf (wm-last-tick wm) now)
-            (wm-handle-event wm (list :tick))))))))
+  ;; A frame (new images for animated windows, then the changed cells) is bracketed as a synchronized update
+  ;; (DEC mode 2026): the terminal shows it all at once instead of half-drawn, which would flicker.  Terminals
+  ;; without the mode ignore it.
+  (let* ((sync (or (wm-dirty wm) (wm-animating-windows wm))) (wait nil))
+    (when sync (%term-sync t))
+    (unwind-protect
+         (progn (setq wait (wm-animate wm))
+                (when (wm-dirty wm) (wm-draw wm) (screen-flush (wm-screen wm))))
+      (when sync (%term-sync nil)))
+    (unless (wm-quit wm)
+      (let ((ev (%term-read-event (if wait (max 1 (min 250 wait)) 250))))
+        (cond (ev
+               (let ((n 0))
+                 (loop (wm-handle-event wm ev)
+                       (setq n (+ n 1))
+                       (setq ev (and (< n 60) (not (wm-quit wm)) (%term-read-event 0)))
+                       (unless ev (return)))))
+              ((null wait) (wm-handle-event wm (list :tick))))
+        ;; while windows are animated the wait is shorter than a tick, so ticks go by the clock
+        (when wait
+          (let ((now (%ms-now)))
+            (when (>= (- now (wm-last-tick wm)) 250)
+              (setf (wm-last-tick wm) now)
+              (wm-handle-event wm (list :tick)))))))))
 
 (defun wm-feed (wm bytes)
   "Feed terminal input BYTES (a string of escape sequences / text) through the real parser."

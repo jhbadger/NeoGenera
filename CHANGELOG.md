@@ -6,6 +6,8 @@
   animated by colour-map cycling, or rippling rings), Munching Squares, Lissajous, Bouncing Lines and Life. Space pauses,
   `N` restarts, `+`/`-` change the speed. Windows can now be animated (`window-frame-interval`, `window-animate`), and
   palette images (`%idx-disc`, `%idx-map`) and `image-changed` redraw an image in place. `define-demo` adds more.
+* The window system draws each frame as a synchronized update (DEC mode 2026), so terminals that support it (kitty,
+  Ghostty, iTerm2, WezTerm, ...) never show a half-drawn screen: animations no longer flicker.
 * **The Pascal Tool Kit**, after the Symbolics one: ISO Pascal and Pascal/VS compiled into Lisp (and then to bytecode), with
   Lisp's integers (no overflow), sets as unbounded bit masks, detection of uninitialised variables, range, subscript and
   pointer checks, and run-time errors that name the routine and line and enter the debugger. Units

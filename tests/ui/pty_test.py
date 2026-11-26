@@ -208,6 +208,11 @@ def demo_session():
     s.pump(1.0)
     frames = len([a for a in s.term.apcs if a.startswith("Ga=T,U=1")]) - before
     check("the demo animates by itself (%d frames in a second)" % frames, frames >= 8)
+    # every image chunk is sent inside a synchronized update, so the terminal never shows a half-sent frame
+    raw = s.term.raw; begin, end = b"\x1b[?2026h", b"\x1b[?2026l"
+    starts = [m.start() for m in re.finditer(re.escape(b"\x1b_G"), raw)][-20:]
+    check("frames are synchronized updates",
+          len(starts) > 0 and all(raw.rfind(begin, 0, p) > raw.rfind(end, 0, p) for p in starts))
     s.send(" "); s.pump(0.3); paused_at = len([a for a in s.term.apcs if a.startswith("Ga=T,U=1")])
     s.pump(0.8)
     check("space pauses it", len([a for a in s.term.apcs if a.startswith("Ga=T,U=1")]) == paused_at and s.term.has("Space resume"))
