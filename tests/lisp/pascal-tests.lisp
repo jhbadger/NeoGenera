@@ -335,7 +335,16 @@ begin write('Your name? '); readln(name); write('Two numbers? '); readln(n, m); 
   (multiple-value-bind (wm lw) (make-test-wm 40 100)
     (run-script wm (script-lines ":execute pascal hello no" ":show pascal programs"))
     (is (pane-has lw "hello from Pascal"))
-    (is (pane-has lw "PASCAL-USER:hello"))))
+    (is (pane-has lw "PASCAL-USER:hello")))
+  ;; :Compile Pascal and :Compile Pascal File both compile a file
+  (let ((f (pas-tmp "cmd.pas")))
+    (with-open-file (s f :direction :output) (write-string "program cmdtest; begin writeln('compiled by command') end." s))
+    (multiple-value-bind (wm lw) (make-test-wm 40 100)
+      (run-script wm (script-lines (format nil ":compile pascal ~A" f) (format nil ":compile pascal file ~A" f) ":execute pascal cmdtest no"))
+      (is (not (pane-has lw "Unknown command")))
+      (is (pane-has lw "cmdtest compiled"))
+      (is (pane-has lw "compiled by command")))
+    (delete-file f)))
 
 ;;; ---- Pascal mode ---------------------------------------------------------------------------------------------
 

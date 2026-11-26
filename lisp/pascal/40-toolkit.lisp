@@ -306,10 +306,17 @@ whose attribute list names no package are compiled into DEFAULT-PACKAGE.
     ((name word :prompt "Pascal program") (init-to-zero word :prompt "Init_to_zero (yes or no)" :default "no"))
   (pascal-execute name :init-to-zero (and init-to-zero (member (string-downcase init-to-zero) '("yes" "y" "t" "true") :test #'string=))))
 
-(define-command (compile-pascal-file :documentation "Compile a Pascal file into the running world") ((path string :prompt "Pascal file"))
+(defun %pascal-compile-file-command (path)
   (let ((names (handler-case (pascal-load-file path)
                  (error (e) (format t "~A~%" e) nil))))
     (when names (format t "~{~A~^, ~} compiled~%" (mapcar (lambda (n) (string-downcase (symbol-name n))) names)))))
+
+(define-command (compile-pascal-file :documentation "Compile a Pascal file into the running world") ((path string :prompt "Pascal file"))
+  (%pascal-compile-file-command path))
+
+;;; :Compile Pascal test.pas -- the shorter spelling (the longer command wins when FILE is typed)
+(define-command (compile-pascal :documentation "Compile a Pascal file into the running world") ((path string :prompt "Pascal file"))
+  (%pascal-compile-file-command path))
 
 (define-command (show-pascal-programs :documentation "List the compiled Pascal main programs") ()
   (let ((ps (pascal-programs)))

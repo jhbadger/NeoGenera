@@ -8,7 +8,7 @@
   (`unit_specification`, `unit_implementation`, `using_units`), `def-program` systems, `%include`, conformant arrays,
   `lispobject` and the `lisp` routine directive for calling Lisp, and `ROUTINE<-PROGRAM` functions for calling Pascal.
   `pascal-execute` (with `:input`, `:output`, `:init-to-zero`, `:save-environment`, ...) runs a program, reading its input
-  in the Listener; `:Execute Pascal`, `:Compile Pascal File`, `:Show Pascal Programs`. Manual: `:doc pascal-manual`.
+  in the Listener; `:Execute Pascal`, `:Compile Pascal` (or `:Compile Pascal File`), `:Show Pascal Programs`. Manual: `:doc pascal-manual`.
 * **Pascal mode** in the editor (`.pas`, `.pascal`, `.p`): colouring, indentation, Electric Pascal mode, motion and
   deletion by statement, routine, expression and token, syntax-error finding, templates with template items and their
   refinement, completion of reserved words, closing constructs, compiling the routine at point or the buffer, compiler

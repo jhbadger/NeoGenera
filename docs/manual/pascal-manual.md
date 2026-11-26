@@ -298,7 +298,7 @@ From Lisp:
 | `(pascal-translate text &key package dialect)` | The Lisp forms for the text, without compiling them |
 | `(pascal-compiler-warnings)` | The warnings of the last compilation of each file or buffer |
 
-and the Listener command `:Compile Pascal File`. The warnings of the last compilation of each file or buffer are kept;
+and the Listener command `:Compile Pascal File` (or just `:Compile Pascal test.pas`). The warnings of the last compilation of each file or buffer are kept;
 `:Show Pascal Warnings` lists them and the editor's `C-c C-w` visits them. Compiler options:
 
 | Variable | Default | |
