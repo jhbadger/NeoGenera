@@ -158,7 +158,7 @@ argument is missing, or signals an error for unknown/ambiguous commands."
   (format t "  Type Lisp forms, or commands starting with a colon (abbreviations work: :sh pack).~%")
   (format t "  Tab completes commands and symbols.  Up/Down browse history.  C-l clears the screen.~%")
   (format t "  Results are mouse-sensitive: left click = default action, middle = copy to input, right = menu.~%")
-  (format t "  Window keys: F6 next window, F7 re-tile, F8 theme, F10 quit.  Drag title bars to move, the corner to resize.~%")
+  (format t "  Window keys: F6 next window, F7 re-tile, F8 theme, F9 select (then L E P D I S), F10 quit (asks first).  Drag title bars to move, the corner to resize.~%")
   (format t "~&Documentation:~%")
   (format t "  :tutorial        learn NeoGenera step by step (:lessons lists the lessons)~%")
   (format t "  :doc [topic]     open the manual, or the documentation of a topic or symbol~%")

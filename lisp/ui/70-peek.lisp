@@ -190,3 +190,5 @@
     (setf (wm-message *wm*) (format nil "Process ~A got an error: ~A  (:peek to look)" (process-name p) (condition-report-string c))
           (wm-dirty *wm*) t)))
 (setq *process-error-hook* #'%announce-process-error)
+
+(define-select-activity #\P "Peek" (lambda (w) (typep w 'peek-window)) #'open-peek)

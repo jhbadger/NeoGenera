@@ -403,3 +403,5 @@ other entries of an existing file are kept.  Returns PATH."
     (if w
         (progn (report-refresh w) (wm-raise wm w) w)
         (open-report wm "Settings" (settings-producer) :class 'settings-window :w 64 :h 24))))
+
+(define-select-activity #\S "Settings" (lambda (w) (typep w 'settings-window)) #'open-settings-window)

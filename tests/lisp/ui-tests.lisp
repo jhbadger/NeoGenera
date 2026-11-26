@@ -377,7 +377,18 @@
     (is (not (eq :classic (theme-name *theme*))))
     (set-theme :classic)
     (is (not (wm-quit wm)))
+    (wm-feed wm (esc "[21~"))                    ; F10 asks first ...
+    (is (not (wm-quit wm)))
+    (is (screen-has wm "Quit NeoGenera?"))
+    (wm-feed wm "x")                             ; ... any other key cancels (and is not typed)
+    (is (not (wm-quit wm)))
+    (is (screen-has wm "Quit cancelled"))
     (wm-feed wm (esc "[21~"))
+    (wm-feed wm "y")                             ; y confirms
+    (is (wm-quit wm))
+    (setf (wm-quit wm) nil)
+    (wm-feed wm (esc "[21~"))
+    (wm-feed wm (esc "[21~"))                    ; so does F10 again
     (is (wm-quit wm))))
 
 (deftest scrolling-and-scrollbar
@@ -445,7 +456,12 @@
         (wm-feed wm (mouse-bytes :release (car sp) row))
         (is (not (eq th (theme-name *theme*)))))
       (set-theme :classic)
-      (let ((sp (cadddr (wm-button-spans))))        ; F10 quit
+      (let ((sp (find :f10 (wm-button-spans) :key #'caddr)))   ; F10 quit: the click asks, a second click quits
+        (wm-feed wm (mouse-bytes :press (car sp) row))
+        (wm-feed wm (mouse-bytes :release (car sp) row))
+        (is (not (wm-quit wm)))
+        (wm-draw wm)
+        (is (screen-has wm "Quit NeoGenera?"))
         (wm-feed wm (mouse-bytes :press (car sp) row))
         (is (wm-quit wm))))))
 
@@ -466,3 +482,57 @@
     (wm-draw wm)
     (type-line wm "(+ 1 1)")
     (is (screen-has wm "=> 2"))))
+
+(deftest select-key-and-quit-warnings
+  (multiple-value-bind (wm lw) (make-test-wm 30 100)
+    (wm-feed wm (esc "[20~"))                    ; F9
+    (wm-draw wm)
+    (is (eq :select (wm-pending wm)))
+    (is (screen-has wm "Select:"))
+    (is (screen-has wm "E Editor"))
+    (wm-feed wm "e")                             ; F9 E opens an editor
+    (let ((ed (find-if (lambda (w) (typep w 'editor-window)) (wm-windows wm))))
+      (is ed)
+      (is (eq ed (wm-focus wm)))
+      (wm-feed wm (esc "[20~")) (wm-feed wm "l") ; F9 L goes back to the Listener
+      (is (eq lw (wm-focus wm)))
+      (wm-feed wm (esc "[20~")) (wm-feed wm "E") ; upper case works; the existing editor is reused
+      (is (eq ed (wm-focus wm)))
+      (is-equal 1 (count-if (lambda (w) (typep w 'editor-window)) (wm-windows wm)))
+      ;; a second Listener: F9 L from a Listener goes to the other one
+      (wm-feed wm (esc "[20~")) (wm-feed wm "l")
+      (let ((lw2 (make-instance 'listener-window :title "Listener 2")))
+        (wm-add-window wm lw2)
+        (wm-feed wm (esc "[20~")) (wm-feed wm "l")
+        (is (eq lw (wm-focus wm)))
+        (wm-feed wm (esc "[20~")) (wm-feed wm "l")
+        (is (eq lw2 (wm-focus wm))))
+      ;; F9 P opens Peek; unknown letters cancel and are not typed
+      (wm-feed wm (esc "[20~")) (wm-feed wm "p")
+      (is (typep (wm-focus wm) 'peek-window))
+      (wm-feed wm (esc "[20~")) (wm-feed wm "z")
+      (wm-draw wm)
+      (is (screen-has wm "Select cancelled"))
+      (is (null (wm-pending wm)))
+      (wm-feed wm (esc "[20~")) (wm-feed wm "i")
+      (wm-draw wm)
+      (is (screen-has wm "No Inspector window is open"))
+      ;; F10 names what would be lost
+      (let ((b (ed-buffer ed)))
+        (setf (buffer-file b) "/tmp/ng-select-test.lisp")
+        (buf-insert b "x")
+        (wm-feed wm (esc "[21~"))
+        (wm-draw wm)
+        (is (screen-has wm "1 modified buffer"))
+        (wm-feed wm (esc "[A"))                  ; an arrow key cancels too
+        (is (not (wm-quit wm)))
+        (setf (buffer-modified b) nil))
+      (let ((p (process-run-function "Lingerer" (lambda () (process-sleep 100)))))
+        (wm-feed wm (esc "[21~"))
+        (wm-draw wm)
+        (is (screen-has wm "1 background process"))
+        ;; clicking elsewhere cancels; clicking the F10 button confirms
+        (wm-feed wm (mouse-bytes :press 10 5 0))
+        (is (null (wm-pending wm)))
+        (is (not (wm-quit wm)))
+        (process-kill p)))))

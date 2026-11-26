@@ -314,3 +314,5 @@
                 (t (format t "~&No source recorded for ~S~%" name))))))
 
 (%install-tool-hooks)
+
+(define-select-activity #\I "Inspector" (lambda (w) (typep w 'inspector-window)) nil)

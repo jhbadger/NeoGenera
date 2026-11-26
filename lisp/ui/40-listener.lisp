@@ -404,3 +404,8 @@ Returns (values list-of-values ok-p)."
                (%in-listener w (lambda () (setq result (execute-command-line (subseq trimmed 1)))))
                (when (and (consp result) (eq (car result) :prompt)) (setf (lw-pending w) result))))
             (t (%eval-text w text))))))
+
+;;; F9 L selects a Listener (only plain ones: report windows are Listener subclasses)
+(define-select-activity #\L "Listener" (lambda (w) (eq (class-of w) (find-class 'listener-window)))
+  (lambda (wm) (let ((lw (make-instance 'listener-window :title "Listener" :x 2 :y 1 :w (max 40 (- (wm-cols wm) 6)) :h (max 8 (- (wm-area-height wm) 4)))))
+                 (wm-add-window wm lw) lw)))

@@ -304,3 +304,11 @@
     (if (and wm locs)
         (let ((l (car locs))) (open-editor wm :file (cadr l) :position (caddr l)))
         nil)))
+
+;;; ---- the window system: F9 E, and F10's warning about unsaved files ------------------------------------------
+
+(defmethod window-quit-warning ((w editor-window))
+  (let ((n (count-if (lambda (b) (and (buffer-file b) (buffer-modified b))) (ed-buffers w))))
+    (and (> n 0) (format nil "~D modified buffer~:P" n))))
+
+(define-select-activity #\E "Editor" (lambda (w) (typep w 'editor-window)) (lambda (wm) (open-editor wm)))

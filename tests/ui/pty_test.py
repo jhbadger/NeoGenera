@@ -97,7 +97,7 @@ def check(name, ok):
 
 def quit_session(s):
     """Press F10 and wait for the process to exit; returns its wait status, or None if it did not."""
-    s.send("\x1b[21~")
+    s.send("\x1b[21~"); s.pump(0.3); s.send("y")      # F10, then confirm
     deadline = time.time() + 6
     while time.time() < deadline:
         s.pump(0.2)
@@ -235,7 +235,7 @@ def main():
     check("a second process starts", s.wait_for("#<PROCESS Sleeper"))
 
     # leave with F10 (with the Sleeper still alive) and verify the terminal is restored
-    s.send("\x1b[21~")
+    s.send("\x1b[21~"); s.pump(0.3); s.send("y")      # F10, then confirm
     deadline = time.time() + 6; exited = None
     while time.time() < deadline:
         s.pump(0.2)

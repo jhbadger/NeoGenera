@@ -52,6 +52,8 @@
 (defmethod window-tick ((w window)) nil)
 (defmethod window-resized ((w window)) nil)
 (defmethod window-package ((w window)) *package*)
+(defgeneric window-quit-warning (window))
+(defmethod window-quit-warning ((w window)) nil)      ; a string such as "2 modified buffers" makes F10 mention it
 
 (defun window-inner (win)
   (if (window-border win)
@@ -146,7 +148,8 @@
    (busy :initform nil :accessor wm-busy)
    (message :initform nil :accessor wm-message)
    (layout :initform :overlap :accessor wm-layout)
-   (last-clock :initform "" :accessor wm-last-clock)))
+   (last-clock :initform "" :accessor wm-last-clock)
+   (pending :initform nil :accessor wm-pending)))      ; :quit or :select while that prompt is up
 
 (defun make-wm (rows cols) (setq *wm* (make-instance 'wm :screen (make-screen rows cols))))
 (defun wm-rows (wm) (scr-rows (wm-screen wm)))
@@ -286,7 +289,7 @@
 (defun %pad-to (str n) (if (>= (length str) n) (subseq str 0 n) (%string-concat str (make-string (- n (length str)) #\Space))))
 
 (defvar *wm-buttons*
-  '(("F6 next window" . :f6) ("F7 tile" . :f7) ("F8 theme" . :f8) ("F10 quit" . :f10))
+  '(("F6 next window" . :f6) ("F7 tile" . :f7) ("F8 theme" . :f8) ("F9 select" . :f9) ("F10 quit" . :f10))
   "Clickable commands shown on the mouse-documentation line: (label . key it stands for).")
 
 (defun wm-button-spans ()
@@ -362,12 +365,82 @@
            (wm-tile wm (case (wm-layout wm) (:overlap :horizontal) (:horizontal :vertical) (:vertical :main) (:main :grid) (t :horizontal))) t)
           ((eq c :f8) (next-theme) (screen-invalidate (wm-screen wm))
            (setf (wm-message wm) (format nil "Theme: ~A" (symbol-name (theme-name *theme*)))) t)
-          ((eq c :f10) (setf (wm-quit wm) t) t)
+          ((eq c :f9) (wm-begin-select wm) t)
+          ((eq c :f10) (wm-request-quit wm) t)
           (t nil))))
+
+;;; ---- F10: quit, after a confirmation ---------------------------------------------------------------------
+
+(defun wm-quit-warnings (wm)
+  "What quitting now would lose: modified buffers, background processes, ..."
+  (let ((acc nil) (n (- (%process-count) 1)))
+    (dolist (w (wm-windows wm)) (let ((m (window-quit-warning w))) (when m (setq acc (cons m acc)))))
+    (when (> n 0) (setq acc (cons (format nil "~D background process~:P" n) acc)))
+    (nreverse acc)))
+
+(defun wm-request-quit (wm)
+  "F10: ask before leaving the window system; F10 again (or y) quits, anything else cancels."
+  (let ((warnings (wm-quit-warnings wm)))
+    (setf (wm-pending wm) :quit
+          (wm-message wm) (format nil "Quit NeoGenera?~@[ (~{~A~^, ~})~]   F10 or y: quit   any other key: cancel" warnings)
+          (wm-dirty wm) t)))
+
+(defun %quit-confirm-key-p (key)
+  (let ((c (key-code key)))
+    (or (eq c :f10) (and (integerp c) (zerop (logand (key-mods key) (logior +ctrl+ +meta+))) (member c '(121 89))))))
+
+;;; ---- F9: the Select key -------------------------------------------------------------------------------------
+;;; F9 then a letter selects an activity, as Genera's SELECT key did: the most recent window of that kind, the
+;;; next one if one is already selected, or a new one if there is none.  Activities are registered by the
+;;; files that define their windows.
+
+(defvar *select-activities* nil "Entries (char label predicate open-function), in the order they are listed.")
+
+(defun define-select-activity (char label predicate open-function)
+  "Register an activity for F9 CHAR.  PREDICATE recognizes its windows; OPEN-FUNCTION (of the WM) makes a new
+one, or is NIL when the activity cannot be started from the key."
+  (let ((entry (list (char-upcase char) label predicate open-function)))
+    (setq *select-activities*
+          (if (find (char-upcase char) *select-activities* :key #'car)
+              (mapcar (lambda (e) (if (char= (car e) (char-upcase char)) entry e)) *select-activities*)
+              (append *select-activities* (list entry))))
+    char))
+
+(defun %select-prompt ()
+  (format nil "Select:~{  ~A~}   any other key: cancel"
+          (mapcar (lambda (e) (format nil "~A ~A" (car e) (cadr e))) *select-activities*)))
+
+(defun wm-begin-select (wm)
+  (setf (wm-pending wm) :select (wm-message wm) (%select-prompt) (wm-dirty wm) t))
+
+(defun wm-select-activity (wm char)
+  "Select the activity registered for CHAR; returns the window, or NIL."
+  (let ((e (find (char-upcase char) *select-activities* :key #'car)))
+    (when e
+      (let* ((wins (remove-if-not (cadr (cdr e)) (wm-windows wm)))      ; front to back
+             (focus (wm-focus wm)))
+        (cond ((and wins (member focus wins) (cdr wins))             ; already there: go to the next one
+               (wm-raise wm (car (last wins))) (car (last wins)))
+              (wins (wm-raise wm (car wins)) (car wins))
+              ((cadddr e) (funcall (cadddr e) wm))
+              (t (setf (wm-message wm) (format nil "No ~A window is open" (cadr e))) nil))))))
+
+(defun wm-pending-key (wm key)
+  (let ((what (wm-pending wm)) (c (key-code key)))
+    (setf (wm-pending wm) nil (wm-message wm) nil)
+    (case what
+      (:quit (if (%quit-confirm-key-p key) (setf (wm-quit wm) t) (setf (wm-message wm) "Quit cancelled")))
+      (:select (if (and (integerp c) (< c 128) (zerop (logand (key-mods key) (logior +ctrl+ +meta+)))
+                        (find (char-upcase (code-char c)) *select-activities* :key #'car))
+                   (wm-select-activity wm (code-char c))
+                   (unless (eq c :f9) (setf (wm-message wm) "Select cancelled")))))
+    (setf (wm-dirty wm) t)
+    t))
 
 (defun wm-key (wm key)
   (setf (wm-message wm) nil)
-  (cond ((wm-popups wm) (window-key (car (wm-popups wm)) key))
+  (cond ((wm-pending wm) (wm-pending-key wm key))
+        ((wm-popups wm) (window-key (car (wm-popups wm)) key))
         ((wm-global-key wm key) t)
         ((wm-focus wm) (window-key (wm-focus wm) key))))
 
@@ -405,6 +478,11 @@
     (when (eq kind :release) (setf (wm-drag wm) nil))))
 
 (defun wm-mouse (wm kind x y button mods)
+  (when (wm-pending wm)                     ; a prompt is up: clicking its button answers it, any other click cancels
+    (when (eq kind :press)
+      (let ((b (and (= button 0) (wm-button-at wm x y))))
+        (wm-pending-key wm (make-key (if (eq b (if (eq (wm-pending wm) :quit) :f10 :f9)) b :cancel) 0))))
+    (return-from wm-mouse nil))
   (setf (wm-message wm) nil)
   (cond ((wm-popups wm)
          (let ((p (car (wm-popups wm))))

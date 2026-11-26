@@ -241,3 +241,5 @@
   :validate #'%validate-bookmarks
   :get (lambda () *doc-bookmarks*)
   :set (lambda (v) (setq *doc-bookmarks* v)))
+
+(define-select-activity #\D "Documentation" (lambda (w) (typep w 'doc-window)) (lambda (wm) (open-doc-window wm :contents)))

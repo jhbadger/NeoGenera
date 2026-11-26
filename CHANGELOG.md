@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **Window system: Select key and a quit confirmation.** F9 then a letter selects an activity, like Genera's SELECT key (`L` Listener,
+  `E` Editor, `P` Peek, `D` Documentation, `I` Inspector, `S` Settings; `define-select-activity` adds more). F10 now asks before quitting,
+  naming modified buffers and background processes; F10 again or `y` quits.
+
 * **Processes and Peek.** Preemptive Lisp processes on threads that share one interpreter lock: `process-run-function`, `process-wait`
   (and `-with-timeout`), `process-sleep`, `process-join`, `process-interrupt`, `process-kill`, `process-arrest`, locks with `with-lock-held`,
   `without-interrupts`. Special bindings are per process; background output is kept per process; errors are recorded and announced.

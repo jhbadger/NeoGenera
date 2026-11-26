@@ -10,7 +10,15 @@ colour themes and a Genera-style status line.
 | F6 or Meta-o | next window |
 | F7 or Meta-t | re-tile: horizontal, vertical, main and stack, grid |
 | F8 | next colour theme: classic, green, amber, mono |
-| F10 | quit |
+| F9, then a letter | **select** an activity, like Genera's SELECT key: `L` Listener, `E` Editor, `P` Peek, `D` Documentation, `I` Inspector, `S` Settings |
+| F10 | quit: asks first (and mentions modified buffers and background processes); F10 again or `y` quits, any other key cancels |
+
+F9 followed by a letter brings the most recent window of that kind to the front; if one is already selected
+it goes to the next one, and if there is none it opens one (the Inspector only opens with `:inspect`).
+`define-select-activity` registers more.
+
+A terminal does not report a modifier key pressed on its own, and sends the same codes for both Alt keys,
+so Alt cannot serve as the Select key: Alt+letter arrives as Meta+letter, which the editor uses.
 
 Drag a title bar to move a window, the bottom-right corner to resize it, and the scrollbar thumb to scroll.
 Click `[x]` to close. The mouse wheel scrolls the window under the pointer.
