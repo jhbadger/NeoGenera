@@ -148,6 +148,24 @@ world" (buffer-string b))
 
 ;;; ---- the editor window ----------------------------------------------------------------------------------------
 
+(deftest editor-escape-is-meta-prefix
+  ;; a lone ESC (typed by hand, or from a terminal that cannot send Meta) prefixes the next key with Meta
+  (multiple-value-bind (wm ed) (make-editor-wm)
+    (ed-type wm "foo bar baz")
+    (ed-keys wm "ESC b")
+    (is-equal 8 (point-col (ed-buffer ed)))
+    (ed-keys wm "C-a ESC f ESC f")
+    (is-equal 7 (point-col (ed-buffer ed)))
+    (ed-keys wm "ESC C-g")                                          ; cancels the prefix
+    (is (null (ed-pending ed)))
+    (ed-type wm "q")                                                ; and plain typing works again
+    (is-equal "foo barq baz" (ed-text ed))
+    (ed-keys wm "ESC q")                                            ; unbound M-q does not insert a q
+    (is-equal "foo barq baz" (ed-text ed))
+    (ed-keys wm "ESC x")
+    (is (ed-minibuf ed))
+    (is-equal "M-x " (mb-prompt (ed-minibuf ed)))))
+
 (deftest editor-editing
   (multiple-value-bind (wm ed) (make-editor-wm)
     (ed-type wm "hello world")
