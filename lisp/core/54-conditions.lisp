@@ -160,7 +160,15 @@
 ;;; ---- restarts -------------------------------------------------------------------------
 
 (defstruct (restart (:conc-name restart-) (:constructor %make-restart) (:copier nil))
-  name fn test report)
+  name fn test report lambda-list)          ; LAMBDA-LIST: of a RESTART-CASE clause, else :UNKNOWN
+
+(defun restart-arguments (r)
+  "How restart R takes arguments: :NONE, :OPTIONAL, :REQUIRED, or :UNKNOWN."
+  (let ((ll (restart-lambda-list r)))
+    (cond ((eq ll :unknown) :unknown)
+          ((and ll (not (member (car ll) '(&optional &rest &key &aux)))) :required)
+          ((intersection ll '(&optional &rest &key)) :optional)
+          (t :none))))
 
 (defun compute-restarts (&optional condition)
   (let ((acc nil))
@@ -197,7 +205,7 @@
 (defmacro restart-bind (bindings &body body)
   `(let ((*restart-clusters*
           (cons (list ,@(mapcar (lambda (b)
-                                  `(%make-restart :name ',(car b) :fn ,(cadr b)
+                                  `(%make-restart :name ',(car b) :fn ,(cadr b) :lambda-list :unknown
                                                   :report ,(getf (cddr b) :report-function)
                                                   :test ,(getf (cddr b) :test-function)))
                                 bindings))
@@ -205,13 +213,13 @@
      ,@body))
 
 (defun %restart-case (thunk specs)
-  ;; SPECS: list of (name function report test)
+  ;; SPECS: list of (name function report test lambda-list)
   (let* ((tag (list nil)) (ok (list nil))
          (restarts (let ((i -1))
                      (mapcar (lambda (sp)
                                (setq i (+ i 1))
                                (let ((idx i))
-                                 (%make-restart :name (car sp) :report (caddr sp) :test (cadddr sp)
+                                 (%make-restart :name (car sp) :report (caddr sp) :test (cadddr sp) :lambda-list (car (cddddr sp))
                                                 :fn (lambda (&rest args) (throw tag (cons idx args))))))
                              specs)))
          (r (catch tag
@@ -237,7 +245,8 @@
                         (go top))))
                  `(list ',(car cl) (lambda ,(cadr cl) ,@rest)
                         ,(if (stringp report) report (if report `(function ,report) nil))
-                        ,(if test `(function ,test) nil))))
+                        ,(if test `(function ,test) nil)
+                        ',(cadr cl))))
              clauses))))
 
 (defmacro with-simple-restart ((name fmt &rest args) &body body)

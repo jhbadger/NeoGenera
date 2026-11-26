@@ -43,8 +43,11 @@ profile favours call-heavy code.
 ## The debugger
 
 When an error is not handled the debugger shows the condition, the restarts and a backtrace with the argument
-values. In the line-mode Listener commands are `N` (invoke restart N), `:bt`, `:frame N`, `:edit`, `:abort`.
-In the window Listener each frame is a presentation; right-click for *Edit definition*.
+values. The commands are the same in both Listeners: `N` (invoke restart N), `:bt`, `:frame N`, `:abort`,
+`:continue`; the line-mode Listener also has `:edit`. Forms typed in the debugger are evaluated in the
+environment of the error. In the window Listener restarts and frames are presentations: click a restart to
+invoke it, and right-click a frame for *Edit definition* (see [The Window System](topic:window-system)).
+`(break)` enters the debugger with a *Return from BREAK* restart.
 
 ## Tests
 

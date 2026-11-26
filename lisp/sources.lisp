@@ -30,6 +30,7 @@
     "lisp/ui/20-present.lisp"
     "lisp/ui/30-commands.lisp"
     "lisp/ui/40-listener.lisp"
+    "lisp/ui/42-debugger.lisp"
     "lisp/ui/50-ui.lisp"
     "lisp/tools/00-xref.lisp"
     "lisp/tools/10-trace.lisp"

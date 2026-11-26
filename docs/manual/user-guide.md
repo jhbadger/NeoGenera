@@ -64,10 +64,10 @@ the place where it is defined.
 
 ## When something goes wrong
 
-In the line-mode Listener an unhandled error enters the debugger: it shows the error, the restarts and a
-backtrace with the argument values. Type a restart number to invoke it, `:bt` for more frames, `:frame 2` to
-select one, `:edit` to jump to the source of the selected function, `:abort` to return. In the window
-Listener the error is shown with a clickable backtrace instead. See [Developer Tools](topic:tools-manual).
+An unhandled error enters the debugger: it shows the error, the restarts and a backtrace with the argument
+values. Type a restart number to invoke it (in the window Listener you can also click it), `:bt` for more
+frames, `:frame 2` to see one, `:abort` to return. In the line-mode Listener, `:edit` jumps to the source of
+the selected function. See [Developer Tools](topic:tools-manual).
 
 ## Where next
 

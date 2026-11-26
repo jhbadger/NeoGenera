@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* **The debugger in the window Listener.** An error no longer unwinds. The Listener shows the error, the restarts and the
+  backtrace, all clickable, and the prompt becomes `debug N>`. Type or click a restart (with a value if it takes one: `1 42`), or use
+  `:abort`, `:continue`, `:restarts`, `:frame N` and `:bt`. Forms typed there run in the environment of the error, and errors nest.
+  Other windows keep working meanwhile. Added `break`. `restart-case` restarts record their lambda list (`restart-arguments`).
+  `(abort)` in the window Listener now returns to it instead of leaving the window system. The backtrace no longer shows the
+  Listener's own frames.
+
 * **Graphics in kitty and Ghostty.** The window system detects terminals that show images (kitty graphics protocol) and draws images
   there at full resolution through Unicode placeholder cells, so they scroll, clip and overlap like text; elsewhere images use colour
   half blocks. New images API (`make-image`, `image-line`, `image-disc`, `image-fill-rect`, `draw-image`) and pixel graphs

@@ -79,8 +79,14 @@ hyphenated form is accepted (`:who-calls foo`). Missing arguments are prompted f
 commands, package names and symbols. The Listener has Emacs-style line editing, history, multi-line
 input (an unbalanced form continues on the next line), `*` `**` `***`, and scrolling (wheel, PageUp).
 
-**Errors in the window Listener are post-mortem:** the backtrace and condition are captured at the
-point of the error and the evaluation is unwound before they are displayed (frames are clickable).
-Restarts other than abort and in-place debugging are available only in the line-mode Listener
-(`bin/neogenera`). Evaluation blocks the UI while it runs, and the UI Listener cannot read from
-stdin.
+**The window debugger runs a nested event loop.** The Listener's handler (`%window-debugger`, in
+`42-debugger.lisp`) runs where the error was signalled, so the stack, restarts and special bindings stay
+intact. It prints the error, the restarts and the frames as presentations. Then it serves the whole window
+system (`wm-serve`) until a non-local exit ends the level: a restart, quitting, or, headless, the end of the
+scripted input (`*wm-script*`, which the nested loop reads from too). Each Listener evaluation sets up an
+ABORT restart (*Return to the Listener* or *Return to debug level N*), recorded in `*listener-aborts*` so a
+window lists only its own restarts. The nested loop puts back the stream and package bindings from outside
+the evaluation, so other windows are not affected by them. Nesting is a stack: choosing a restart in an outer
+level, even in another window, unwinds the levels above it. A window whose level is unwound this way says so.
+The backtrace stops at `%listener-call`, so the Listener's own frames are not shown. Evaluation blocks the UI
+while it runs, and the UI Listener cannot read from stdin.

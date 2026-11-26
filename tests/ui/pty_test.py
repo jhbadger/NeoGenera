@@ -206,10 +206,19 @@ def main():
     check("evaluating (+ 1 2) shows => 3", s.wait_for("=> 3"))
     s.send("(expt 2 100)\r")
     check("bignum result displayed", s.wait_for("=> 1267650600228229401496703205376"))
-    s.send("(car 5)\r")
-    check("errors are reported in the pane", s.wait_for("Error: The value 5 is not of type LIST"))
+    s.send("(defvar *dv* 1)\r")
+    s.wait_for("=> COMMON-LISP-USER::*DV*")
+    s.send("(let ((*dv* 99)) (car 5))\r")
+    check("an error enters the debugger in the window",
+          s.wait_for("Error: The value 5 is not of type LIST") and s.wait_for("CL-USER debug 1>") and s.term.has("0: Return to the Listener"))
+    s.send("(list :dv *dv*)\r")
+    check("forms in the debugger see the bindings at the error", s.wait_for("=> (:DV 99)"))
     s.send("(format t \"hello~%\")\r")
     check("output goes to the pane", s.wait_for("hello"))
+    s.send("0\r")
+    check("restart 0 returns to the Listener", s.wait_for("; Back to the Listener"))
+    s.send("(list :after *dv*)\r")
+    check("the binding is undone after the restart", s.wait_for("=> (:AFTER 1)"))
 
     # mouse: hover a result, then click it
     pos = s.locate("=> 3")

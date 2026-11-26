@@ -6,7 +6,8 @@
 ;;;; (function and argument values), and runs a nested read-eval-print loop.
 ;;;; Commands: N (invoke restart N), :bt, :frame N, :restarts, :abort, :continue,
 ;;;; :edit N (jump to the frame function's definition, if an editor is loaded),
-;;;; :help.  Not implemented: returning a value from a frame, local variables.
+;;;; :help.  BREAK enters it on purpose.  The window Listener has its own debugger (lisp/ui/42-debugger.lisp)
+;;;; built on the same frames and restarts.  Not implemented: returning a value from a frame, local variables.
 
 (in-package :cl)
 
@@ -115,6 +116,12 @@
                        (dolist (v vals) (format t "~&~S~%" v)))
                    (abort () :report (lambda (s) (format s "Return to debug level ~D" level))
                      (format t "~&; Back at debug level ~D~%" level)))))))))
+
+(defun break (&optional (format-control "Break") &rest format-arguments)
+  "Enter the debugger, with a CONTINUE restart that returns NIL from BREAK."
+  (with-simple-restart (continue "Return from BREAK")
+    (invoke-debugger (make-condition 'simple-condition :format-control format-control :format-arguments format-arguments)))
+  nil)
 
 (defun %listener-debugger (condition hook)
   (declare (ignore hook))

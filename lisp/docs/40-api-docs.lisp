@@ -395,7 +395,7 @@
    gf-cache gf-dispatch-n gf-fn gf-has-eql gf-lambda-list gf-methods gf-name gf-nreq method-fn method-gf
    slotd-allocation slotd-initargs slotd-initfn slotd-name slotd-readers slotd-writers slot-definition slot-definition-p
    slot-definition-allocation slot-definition-initargs get-default-initargs-cache set-default-initargs-cache
-   restart-fn restart-p restart-report restart-test restart-report-string restart classp conditionp
+   restart-fn restart-p restart-report restart-test restart-lambda-list restart-report-string restart classp conditionp
    loop-pairs loop-while-trim member-by merge-lists list-length-safe do-list-tails identity-fn assq assql memq memql
    string-to-list unwind-protect* method-qualifiers-of describe-object-slots ng-toplevel pretty-string
    stream-error-stream class-finalized-p arithmetic-error-operands arithmetic-error-operation cell-error-name

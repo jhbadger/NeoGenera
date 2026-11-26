@@ -518,15 +518,40 @@ one, or is NIL when the activity cannot be started from the key."
         (:mouse (wm-mouse wm (cadr ev) (caddr ev) (cadddr ev) (nth 4 ev) (nth 5 ev)) (setf (wm-dirty wm) t))
         (:resize (wm-resize wm (cadr ev) (caddr ev)))
         (:eof (setf (wm-quit wm) t))
-        (:tick (wm-tick wm)))
+        (:tick (wm-tick wm))
+        (:call (funcall (cadr ev))))           ; scripts only: run a function inside the event loop
     (error (e)
       (setf (wm-message wm) (format nil "Error: ~A" e) (wm-dirty wm) t))))
 
+(defvar *wm-script* nil
+  "While scripted events run headless (WM-RUN-EVENTS): a cons whose car is the events still to come, so that a
+nested event loop (the window debugger) takes its input from the same script.")
+(defvar *wm-live* nil "True in the process running WM-RUN on a terminal.")
+
+(defun wm-next-scripted-event ()
+  "The next scripted event, removed from the script, or NIL when there is none."
+  (let ((q (car *wm-script*)))
+    (when q (setf (car *wm-script*) (cdr q)) (car q))))
+
 (defun wm-run-events (wm events)
   "Process scripted EVENTS headlessly and redraw."
-  (dolist (ev events) (wm-handle-event wm ev))
+  (let ((*wm-script* (list events)))
+    (loop (let ((ev (wm-next-scripted-event))) (unless ev (return)) (wm-handle-event wm ev))))
   (wm-draw wm)
   wm)
+
+(defun wm-serve (wm)
+  "One turn of the event loop on the terminal: redraw if needed, then wait up to 250 ms for input and handle it."
+  (when (wm-dirty wm) (wm-draw wm) (screen-flush (wm-screen wm)))
+  (unless (wm-quit wm)
+    (let ((ev (%term-read-event 250)))
+      (if ev
+          (let ((n 0))
+            (loop (wm-handle-event wm ev)
+                  (setq n (+ n 1))
+                  (setq ev (and (< n 60) (not (wm-quit wm)) (%term-read-event 0)))
+                  (unless ev (return))))
+          (wm-handle-event wm (list :tick))))))
 
 (defun wm-feed (wm bytes)
   "Feed terminal input BYTES (a string of escape sequences / text) through the real parser."
@@ -542,16 +567,7 @@ one, or is NIL when the activity cannot be started from the key."
          (multiple-value-bind (r c) (%term-size) (wm-resize wm r c))
          (screen-invalidate (wm-screen wm))
          (when on-start (funcall on-start))
-         (loop
-           (when (wm-dirty wm) (wm-draw wm) (screen-flush (wm-screen wm)))
-           (when (wm-quit wm) (return))
-           (let ((ev (%term-read-event 250)))
-             (if ev
-                 (let ((n 0))
-                   (loop (wm-handle-event wm ev)
-                         (setq n (+ n 1))
-                         (setq ev (and (< n 60) (not (wm-quit wm)) (%term-read-event 0)))
-                         (unless ev (return))))
-                 (wm-handle-event wm (list :tick))))))
+         (let ((*wm-live* t))
+           (loop (wm-serve wm) (when (wm-quit wm) (return)))))
     (when (eq *graphics* :kitty) (%term-image-delete 0) (graphics-reset))
     (%term-restore)))

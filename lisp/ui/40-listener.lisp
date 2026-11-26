@@ -4,7 +4,7 @@
 ;;;; command history (Up/Down, M-p/M-n), Emacs-style line editing, Tab completion of
 ;;;; commands and symbols, automatic continuation of unbalanced forms, * ** ***,
 ;;;; results shown as presentations (click = default action, right = menu),
-;;;; post-mortem error display with a backtrace of presentations (:BT, :FRAME),
+;;;; errors entering the window debugger (42-debugger.lisp) with clickable restarts and frames,
 ;;;; mouse-wheel/PageUp scrolling, and a mouse-documentation line.
 
 (in-package :cl)
@@ -29,6 +29,7 @@
    (vis-count :initform 0 :accessor lw-vis-count)
    (input-top :initform 0 :accessor lw-input-top)
    (last-error :initform nil :accessor lw-last-error)
+   (debug :initform nil :accessor lw-debug)          ; debugger levels in this window, innermost first
    (read-only :initform nil :initarg :read-only :accessor lw-read-only)
    (lesson :initform nil :accessor lw-lesson)))
 
@@ -48,7 +49,7 @@
       (%string-concat (%pending-prompt (lw-pending w)) ": ")
       (%string-concat (let ((n (package-name (lw-pkg w))))
                         (cond ((string= n "COMMON-LISP-USER") "CL-USER") ((string= n "COMMON-LISP") "CL") (t n)))
-                      "> ")))
+                      (if (lw-debug w) (format nil " debug ~D> " (length (lw-debug w))) "> "))))
 
 ;;; ---- drawing -----------------------------------------------------------------------------------------------
 
@@ -307,11 +308,19 @@
 
 ;;; ---- evaluation --------------------------------------------------------------------------------------------------------
 
-(defvar *internal-error-frames* '(signal error %signal-error invoke-debugger cerror warn))
+(defvar *internal-error-frames* '(signal error %signal-error invoke-debugger cerror warn break))
+
+(defun %listener-call (thunk)
+  "Calls THUNK for a Listener evaluation; its frame marks where the backtrace of an error stops."
+  (multiple-value-list (funcall thunk)))
 
 (defun %capture-error-frames ()
-  "Backtrace at the point of an error, with the signalling machinery removed."
-  (let* ((frames (%backtrace 60)) (last-internal nil) (i 0))
+  "Backtrace at the point of an error: the signalling machinery removed from the top, and the Listener's own
+frames (from the evaluation's thunk outwards) from the bottom."
+  (let* ((frames (%backtrace 200)) (end (position '%listener-call frames :key #'cadr)) (last-internal nil) (i 0))
+    (when end
+      (setq frames (subseq frames 0 end))
+      (loop (unless (and frames (null (cadr (car (last frames))))) (return)) (setq frames (butlast frames))))  ; the thunk and the typed form
     (dolist (f frames) (when (member (cadr f) *internal-error-frames*) (setq last-internal i)) (setq i (+ i 1)))
     (if last-internal (nthcdr (+ last-internal 1) frames) frames)))
 
@@ -331,25 +340,42 @@
           (terpri out)
           (setq i (+ i 1)))))))
 
-(defun %in-listener (w thunk &optional (what ""))
-  "Run THUNK with output going to listener W.  Errors are reported in the pane and abort THUNK.
-Returns (values list-of-values ok-p)."
+(defvar *listener-aborts* nil "(restart . window) for the ABORT restart of each Listener evaluation in progress, innermost first.")
+(defvar *outside-listener* nil "The dynamic environment outside the innermost Listener evaluation: (stdout stderr stdin package hook).")
+
+(defun %post-mortem (w c)
+  "Report the error C in W and abandon the evaluation (the debugger is off or cannot run here)."
+  (let ((frames (%capture-error-frames)))
+    (setf (lw-last-error w) (cons c frames))
+    (%print-error-block w c frames)
+    (throw 'listener-abort nil)))
+
+(defun %in-listener (w thunk &optional (what "") (debug t))
+  "Run THUNK with output going to listener W.  An error enters the window debugger (or, with DEBUG false, is
+reported in the pane); either way an abandoned THUNK returns.  Returns (values list-of-values ok-p)."
   (declare (ignorable what))
-  (let ((out (lw-stream w)) (*current-listener* w) (result nil) (ok nil))
-    (setf (wm-busy (window-wm w)) t)
-    (catch 'listener-abort
-      (handler-bind ((serious-condition
-                      (lambda (c)
-                        (let ((frames (%capture-error-frames)))
-                          (setf (lw-last-error w) (cons c frames))
-                          (%print-error-block w c frames)
-                          (throw 'listener-abort nil)))))
-        (let ((*standard-output* out) (*error-output* out) (*standard-input* (make-string-input-stream ""))
-              (*package* (lw-pkg w)) (*debugger-hook* nil))
-          (setq result (multiple-value-list (funcall thunk)))
-          (setq ok t)
-          (setf (lw-pkg w) *package*))))
-    (setf (wm-busy (window-wm w)) nil)
+  (let ((out (lw-stream w)) (result nil) (ok nil) (wm (window-wm w))
+        (level (length (lw-debug w)))
+        (outside (list *standard-output* *error-output* *standard-input* *package* *debugger-hook* *current-listener*)))
+    (setf (wm-busy wm) t)
+    (unwind-protect
+         (catch 'listener-abort
+           (restart-case
+               (let ((*listener-aborts* (cons (cons (find-restart 'abort) w) *listener-aborts*))
+                     (*outside-listener* outside) (*current-listener* w))
+                 (handler-bind ((serious-condition (lambda (c) (if debug (%window-debugger w c) (%post-mortem w c)))))
+                   (let ((*standard-output* out) (*error-output* out) (*standard-input* (make-string-input-stream ""))
+                         (*package* (lw-pkg w))
+                         (*debugger-hook* (lambda (c hook) (declare (ignore hook)) (%window-debugger w c))))
+                     (setq result (%listener-call thunk))
+                     (setq ok t)
+                     (setf (lw-pkg w) *package*))))
+             (abort () :report (lambda (s) (if (= level 0) (write-string "Return to the Listener" s)
+                                                (format s "Return to debug level ~D" level)))
+               (%fresh-line w)
+               (with-style (out :dim)
+                 (if (= level 0) (format out "; Back to the Listener~%") (format out "; Back to debug level ~D~%" level))))))
+      (setf (wm-busy wm) nil))
     (values result ok)))
 
 
@@ -371,7 +397,7 @@ Returns (values list-of-values ok-p)."
       (let ((rest (string-left-trim " " (subseq text pos))))
         (when (= (length rest) 0) (return))
         (setq pos (- (length text) (length rest))))
-      (multiple-value-bind (read-result ok) (%in-listener w (lambda () (multiple-value-list (%read-from-string text pos))))
+      (multiple-value-bind (read-result ok) (%in-listener w (lambda () (multiple-value-list (%read-from-string text pos))) "read" nil)
         (unless ok (return))
         (let* ((pair (car read-result)) (form (car pair)))
           (when (eq form (%eof-object)) (return))
@@ -387,6 +413,7 @@ Returns (values list-of-values ok-p)."
 
 
 (defun %submit (w)
+  (setq *debug-resumer* nil)
   (let ((text (lw-input w)) (out (lw-stream w)))
     (unless (= (length text) 0)
       (setf (lw-history w) (cons text (remove text (lw-history w) :test #'string=))))
@@ -401,6 +428,7 @@ Returns (values list-of-values ok-p)."
                (%in-listener w (lambda () (setq result (continue-command pending trimmed))))
                (when (and (consp result) (eq (car result) :prompt)) (setf (lw-pending w) result))))
             ((= (length trimmed) 0) nil)
+            ((and (lw-debug w) (%restart-number-line trimmed)) (%debug-restart-line w trimmed))
             ((char= (char trimmed 0) #\:)
              (let ((result nil))
                (%in-listener w (lambda () (setq result (execute-command-line (subseq trimmed 1)))))

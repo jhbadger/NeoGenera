@@ -9,7 +9,10 @@
   (if (%codep (if (functionp obj) (if (compiled-function-p obj) obj nil) nil)) (disassemble obj) (describe obj)))
 (define-presentation-command (show-frame frame :documentation "Show arguments" :default t) (f)
   (format t "~&Frame ~A~%" (%frame-name f))
-  (let ((i 0)) (dolist (a (caddr f)) (format t "  arg ~D = ~A~%" i (%abbrev a 200)) (setq i (+ i 1)))))
+  (let ((i 0)) (dolist (a (caddr f)) (format t "  arg ~D = ~A~%" i (%abbrev a 200)) (setq i (+ i 1))))
+  (when (and (%current-dbg) (member f (dbg-frames (%current-dbg))))
+    (setq *frame-args* (caddr f))
+    (format t "~&  (the arguments are in *FRAME-ARGS*)~%")))
 (define-presentation-command (describe-condition condition :documentation "Report" :default t) (c)
   (format t "~&~A~%  condition class: ~A~%" (condition-report-string c) (symbol-name (%cls-name (class-of c)))))
 
@@ -28,6 +31,7 @@
   "Run the NeoGenera window system on the terminal.  Saved settings (see :settings) are applied first;
 THEME, when given, overrides the saved theme."
   (%install-tool-hooks)
+  (when (getenv "NG_NODEBUG") (setq *debugger-enabled* nil))
   (handler-case (settings-load)
     (error (e) (format t "~&Could not load settings: ~A~%" e)))
   (when theme (set-theme theme))

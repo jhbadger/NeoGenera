@@ -45,8 +45,23 @@ arguments are prompted for. Tab completes command names, package names and symbo
 Emacs-style editing keys work on the input line: Control-a/e/b/f/k/u/w/y, Meta-b/f, Up/Down or Meta-p/n for
 history. An unbalanced form continues on the next line. Page Up and Page Down scroll the output.
 
-Errors are shown in the window together with a clickable backtrace; the evaluation is abandoned first
-(the interactive debugger with restarts is in the line-mode Listener).
+## The debugger
+
+An error in the Listener stops where it happened and enters the debugger in the same window. The window
+shows the error, the restarts and the top of the backtrace, and the prompt becomes `CL-USER debug 1>`.
+
+* Type a restart number and Return to invoke it, or click the restart. A restart that takes a value (such as
+  `use-value`) wants a form after the number: `1 42`.
+* `:abort` leaves this level (restart *Return to the Listener*, or *Return to debug level N*); `:continue`
+  continues, for example from `break` or `cerror`; `:restarts` lists the restarts again.
+* Forms typed now are evaluated where the error happened: special variables have the values they had there.
+  An error among them enters level 2, and so on.
+* `:bt` shows the whole backtrace and `:frame N` one frame with its arguments; clicking a frame does the same.
+  Either way the frame's arguments are put in `*frame-args*`. Right-click a frame for *Edit definition*.
+
+While a Listener is in the debugger the other windows keep working, and the who-line spinner stops. Quitting
+with F10 leaves the debugger too. `(break)` enters the debugger on purpose. With `NG_NODEBUG` set, errors are
+only reported, and the evaluation is abandoned.
 
 ## Settings
 

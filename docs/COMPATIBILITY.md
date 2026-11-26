@@ -47,7 +47,7 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 * The meta-object protocol is a small subset (`class-of`, `find-class`, `class-precedence-list`, slot access).
 
 **Conditions and the debugger**
-* The interactive debugger with restarts runs in the line-mode Listener. The window Listener shows errors with a backtrace after the evaluation has unwound.
+* The interactive debugger with restarts runs in both the line-mode and the window Listener. `break` enters it with a CONTINUE restart, and it honours `*debugger-hook*`.
 * Missing: `with-condition-restarts`, `invoke-restart-interactively`, return-from-frame and retry in the debugger.
 
 **Packages, reading and printing**
