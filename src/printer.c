@@ -141,6 +141,22 @@ static void print_char(Buf *b, int c, int escape) {
   buf_put(b, STR_DATA(SLOT(tmp, ST_BUF)), (size_t)UNFIX(SLOT(tmp, ST_LEN)));
 }
 
+static void print_rec(Buf *b, Obj o, int escape, int readable, int depth);
+/* the elements of a multi-dimensional array from row-major index START, as nested lists by DIMS */
+static long print_md(Buf *b, Obj data, Obj dims, long start, int escape, int readable, int depth) {
+  if (dims == NIL) {
+    Obj x = STRINGP(data) ? MK_CHAR((unsigned char)STR_DATA(data)[start]) : SLOT(data, start);
+    print_rec(b, x, escape, readable, depth + 1);
+    return start + 1;
+  }
+  long n = (long)UNFIX(CAR(dims));
+  buf_putc(b, '(');
+  for (long i = 0; i < n; i++) { if (i) buf_putc(b, ' '); start = print_md(b, data, CDR(dims), start, escape, readable, depth + 1); }
+  buf_putc(b, ')');
+  return start;
+}
+void print_object_rec(Buf *b, Obj o) { print_rec(b, o, 1, 0, 0); }    /* the parts of a complex number */
+
 static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   STACK_CHECK();
   if (depth > 2000) { buf_puts(b, "..."); return; }
@@ -178,11 +194,17 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_SYMBOL: print_symbol(b, o, escape, readable); return;
   case T_STRING: print_string(b, o, escape); return;
   case T_FLONUM: format_double(b, flonum_value(o)); return;
-  case T_BIGNUM: case T_RATIO: number_print(b, o, 10); return;
+  case T_BIGNUM: case T_RATIO: case T_COMPLEX: number_print(b, o, 10); return;
   case T_VECTOR: {
     buf_puts(b, "#(");
     for (size_t i = 0; i < OBJ_NWORDS(o); i++) { if (i) buf_putc(b, ' '); print_rec(b, SLOT(o, i), escape, readable, depth + 1); }
     buf_putc(b, ')');
+    return;
+  }
+  case T_MDARRAY: {
+    Obj dims = SLOT(o, AR_DIMS); long rank = list_length(dims);
+    char hdr[32]; snprintf(hdr, sizeof hdr, "#%ldA", rank); buf_puts(b, hdr);
+    print_md(b, SLOT(o, AR_DATA), dims, 0, escape, readable, depth);
     return;
   }
   case T_ADVEC: {

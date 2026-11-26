@@ -387,7 +387,7 @@ by Hessenberg reduction and shifted QR iteration."
                               (tr (+ a11 a22)) (det (- (* a11 a22) (* a12 a21))) (disc (- (* tr tr 0.25) det)))
                          (if (>= disc 0)
                              (let ((root (sqrt disc))) (setq out (cons (+ (* 0.5 tr) root) (cons (- (* 0.5 tr) root) out))))
-                             (let ((root (sqrt (- disc)))) (setq out (cons (%make-cx (* 0.5 tr) root) (cons (%make-cx (* 0.5 tr) (- root)) out)))))
+                             (let ((root (sqrt (- disc)))) (setq out (cons (complex (* 0.5 tr) root) (cons (complex (* 0.5 tr) (- root)) out)))))
                          (setq hi (- hi 2) iter 0)))
                       (t
                        (setq iter (+ iter 1))

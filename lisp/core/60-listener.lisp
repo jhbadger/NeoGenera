@@ -68,6 +68,9 @@
   (setq *listener-running* t)
   (when (getenv "NG_NODEBUG") (setq *debugger-enabled* nil))
   (format t "~&NeoGenera ~A -- type :help for help, :quit to leave.~%" *ng-version*)
+  (when (and (boundp '*world-saved*) (symbol-value '*world-saved*))
+    (let ((w (symbol-value '*world-saved*)))
+      (format t "~&; A saved world: ~A~@[ (~A)~]~%" (namestring (car w)) (caddr w))))
   (let ((*debugger-hook* (function %listener-debugger)))
     (loop
       (when (not *listener-running*) (return))
@@ -78,7 +81,8 @@
                     (error (e) (format t "~&Read error: ~A~%" e) '%retry))))
         (cond ((eq form '%eof) (terpri) (return))
               ((eq form '%retry) nil)
-              (t (restart-case (%listener-step form)
+              (t (when (fboundp '%dribble-input) (funcall '%dribble-input (prin1-to-string form)))
+                 (restart-case (%listener-step form)
                    (abort () :report "Return to the Listener top level"
                      (format t "~&; Aborted~%"))))))))
   nil)

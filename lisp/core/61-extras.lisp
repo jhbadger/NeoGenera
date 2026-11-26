@@ -37,7 +37,7 @@
   "The number of 1 bits of the non-negative integer N (of 0 bits for a negative one)."
   (let ((m (if (< n 0) (lognot n) n)) (c 0)) (loop while (> m 0) do (when (oddp m) (setq c (+ c 1))) (setq m (ash m -1))) c))
 
-(defun arrayp (x) "True when X is an array (vectors and strings are)." (vectorp x))
+(defun arrayp (x) "True when X is an array: a vector, a string or a multi-dimensional array." (or (vectorp x) (%md-array-p x)))
 
 (defun sublis (alist tree &key test)
   "Substitute in TREE every atom found as a key of ALIST."

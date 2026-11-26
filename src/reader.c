@@ -18,8 +18,38 @@ static void reader_error(const char *msg) __attribute__((noreturn));
 static void reader_error(const char *msg) { lisp_error("READ error: %s", msg); }
 
 static int is_ws(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 11; }
+/* ---- the current readtable ------------------------------------------------------------------------------
+ * *READTABLE* is NIL (built-in syntax only) or a READTABLE structure (lisp/core/57-reader.lisp) whose slots are
+ * 1: case (fixnum: 0 upcase, 1 downcase, 2 preserve, 3 invert), 2: macro functions, 3: terminating flags and
+ * 4: dispatch tables, each a vector indexed by character code below 128.  A dispatch table is a vector of 128
+ * functions indexed by the upper-case sub-character. */
+#define RT_SLOTS 5
+static Obj cur_rt(void) {
+  Obj rt = SYM_VALUE(Q_readtable);
+  if (!IS_TYPE(rt, T_STRUCT) || OBJ_NWORDS(rt) < RT_SLOTS) return NIL;
+  return rt;
+}
+static Obj rt_vec(Obj rt, int slot, int c) {
+  if (rt == NIL || c < 0 || c >= 128) return NIL;
+  Obj v = SLOT(rt, slot);
+  return (IS_TYPE(v, T_VECTOR) && OBJ_NWORDS(v) >= 128) ? SLOT(v, c) : NIL;
+}
+static int rt_case(void) { Obj rt = cur_rt(); return rt == NIL || !FIXP(SLOT(rt, 1)) ? 0 : (int)UNFIX(SLOT(rt, 1)); }
+
 static int is_term(int c) {
-  return c == '(' || c == ')' || c == '\'' || c == '"' || c == ';' || c == '`' || c == ',';
+  if (c == '(' || c == ')' || c == '\'' || c == '"' || c == ';' || c == '`' || c == ',') return 1;
+  Obj rt = cur_rt();
+  return rt != NIL && rt_vec(rt, 2, c) != NIL && rt_vec(rt, 3, c) != NIL;
+}
+
+/* Call a reader macro function: GC is inhibited, as the reader holds raw objects in C locals. */
+static Obj call_reader_fn(Obj fn, Obj s, Obj a, Obj b, int nargs, int *nvalues) {
+  gc_inhibit++;
+  mv_count = 1;
+  Obj r = nargs == 2 ? call2(fn, s, a) : call3(fn, s, a, b);
+  gc_inhibit--;
+  *nvalues = mv_count;
+  return r;
 }
 static int is_delim(int c) { return c < 0 || is_ws(c) || is_term(c); }
 
@@ -106,16 +136,31 @@ static Obj make_symbol_from_token(const char *buf, size_t len, int *colons, int 
   return sym;
 }
 
+/* Apply the readtable case to the unescaped characters of a token: MASK marks the escaped ones. */
+static void apply_case(char *buf, const char *escmask, size_t len, int mode) {
+  if (mode == 2) return;
+  if (mode == 3) {                                  /* invert: only if all the unescaped letters have one case */
+    int up = 0, low = 0;
+    for (size_t i = 0; i < len; i++) if (!escmask[i]) { if (isupper((unsigned char)buf[i])) up = 1; else if (islower((unsigned char)buf[i])) low = 1; }
+    if (up && low) return;
+    for (size_t i = 0; i < len; i++) if (!escmask[i]) buf[i] = (char)(up ? tolower((unsigned char)buf[i]) : toupper((unsigned char)buf[i]));
+    return;
+  }
+  for (size_t i = 0; i < len; i++)
+    if (!escmask[i]) buf[i] = (char)(mode == 1 ? tolower((unsigned char)buf[i]) : toupper((unsigned char)buf[i]));
+}
+
 /* read a token starting with 'first' (already consumed). */
 static Obj read_atom(Obj s, int first, int *was_dot) {
   Buf b; buf_init(&b);
+  Buf esc; buf_init(&esc);
   int colons[4]; int ncolons = 0, escaped = 0;
   int c = first;
   if (was_dot) *was_dot = 0;
   for (;;) {
     if (c == '\\') {
       int n = stream_getc(s); if (n < 0) reader_error("EOF after backslash");
-      buf_putc(&b, n); escaped = 1;
+      buf_putc(&b, n); buf_putc(&esc, 1); escaped = 1;
     } else if (c == '|') {
       escaped = 1;
       for (;;) {
@@ -123,16 +168,18 @@ static Obj read_atom(Obj s, int first, int *was_dot) {
         if (n < 0) reader_error("EOF inside |...|");
         if (n == '|') break;
         if (n == '\\') { n = stream_getc(s); if (n < 0) reader_error("EOF"); }
-        buf_putc(&b, n);
+        buf_putc(&b, n); buf_putc(&esc, 1);
       }
     } else {
-      if (c == ':' ) { if (ncolons < 4) colons[ncolons] = (int)b.len; ncolons++; buf_putc(&b, ':'); }
-      else buf_putc(&b, toupper(c));
+      if (c == ':' ) { if (ncolons < 4) colons[ncolons] = (int)b.len; ncolons++; buf_putc(&b, ':'); buf_putc(&esc, 1); }
+      else { buf_putc(&b, c); buf_putc(&esc, 0); }
     }
     c = stream_getc(s);
     if (is_delim(c)) { stream_ungetc(s, c); break; }
   }
   if (ncolons > 4) reader_error("too many colons");
+  apply_case(b.buf, esc.buf, b.len, rt_case());
+  buf_free(&esc);
   buf_putc(&b, 0); b.len--;
   Obj result;
   if (!escaped && b.len == 1 && b.buf[0] == '.') { if (was_dot) *was_dot = 1; buf_free(&b); return NIL; }
@@ -243,6 +290,8 @@ static int feature_test(Obj f) {
   reader_error("bad feature expression");
 }
 
+static Obj rd1(Obj s);
+
 static Obj read_list(Obj s, int close) {
   Obj head = NIL, tail = NIL;
   for (;;) {
@@ -250,7 +299,7 @@ static Obj read_list(Obj s, int close) {
     if (c < 0) reader_error("EOF inside list");
     if (c == close) { stream_getc(s); return head; }
     if (c == ')') reader_error("mismatched close parenthesis");
-    if (c == '.') {
+    if (c == '.' && rt_vec(cur_rt(), 2, '.') == NIL) {
       stream_getc(s);
       int n = stream_peekc(s);
       if (is_delim(n)) {
@@ -267,7 +316,8 @@ static Obj read_list(Obj s, int close) {
       tail = cell;
       continue;
     }
-    Obj x = rd(s);
+    Obj x = rd1(s);
+    if (x == NOVALUE) continue;                     /* a comment, a skipped #+ form, a macro with no values */
     Obj cell = cons(x, NIL);
     if (head == NIL) head = cell; else CDR(tail) = cell;
     tail = cell;
@@ -320,10 +370,26 @@ static Obj read_char_literal(Obj s) {
   return r;
 }
 
+static Obj read_hash_builtin(Obj s, int c);
+
 static Obj read_hash(Obj s) {
   int c = stream_getc(s);
   if (c < 0) reader_error("EOF after #");
-  while (isdigit(c)) c = stream_getc(s);        /* ignore numeric infix args */
+  long arg = -1;
+  while (isdigit(c)) { arg = (arg < 0 ? 0 : arg) * 10 + (c - '0'); if (arg > 100000000) arg = 100000000; c = stream_getc(s); }
+  Obj table = rt_vec(cur_rt(), 4, '#');
+  if (IS_TYPE(table, T_VECTOR) && OBJ_NWORDS(table) >= 128 && c >= 0 && c < 128) {
+    Obj fn = SLOT(table, toupper(c));
+    if (fn != NIL) {
+      int nv;
+      Obj r = call_reader_fn(fn, s, MK_CHAR(c), arg < 0 ? NIL : FIX(arg), 3, &nv);
+      return nv == 0 ? NOVALUE : r;
+    }
+  }
+  return read_hash_builtin(s, c);
+}
+
+static Obj read_hash_builtin(Obj s, int c) {
   switch (c) {
   case '\'': return list2(Q_function, rd(s));
   case '(': {
@@ -353,17 +419,17 @@ static Obj read_hash(Obj s) {
       if (prev == '#' && n == '|') { depth++; prev = 0; continue; }
       prev = n;
     }
-    return rd(s);
+    return NOVALUE;
   }
   case '+': case '-': {
     Obj saved = SYM_VALUE(Q_package);
     SYM_VALUE(Q_package) = PKG_KEYWORD;
     Obj feat = rd(s);
-    SYM_VALUE(Q_package) = saved;
+    SYM_VALUE(Q_package) = saved; WB(Q_package, saved);
     int ok = feature_test(feat);
     if (c == '-') ok = !ok;
     Obj form = rd(s);
-    return ok ? form : rd(s);
+    return ok ? form : NOVALUE;
   }
   case 'x': case 'X': case 'b': case 'B': case 'o': case 'O': {
     int base = (c == 'x' || c == 'X') ? 16 : (c == 'b' || c == 'B') ? 2 : 8;
@@ -378,18 +444,43 @@ static Obj read_hash(Obj s) {
   case '.': {
     if (SYM_VALUE(Q_read_eval) == NIL) reader_error("#. disabled");
     Obj f = rd(s);
-    return eval(f, NIL, NIL);
+    gc_inhibit++;                                   /* the reader's callers hold raw objects */
+    Obj v = eval(f, NIL, NIL);
+    gc_inhibit--;
+    return v;
+  }
+  case 'c': case 'C': {
+    Obj parts = rd(s);
+    if (!CONSP(parts) || !CONSP(CDR(parts)) || CDR(CDR(parts)) != NIL) reader_error("#C needs a list of two real numbers");
+    return make_complex(CAR(parts), CAR(CDR(parts)));
   }
   case '<': reader_error("unreadable object #<");
   default: lisp_error("READ error: unknown # dispatch character %c", c);
   }
 }
 
-static Obj rd(Obj s) {
+static Obj rd_builtin(Obj s, int c);
+
+/* Read one object, or return NOVALUE for something that produced none (a comment, a skipped feature). */
+static Obj rd1(Obj s) {
   STACK_CHECK();
   int c = skip_ws(s);
   if (c < 0) { reader_error("unexpected EOF"); }
   c = stream_getc(s);
+  Obj fn = rt_vec(cur_rt(), 2, c);
+  if (fn != NIL) {
+    int nv;
+    Obj r = call_reader_fn(fn, s, MK_CHAR(c), NIL, 2, &nv);
+    return nv == 0 ? NOVALUE : r;
+  }
+  return rd_builtin(s, c);
+}
+
+static Obj rd(Obj s) {
+  for (;;) { Obj x = rd1(s); if (x != NOVALUE) return x; }
+}
+
+static Obj rd_builtin(Obj s, int c) {
   switch (c) {
   case '(': return read_list(s, ')');
   case ')': reader_error("unmatched close parenthesis");
@@ -429,11 +520,55 @@ long last_read_start;
 
 Obj read_form(Obj stream, int *eof) {
   qq_depth = 0;
+  for (;;) {
+    int c = skip_ws(stream);
+    if (c < 0) { *eof = 1; return NIL; }
+    last_read_start = stream_position(stream);
+    *eof = 0;
+    Obj x = rd1(stream);
+    if (x != NOVALUE) return x;
+  }
+}
+
+Obj read_form_recursive(Obj stream, int *eof) {
   int c = skip_ws(stream);
   if (c < 0) { *eof = 1; return NIL; }
-  last_read_start = stream_position(stream);
   *eof = 0;
   return rd(stream);
+}
+
+/* ---- primitives for readtables (lisp/core/57-reader.lisp) --------------------------------------------------- */
+
+PRIM(p_read_standard_macro) {
+  /* (%read-standard-macro stream char): what the built-in syntax does for CHAR, which has been read */
+  UNUSED_ARGS;
+  if (!CHARP(argv[1])) type_error("CHARACTER", argv[1]);
+  int c = CHAR_CODE(argv[1]);
+  Obj x = c == '#' ? read_hash(argv[0]) : rd_builtin(argv[0], c);
+  if (x == NOVALUE) { mv_count = 0; return NIL; }
+  return x;
+}
+
+PRIM(p_read_standard_dispatch) {
+  /* (%read-standard-dispatch stream sub-char arg): the built-in # syntax for SUB-CHAR */
+  UNUSED_ARGS;
+  if (!CHARP(argv[1])) type_error("CHARACTER", argv[1]);
+  Obj x = read_hash_builtin(argv[0], CHAR_CODE(argv[1]));
+  if (x == NOVALUE) { mv_count = 0; return NIL; }
+  return x;
+}
+
+PRIM(p_read_delimited_list) {
+  /* (%read-delimited-list char stream) */
+  UNUSED_ARGS;
+  if (!CHARP(argv[0])) type_error("CHARACTER", argv[0]);
+  return read_list(argv[1], CHAR_CODE(argv[0]));
+}
+
+void init_reader_prims(void) {
+  defprim_mv("%READ-STANDARD-MACRO", p_read_standard_macro, 2, 2);
+  defprim_mv("%READ-STANDARD-DISPATCH", p_read_standard_dispatch, 3, 3);
+  defprim("%READ-DELIMITED-LIST", p_read_delimited_list, 2, 2);
 }
 
 Obj read_from_cstring(const char *str) {

@@ -25,7 +25,7 @@
 (%def-setf 'cadr '%set-cadr) (%def-setf 'second '%set-cadr) (%def-setf 'cddr '%set-cddr)
 (%def-setf 'caddr '%set-caddr) (%def-setf 'third '%set-caddr)
 (%def-setf 'caar '%set-caar) (%def-setf 'cdar '%set-cdar)
-(%def-setf 'aref '%aset) (%def-setf 'svref '%aset) (%def-setf 'char '%aset) (%def-setf 'schar '%aset)
+(%def-setf 'aref '%aset) (%def-setf 'row-major-aref '%row-major-aset) (%def-setf 'svref '%aset) (%def-setf 'char '%aset) (%def-setf 'schar '%aset)
 (%def-setf 'symbol-value '%set-symbol-value) (%def-setf 'symbol-function '%set-symbol-function)
 (%def-setf 'symbol-plist '%set-symbol-plist) (%def-setf 'get '%put)
 (%def-setf 'macro-function '%set-macro-function)

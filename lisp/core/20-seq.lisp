@@ -151,7 +151,28 @@ instead of signalling an error."
         (funcall %make-string-prim n (cadr args))
         (apply %make-string-prim n args))))
 
-(defun make-array (dims &key initial-element initial-contents fill-pointer adjustable element-type)
+(defun %flatten-contents (contents rank)
+  "The elements of the nested sequence CONTENTS (RANK levels deep) in row-major order."
+  (if (= rank 0) (list contents)
+      (let ((acc nil)) (dolist (x (%elt-list contents)) (setq acc (append (reverse (%flatten-contents x (- rank 1))) acc))) (nreverse acc))))
+
+(defun %make-md-array-of (dims initial-element initial-contents element-type)
+  (let* ((total (let ((p 1)) (dolist (d dims p) (unless (and (integerp d) (>= d 0)) (error "Bad array dimension ~S" d)) (setq p (* p d)))))
+         (data (if (eq element-type 'character) (make-string total (or initial-element #\Space)) (%make-vector total initial-element))))
+    (when initial-contents
+      (let ((elts (%flatten-contents initial-contents (length dims))) (i 0))
+        (unless (= (length elts) total) (error "Initial contents do not match the dimensions ~S" dims))
+        (dolist (x elts) (%aset data i x) (setq i (+ i 1)))))
+    (%make-md-array data (copy-list dims))))
+
+(defun make-array (dims &key initial-element initial-contents fill-pointer adjustable element-type displaced-to displaced-index-offset)
+  "An array of dimensions DIMS (an integer for a vector, or a list): filled with INITIAL-ELEMENT or the nested
+INITIAL-CONTENTS.  A vector may have a FILL-POINTER and be ADJUSTABLE; ELEMENT-TYPE CHARACTER makes strings."
+  (declare (ignore displaced-index-offset))
+  (when displaced-to (error "Displaced arrays are not supported"))
+  (when (and (listp dims) (/= (length dims) 1))
+    (when fill-pointer (error "Only vectors have fill pointers"))
+    (return-from make-array (%make-md-array-of dims initial-element initial-contents element-type)))
   (let ((n (if (consp dims) (car dims) dims)) (stringp (eq element-type 'character)))
     (cond ((or fill-pointer adjustable)
            (let ((v (%make-adjustable (max n 4) stringp)))
@@ -176,8 +197,41 @@ instead of signalling an error."
     (let ((x (aref v (- f 1))))
       (%set-fill-pointer v (- f 1))
       x)))
-(defun array-total-size (v) (length v))
-(defun array-dimension (v n) (declare (ignore n)) (length v))
+(defun array-rank (a) "The number of dimensions of the array A." (if (%md-array-p a) (length (%md-dims a)) 1))
+(defun array-dimensions (a) "The dimensions of the array A, as a list." (if (%md-array-p a) (copy-list (%md-dims a)) (list (length a))))
+(defun array-dimension (a n) "Dimension N of the array A." (nth n (array-dimensions a)))
+(defun array-total-size (a) "The number of elements of the array A." (if (%md-array-p a) (length (%md-data a)) (length a)))
+(defun array-row-major-index (a &rest subscripts)
+  "The index in row-major order of the element of A at SUBSCRIPTS."
+  (let ((dims (array-dimensions a)) (idx 0))
+    (unless (= (length dims) (length subscripts)) (error "Wrong number of subscripts ~S for ~S" subscripts dims))
+    (dolist (d dims idx)
+      (let ((s (pop subscripts))) (unless (and (integerp s) (< -1 s d)) (error "Subscript ~S out of bounds" s)) (setq idx (+ (* idx d) s))))))
+(defun array-in-bounds-p (a &rest subscripts)
+  "True if SUBSCRIPTS are valid for the array A."
+  (let ((dims (array-dimensions a)))
+    (and (= (length dims) (length subscripts)) (every (lambda (s d) (and (integerp s) (< -1 s d))) subscripts dims))))
+(defun row-major-aref (a i) "The element of A at row-major index I." (if (%md-array-p a) (aref (%md-data a) i) (aref a i)))
+(defun %row-major-aset (a i v) (if (%md-array-p a) (%aset (%md-data a) i v) (%aset a i v)))
+(defun array-element-type (a) "The element type of A: CHARACTER for strings, else T."
+  (if (or (stringp a) (and (%md-array-p a) (stringp (%md-data a)))) 'character t))
+(defun adjustable-array-p (a) "True for an adjustable vector." (and (%advec-p a) t))
+(defun adjust-array (a new-dims &key initial-element initial-contents fill-pointer element-type)
+  "An array with dimensions NEW-DIMS holding the elements of A that fit (a new array; A is not changed)."
+  (let* ((dims (if (listp new-dims) new-dims (list new-dims)))
+         (new (make-array (if (= (length dims) 1) (car dims) dims) :initial-element initial-element
+                          :initial-contents initial-contents :fill-pointer fill-pointer :adjustable (%advec-p a)
+                          :element-type (or element-type (array-element-type a)))))
+    (unless initial-contents
+      (let ((old-dims (array-dimensions a)))
+        (when (= (length old-dims) (length dims))
+          (labels ((copy (subs od nd)
+                     (if (null od) (apply #'%aset new (append (reverse subs) (list (apply #'aref a (reverse subs)))))
+                         (dotimes (i (min (car od) (car nd))) (copy (cons i subs) (cdr od) (cdr nd))))))
+            (if (%advec-p a)
+                (dotimes (i (min (length a) (car dims))) (vector-push-extend (aref a i) new))
+                (copy nil old-dims dims))))))
+    new))
 (defun array-has-fill-pointer-p (v) (and (%advec-p v) t))
 
 (defun coerce (x type)
@@ -191,6 +245,7 @@ instead of signalling an error."
                                     (t (string x))))
       ((character) (if (characterp x) x (char (string x) 0)))
       ((float single-float double-float) (float x))
+      ((complex) (if (complexp x) x (complex x)))
       ((function) (if (functionp x) x (symbol-function x)))
       ((t) x)
       (t (error "COERCE: cannot coerce to ~S" type)))))

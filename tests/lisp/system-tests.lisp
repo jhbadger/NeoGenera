@@ -1,0 +1,215 @@
+;;;; system-tests.lisp -- DEFSYSTEM and patches, SAVE-WORLD, ADVISE, DRIBBLE, FORMAT-TEXTUAL-LIST,
+;;;; FORMAT-GRAPH-FROM-ROOT and the file browser.  Uses helpers from ui-tests.lisp and debugger-tests.lisp.
+
+(in-package :cl)
+
+(defun %st-dir (tag) (format nil "/tmp/ng-~A-~D-~D/" tag (get-universal-time) (random 1000000)))
+(defun %st-write (path text) (ensure-directories-exist path) (with-open-file (s path :direction :output) (write-string text s)))
+(defun %st-rm (dir) (%run-program "rm" (list "-rf" dir)))
+(defvar *st-log* nil)
+
+(deftest systems-and-patches
+  (let ((dir (%st-dir "sys")))
+    (%st-write (%string-concat dir "a.lisp") "(push :a *st-log*) (defun st-a () 1)")
+    (%st-write (%string-concat dir "b.lisp") "(push :b *st-log*) (defun st-b () (+ (st-a) 1))")
+    (%st-write (%string-concat dir "base/u.lisp") "(push :u *st-log*) (defun st-u () :u)")
+    (eval `(defsystem st-base (:pathname ,(%string-concat dir "base/") :version "0.1") "u"))
+    (eval `(defsystem st-app (:pathname ,dir :version "1.0" :description "test app" :depends-on (st-base)) "a" "b"))
+    (setq *st-log* nil)
+    (load-system 'st-app :verbose nil)
+    (is-equal '(:u :a :b) (reverse *st-log*))                       ; dependencies first, then the files in order
+    (is-equal 2 (st-b))
+    (setq *st-log* nil)
+    (load-system 'st-app :verbose nil)
+    (is-equal nil *st-log*)                                            ; nothing changed: nothing loaded
+    (sleep 1.1)
+    (%st-write (%string-concat dir "b.lisp") "(push :b2 *st-log*) (defun st-b () 20)")
+    (load-system 'st-app :verbose nil)
+    (is-equal '(:b2) *st-log*)                                         ; only the changed file
+    (is-equal 20 (st-b))
+    (setq *st-log* nil)
+    (load-system 'st-app :verbose nil :reload t)
+    (is-equal '(:u :a :b2) (reverse *st-log*))
+    ;; compiling
+    (setq *st-log* nil)
+    (compile-system 'st-app :verbose nil :reload t)
+    (is (probe-file (%string-concat dir "a.nfasl")))
+    (is (compiled-function-p #'st-a))
+    ;; patches
+    (is-equal "ST-APP 1.0" (system-version-string 'st-app))
+    (let ((p1 (make-patch 'st-app "faster st-a")))
+      (with-open-file (s p1 :direction :output :if-exists :append) (write-string "(defun st-a () 100)" s))
+      (is-equal 1 (load-patches 'st-app :verbose nil))
+      (is-equal 100 (st-a))
+      (is-equal "ST-APP 1.0.1" (system-version-string 'st-app))
+      (is-equal 0 (load-patches 'st-app :verbose nil)))
+    (let ((p2 (make-patch 'st-app "second")))
+      (is (search "st-app-2" (namestring p2)))
+      (with-open-file (s p2 :direction :output :if-exists :append) (write-string "(push :patch2 *st-log*)" s)))
+    (setq *st-log* nil)
+    (load-system 'st-app :verbose nil)
+    (is-equal '(:patch2) *st-log*)                                     ; LOAD-SYSTEM also loads new patches
+    (let ((text (with-output-to-string (s) (describe-system 'st-app s))))
+      (is (search "ST-APP 1.0.2 -- test app" text))
+      (is (search "patch 1: faster st-a" text))
+      (is (search "a.lisp" text)))
+    (is (member "ST-APP" (list-systems) :test #'string=))
+    ;; a system found from its .system file
+    (%st-write (%string-concat dir "st-found.system") (format nil "(defsystem st-found (:pathname ~S) \"a\")" dir))
+    (let ((*system-search-path* (list dir))) (is (find-system 'st-found)))
+    (is (handler-case (progn (find-system 'st-no-such-system) nil) (error () t)))
+    (%st-rm dir)))
+
+(defun st-adv (x) (* x 10))
+
+(deftest advise-functions
+  (let ((log nil))
+    (is-equal 30 (st-adv 3))
+    (advise st-adv :before log-args nil (push (list :before arglist) log))
+    (advise st-adv :after double nil (setq values (list (* 2 (car values)))))
+    (is-equal 60 (st-adv 3))
+    (is-equal '((:before (3))) log)
+    (advise st-adv :before add-one nil (setq arglist (list (+ 1 (car arglist)))))
+    (is-equal 80 (st-adv 3))                                          ; (3+1) * 10 * 2
+    (advise st-adv :around clamp nil (min 30 (car (multiple-value-list :do-it))))
+    (is-equal 60 (st-adv 3))                                          ; around: min(30, 40)=30, then after doubles
+    (is (member 'st-adv *advised-functions*))
+    (unadvise st-adv :after)
+    (is-equal 30 (st-adv 3))
+    (trace st-adv)                                                     ; tracing on top of advice
+    (let ((out (with-output-to-string (*standard-output*) (st-adv 3))))
+      (is (search "ST-ADV" out)))
+    (untrace st-adv)
+    (unadvise st-adv)
+    (is-equal 30 (st-adv 3))
+    (is (not (member 'st-adv *advised-functions*)))
+    (is (handler-case (progn (eval '(advise st-no-such-fn :before x nil 1)) nil) (error () t)))))
+
+(deftest dribble-session
+  (let ((file (format nil "/tmp/ng-dribble-~D.txt" (random 1000000))))
+    (let ((*standard-output* (make-string-output-stream)) (*current-listener* nil))
+      (dribble file)
+      (%dribble-input "(+ 1 2)")
+      (format t "3~%")
+      (dribble))
+    (let ((text (with-open-file (s file) (let ((acc "")) (loop (let ((l (read-line s nil))) (unless l (return acc)) (setq acc (%string-concat acc l (string #\Newline)))))))))
+      (is (search "Dribble of NeoGenera" text))
+      (is (search "(+ 1 2)" text))
+      (is (search "3" text))
+      (is (search "Dribble ended" text)))
+    (delete-file file))
+  ;; in the window Listener, the pane is recorded
+  (multiple-value-bind (wm lw) (make-test-wm 30 100)
+    (let ((file (format nil "/tmp/ng-dribble-w-~D.txt" (random 1000000))))
+      (run-script wm (script-lines (format nil "(dribble ~S)" file) "(* 6 7)" "(dribble)"))
+      (let ((text (with-open-file (s file) (let ((acc "")) (loop (let ((l (read-line s nil))) (unless l (return acc)) (setq acc (%string-concat acc l (string #\Newline)))))))))
+        (is (search "(* 6 7)" text))
+        (is (search "=> 42" text)))
+      (delete-file file)
+      (is (pane-has lw "=> 42")))))
+
+(deftest textual-lists-and-graphs
+  (is-equal "1, 2, and 3" (format-textual-list '(1 2 3) #'princ :stream nil :conjunction "and"))
+  (is-equal "1 and 2" (format-textual-list '(1 2) #'princ :stream nil :conjunction "and"))
+  (is-equal "1, 2, 3." (format-textual-list #(1 2 3) #'princ :stream nil :finally "."))
+  (is-equal "[a] or [b]" (format-textual-list '("a" "b") #'princ :stream nil :conjunction "or" :before-each "[" :after-each "]"))
+  (is-equal "" (format-textual-list nil #'princ :stream nil))
+  (let ((tree '(a (b (d) (e)) (c (f)))))
+    (is-equal (format nil "A~%~A~%~A~%~A~%~A~%~A~%"
+                      (utf8-from-codes (append '(#x251C #x2500 #x2500 32) (utf8-codes "B")))
+                      (utf8-from-codes (append '(#x2502 32 32 32 #x251C #x2500 #x2500 32) (utf8-codes "D")))
+                      (utf8-from-codes (append '(#x2502 32 32 32 #x2514 #x2500 #x2500 32) (utf8-codes "E")))
+                      (utf8-from-codes (append '(#x2514 #x2500 #x2500 32) (utf8-codes "C")))
+                      (utf8-from-codes (append '(32 32 32 32 #x2514 #x2500 #x2500 32) (utf8-codes "F"))))
+              (format-graph-from-root tree (lambda (n s) (princ (car n) s)) #'cdr :stream nil))
+    (let ((down (format-graph-from-root tree (lambda (n s) (princ (car n) s)) #'cdr :stream nil :orientation :vertical)))
+      (is-equal 5 (length (%split-string (string-right-trim (string #\Newline) down) #\Newline)))   ; A, lines, B C, lines, D E F
+      (is (search "D  E  F" down))))
+  ;; shared nodes and cycles are drawn once
+  (let* ((cycle (list 'x)) (edges (list (cons 'x '(y)) (cons 'y '(x z)) (cons 'z nil))))
+    (declare (ignore cycle))
+    (let ((out (format-graph-from-root 'x #'princ (lambda (n) (cdr (assoc n edges))) :stream nil)))
+      (is (search "X ..." out))
+      (is (search "Z" out))))
+  (is-equal (format nil "A~%") (format-graph-from-root 'a #'princ (constantly nil) :stream nil))
+  (is (search "B" (format-graph-from-root '(a (b (c))) (lambda (n s) (princ (car n) s)) #'cdr :stream nil :depth-limit 1)))
+  (is (not (search "C" (format-graph-from-root '(a (b (c))) (lambda (n s) (princ (car n) s)) #'cdr :stream nil :depth-limit 1)))))
+
+(deftest save-world-image
+  (let ((img (format nil "/tmp/ng-world-~D.img" (random 1000000))))
+    (eval '(defun st-saved-marker () :i-was-saved))
+    (multiple-value-bind (path size) (save-world img :description "test world")
+      (is (probe-file path))
+      (is (> size 100000)))
+    (multiple-value-bind (out status) (%run-program "build/neogenera" (list "-i" img "--no-toplevel" "--eval" "(list (st-saved-marker) (caddr *world-saved*))"))
+      (is-equal 0 status)
+      (is (search "(:I-WAS-SAVED \"test world\")" out)))
+    (delete-file img))
+  (let ((p (process-run-function "St-sleeper" (lambda () (process-sleep 30)))))
+    (is (handler-case (progn (save-world "/tmp/ng-never.img") nil) (error () t)))   ; not while processes run
+    (process-kill p)
+    (process-join p)))
+
+(deftest file-browser-window
+  (let ((dir (%st-dir "fb")))
+    (%st-write (%string-concat dir "beta.txt") (format nil "hello~%world"))
+    (%st-write (%string-concat dir "alpha.lisp") "(defun x ())")
+    (%st-write (%string-concat dir "sub/inner.txt") "x")
+    (%st-write (%string-concat dir ".hidden") "secret")
+    (multiple-value-bind (wm lw) (make-test-wm 30 120)
+      (declare (ignorable lw))
+      (let ((fb (open-file-browser wm dir)))
+        (wm-draw wm)
+        (is-equal '("sub" "alpha.lisp" "beta.txt") (mapcar #'car (fb-entries fb)))   ; directories first, no hidden files
+        (is (screen-has wm "Files:"))
+        (is (screen-has wm "sub/"))
+        (wm-handle-event wm (list :key :down 0)) (wm-handle-event wm (list :key :down 0)) (wm-draw wm)
+        (is-equal "beta.txt" (car (fb-selected fb)))
+        (is (screen-has wm "hello"))                                        ; the preview
+        (wm-handle-event wm (list :key 46 0))                               ; . shows hidden files
+        (is (find ".hidden" (fb-entries fb) :key #'car :test #'string=))
+        (wm-handle-event wm (list :key 46 0))
+        (wm-handle-event wm (list :key :home 0)) (wm-handle-event wm (list :key :return 0))
+        (is (search "sub/" (fb-dir fb)))
+        (is-equal '("inner.txt") (mapcar #'car (fb-entries fb)))
+        (wm-handle-event wm (list :key :backspace 0))
+        (is-equal dir (fb-dir fb))
+        (is-equal "sub" (car (fb-selected fb)))                             ; back on the directory left
+        ;; new directory, rename, delete through the prompt
+        (wm-feed wm "+") (wm-feed wm "newdir") (wm-feed wm (string (code-char 13)))
+        (is (probe-file (%string-concat dir "newdir/")))
+        (is-equal "newdir" (car (fb-selected fb)))
+        (wm-feed wm "r") (wm-feed wm (string (code-char 21)))
+        (dotimes (i 6) (wm-handle-event wm (list :key :backspace 0)))
+        (wm-feed wm "renamed") (wm-feed wm (string (code-char 13)))
+        (is (probe-file (%string-concat dir "renamed/")))
+        (wm-feed wm "d") (wm-feed wm "yes") (wm-feed wm (string (code-char 13)))
+        (is (not (probe-file (%string-concat dir "renamed/"))))
+        (wm-feed wm "s")                                                    ; sort by size
+        (is-equal :size (fb-sort fb))
+        ;; opening a file edits it
+        (setf (fb-sort fb) :name) (fb-refresh fb)
+        (setf (fb-sel fb) (position "alpha.lisp" (fb-entries fb) :key #'car :test #'string=))
+        (wm-handle-event wm (list :key :return 0))
+        (is (find-if (lambda (w) (typep w 'editor-window)) (wm-windows wm)))
+        (wm-close-window wm (find-if (lambda (w) (typep w 'editor-window)) (wm-windows wm)))
+        (wm-raise wm fb)
+        (wm-feed wm "v")                                                    ; view
+        (is (find-if (lambda (w) (typep w 'text-window)) (wm-windows wm)))
+        (wm-close-window wm (find-if (lambda (w) (typep w 'text-window)) (wm-windows wm)))
+        (wm-feed wm "q")
+        (is (not (member fb (wm-windows wm))))))
+    ;; clicking an entry answers an ACCEPT of a pathname
+    (multiple-value-bind (wm lw) (make-test-wm 30 120)
+      (let ((seen nil))
+        (run-script wm
+          (script-lines (format nil "(list :picked (namestring (accept 'pathname :prompt \"File\")))"))
+          (at (lambda ()
+                (let ((fb (open-file-browser wm dir)))
+                  (wm-draw wm)
+                  (let ((pos (screen-has wm "beta.txt")))
+                    (push (window-hover-doc fb 2 (- (car pos) (window-y fb) 1)) seen)
+                    (wm-handle-event wm (list :mouse :press (+ (cdr pos) 1) (car pos) 0 0)))))))
+        (is (search "use this for File" (car seen)))
+        (is (pane-has lw (format nil "=> (:PICKED ~S)" (%string-concat dir "beta.txt"))))))
+    (%st-rm dir)))

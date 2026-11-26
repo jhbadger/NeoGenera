@@ -27,7 +27,7 @@ The bytecode VM itself was never the bottleneck (`fib 27` takes 0.07 s, `tak` 0.
   Before this, `(defun f (n) (+ 1 (f (+ n 1))))` killed the process.
 * **Soak test.** `tests/soak/soak.lisp` runs a mixed workload (lists, strings, hash tables, bignums, CLOS, conditions, file formats, alignment, trees, regressions, subprocesses,
   the compiler) and compares the live heap early and late in the run. Twenty seconds show 355 rounds, 70 collections and a flat 6.9 MB live heap; `NG_SOAK_SECONDS=3600 make soak` is the long form.
-* **GC tuning.** The collector is a two-space copier with triggers below the limits; no tuning was needed for the soak workload. A generational collector remains future work.
+* **GC tuning.** The collector is generational (an 8 MB nursery over a two-space old generation) with triggers below the limits; no tuning was needed for the soak workload.
 
 ## Reproducible builds and packaging
 

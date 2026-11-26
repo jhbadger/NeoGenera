@@ -47,7 +47,7 @@ long list_length(Obj l) {
 
 Obj nreverse_list(Obj l) {
   Obj prev = NIL;
-  while (CONSP(l)) { Obj next = CDR(l); CDR(l) = prev; prev = l; l = next; }
+  while (CONSP(l)) { Obj next = CDR(l); CDR(l) = prev; WB(l, prev); prev = l; l = next; }
   return prev;
 }
 
@@ -61,7 +61,7 @@ Obj plist_get(Obj plist, Obj key, Obj dflt) {
 
 Obj plist_put(Obj plist, Obj key, Obj val) {
   for (Obj p = plist; CONSP(p) && CONSP(CDR(p)); p = CDR(CDR(p)))
-    if (CAR(p) == key) { CAR(CDR(p)) = val; return plist; }
+    if (CAR(p) == key) { CAR(CDR(p)) = val; WB(CDR(p), val); return plist; }
   return cons(key, cons(val, plist));
 }
 
@@ -69,8 +69,18 @@ Obj plist_put(Obj plist, Obj key, Obj val) {
 int eql(Obj a, Obj b) {
   if (a == b) return 1;
   if (FLONUMP(a) && FLONUMP(b)) return memcmp(&SLOT(a, 0), &SLOT(b, 0), sizeof(double)) == 0;
-  if (OBJP(a) && OBJP(b) && (OBJ_TYPE(a) == T_BIGNUM || OBJ_TYPE(a) == T_RATIO) && OBJ_TYPE(a) == OBJ_TYPE(b)) return num_eql(a, b);
+  if (OBJP(a) && OBJP(b) && (OBJ_TYPE(a) == T_BIGNUM || OBJ_TYPE(a) == T_RATIO || OBJ_TYPE(a) == T_COMPLEX) && OBJ_TYPE(a) == OBJ_TYPE(b)) return num_eql(a, b);
   return 0;
+}
+
+/* Is O a PATHNAME or LOGICAL-PATHNAME structure?  EQUAL compares those by component. */
+static int pathname_struct_p(Obj o) {
+  if (!IS_TYPE(o, T_STRUCT)) return 0;
+  Obj type = SLOT(o, 0);
+  Obj name = CONSP(type) ? CAR(type) : type;
+  if (!SYMBOLP(name) || !STRINGP(SYM_NAME(name))) return 0;
+  const char *s = STR_DATA(SYM_NAME(name));
+  return strcmp(s, "PATHNAME") == 0 || strcmp(s, "LOGICAL-PATHNAME") == 0;
 }
 
 int equal(Obj a, Obj b) {
@@ -80,6 +90,10 @@ int equal(Obj a, Obj b) {
     if (CONSP(a) && CONSP(b)) { if (!equal(CAR(a), CAR(b))) return 0; a = CDR(a); b = CDR(b); continue; }
     if (STRINGP(a) && STRINGP(b))
       return STR_LEN(a) == STR_LEN(b) && memcmp(STR_DATA(a), STR_DATA(b), STR_LEN(a)) == 0;
+    if (pathname_struct_p(a) && pathname_struct_p(b) && SLOT(a, 0) == SLOT(b, 0) && OBJ_NWORDS(a) == OBJ_NWORDS(b)) {
+      for (size_t i = 1; i < OBJ_NWORDS(a); i++) if (!equal(SLOT(a, i), SLOT(b, i))) return 0;   /* pathnames: by component */
+      return 1;
+    }
     return 0;
   }
 }
@@ -90,7 +104,7 @@ int equalp(Obj a, Obj b) {
   STACK_CHECK();
   for (;;) {
     if (eql(a, b)) return 1;
-    if (is_number(a) && is_number(b)) return num_cmp(a, b) == 0;
+    if (is_number(a) && is_number(b)) return num_equal(a, b);
     if (CHARP(a) && CHARP(b)) return char_eqi(CHAR_CODE(a), CHAR_CODE(b));
     if (CONSP(a) && CONSP(b)) { if (!equalp(CAR(a), CAR(b))) return 0; a = CDR(a); b = CDR(b); continue; }
     if (STRINGP(a) && STRINGP(b)) {
@@ -102,6 +116,11 @@ int equalp(Obj a, Obj b) {
       if (OBJ_NWORDS(a) != OBJ_NWORDS(b)) return 0;
       for (size_t i = 0; i < OBJ_NWORDS(a); i++) if (!equalp(SLOT(a, i), SLOT(b, i))) return 0;
       return 1;
+    }
+    if (IS_TYPE(a, T_MDARRAY) && IS_TYPE(b, T_MDARRAY)) {       /* same dimensions, elements EQUALP */
+      if (!equal(SLOT(a, AR_DIMS), SLOT(b, AR_DIMS))) return 0;
+      a = SLOT(a, AR_DATA); b = SLOT(b, AR_DATA);
+      continue;
     }
     return 0;
   }
@@ -123,7 +142,7 @@ uint64_t sxhash(Obj o, int depth) {
   case T_SYMBOL: return hash_bytes(STR_DATA(SYM_NAME(o)), STR_LEN(SYM_NAME(o))) ^ 0x5bd1e995;
   case T_FLONUM: { uint64_t b; memcpy(&b, &SLOT(o, 0), 8); return b * 0x9E3779B97F4A7C15ULL; }
   case T_VECTOR: return 0x1234 + OBJ_NWORDS(o);
-  case T_BIGNUM: case T_RATIO: return num_hash(o);
+  case T_BIGNUM: case T_RATIO: case T_COMPLEX: return num_hash(o);
   default: return 99;
   }
 }
@@ -141,7 +160,7 @@ static Obj table_lookup(Obj table, const char *name, size_t len) {
 static void table_add(Obj table, Obj sym) {
   Obj n = SYM_NAME(sym);
   size_t idx = hash_bytes(STR_DATA(n), STR_LEN(n)) % TABLE_SIZE;
-  SLOT(table, idx) = cons(sym, SLOT(table, idx));
+  SLOT(table, idx) = cons(sym, SLOT(table, idx)); WB(table, SLOT(table, idx));
 }
 
 /* table_remove intentionally omitted: UNINTERN is not supported yet */
@@ -161,8 +180,8 @@ Obj make_package(Obj name, Obj nicks, Obj uses) {
 
 void use_package(Obj pkg, Obj used) {
   for (Obj l = SLOT(pkg, PK_USES); l != NIL; l = CDR(l)) if (CAR(l) == used) return;
-  SLOT(pkg, PK_USES) = cons(used, SLOT(pkg, PK_USES));
-  SLOT(used, PK_USEDBY) = cons(pkg, SLOT(used, PK_USEDBY));
+  SLOT(pkg, PK_USES) = cons(used, SLOT(pkg, PK_USES)); WB(pkg, SLOT(pkg, PK_USES));
+  SLOT(used, PK_USEDBY) = cons(pkg, SLOT(used, PK_USEDBY)); WB(used, SLOT(used, PK_USEDBY));
 }
 
 static int pkg_name_is(Obj pkg, const char *name, size_t len) {
@@ -219,7 +238,7 @@ Obj intern_obj(Obj namestr, Obj pkg, int *status) {
   if (*status) return s;
   Obj name = make_string(STR_DATA(namestr), STR_LEN(namestr));
   s = make_symbol_obj(name);
-  SYM_PKG(s) = pkg;
+  SYM_PKG(s) = pkg; WB(s, pkg);
   table_add(SLOT(pkg, PK_INTERNAL), s);
   if (pkg == PKG_KEYWORD) {
     table_add(SLOT(pkg, PK_EXTERNAL), s);
@@ -306,12 +325,13 @@ void init_symbols(void) {
   };
   for (size_t i = 0; i < sizeof sf / sizeof sf[0]; i++) set_special_form(*sf[i].s, sf[i].id);
 
-  Obj specials[] = { Q_package, Q_stdout, Q_stdin, Q_stderr, Q_features, Q_print_pkg, Q_read_eval, Q_in_signal };
+  Obj specials[] = { Q_package, Q_stdout, Q_stdin, Q_stderr, Q_features, Q_print_pkg, Q_read_eval, Q_in_signal, Q_readtable };
   for (size_t i = 0; i < sizeof specials / sizeof specials[0]; i++)
     SYM_FLAGS(specials[i]) = FIX(UNFIX(SYM_FLAGS(specials[i])) | SF_SPECIAL);
   SYM_VALUE(Q_in_signal) = NIL;
   SYM_VALUE(Q_package) = PKG_USER;
   SYM_VALUE(Q_print_pkg) = NIL;
   SYM_VALUE(Q_read_eval) = TT;
+  SYM_VALUE(Q_readtable) = NIL;                 /* NIL: the built-in syntax only (until Lisp installs a readtable) */
   SYM_VALUE(Q_features) = list3(intern_kw("NEOGENERA"), intern_kw("COMMON-LISP"), intern_kw("BYTECODE"));
 }

@@ -1,0 +1,241 @@
+;;;; 75-files.lisp -- the file browser: a window for the file system.
+;;;;
+;;;; A directory listing (name, size, date), sorted by name, size or date with directories first, and a preview of
+;;;; the selected file.  Return or a second click opens a directory or edits a file; Backspace goes up.  Entries are
+;;;; presentations of their pathnames: while something asks for a pathname (ACCEPT, a command argument), clicking an
+;;;; entry answers it.
+
+(in-package :cl)
+
+(defclass file-browser-window (window)
+  ((dir :initarg :dir :accessor fb-dir)                 ; a namestring ending in /
+   (entries :initform nil :accessor fb-entries)         ; (name kind size mtime)
+   (sel :initform 0 :accessor fb-sel)
+   (top :initform 0 :accessor fb-top)
+   (sort :initform :name :accessor fb-sort)
+   (hidden :initform nil :accessor fb-hidden)
+   (preview :initform t :accessor fb-preview)
+   (prompt :initform nil :accessor fb-prompt)           ; (label input callback) while asking
+   (message :initform nil :accessor fb-message)
+   (rows :initform 1 :accessor fb-rows)
+   (list-w :initform 40 :accessor fb-list-w)
+   (preview-cache :initform nil :accessor fb-preview-cache)))
+
+(defun %fb-dir-name (dir)
+  (let ((d (if (string= dir "") "./" dir))) (if (char= (char d (- (length d) 1)) #\/) d (%string-concat d "/"))))
+
+(defun fb-refresh (w &optional keep)
+  (let* ((old (and keep (car (nth (fb-sel w) (fb-entries w)))))
+         (raw (or (ignore-errors (%directory (fb-dir w))) nil))
+         (shown (if (fb-hidden w) raw (remove-if (lambda (e) (char= (char (car e) 0) #\.)) raw)))
+         (key (case (fb-sort w) (:size #'caddr) (:date #'cadddr) (t nil)))
+         (sorted (sort (copy-list shown)
+                       (lambda (a b)
+                         (let ((da (eq (cadr a) :directory)) (db (eq (cadr b) :directory)))
+                           (cond ((and da (not db)) t) ((and db (not da)) nil)
+                                 (key (> (funcall key a) (funcall key b)))
+                                 (t (string-lessp (car a) (car b)))))))))
+    (setf (fb-entries w) sorted (fb-preview-cache w) nil)
+    (setf (fb-sel w) (or (and old (position old sorted :key #'car :test #'string=)) (min (fb-sel w) (max 0 (- (length sorted) 1)))))
+    (setf (window-title w) (format nil "Files: ~A" (fb-dir w)))
+    w))
+
+(defun open-file-browser (wm &optional (dir (namestring (truename "."))))
+  "Open a file browser window on DIR."
+  (let ((w (make-instance 'file-browser-window :dir (%fb-dir-name dir) :title "Files"
+                          :x 3 :y 1 :w (max 50 (- (wm-cols wm) 6)) :h (max 10 (- (wm-area-height wm) 3)))))
+    (fb-refresh w)
+    (wm-add-window wm w)
+    w))
+
+(defun %fb-entry-path (w e) (%string-concat (fb-dir w) (car e) (if (eq (cadr e) :directory) "/" "")))
+(defun fb-selected (w) (nth (fb-sel w) (fb-entries w)))
+
+(defun %fb-size (n)
+  (cond ((< n 1024) (format nil "~D" n)) ((< n (* 1024 1024)) (format nil "~,1FK" (/ n 1024.0)))
+        ((< n (* 1024 1024 1024)) (format nil "~,1FM" (/ n 1048576.0))) (t (format nil "~,1FG" (/ n 1073741824.0)))))
+
+(defun %fb-date (unix)
+  (multiple-value-bind (s mi h d mo y) (decode-universal-time (+ unix 2208988800))
+    (declare (ignore s))
+    (format nil "~D-~2,'0D-~2,'0D ~2,'0D:~2,'0D" y mo d h mi)))
+
+(defun %fb-text-p (bytes)
+  (and (not (find (code-char 0) bytes)) (< (count-if (lambda (c) (let ((k (char-code c))) (and (< k 32) (not (member k '(9 10 13)))))) bytes) 3)))
+
+(defun %fb-preview-lines (w e max-lines)
+  (let ((path (%fb-entry-path w e)))
+    (or (and (equal (car (fb-preview-cache w)) path) (cdr (fb-preview-cache w)))
+        (let ((lines
+                (cond ((eq (cadr e) :directory)
+                       (let ((sub (ignore-errors (%directory path))))
+                         (cons (format nil "~D entr~:@P" (length sub))
+                               (mapcar (lambda (x) (%string-concat (car x) (if (eq (cadr x) :directory) "/" ""))) (subseq sub 0 (min (length sub) (- max-lines 1)))))))
+                      ((> (caddr e) 4000000) (list (format nil "~A bytes" (caddr e))))
+                      (t (let ((text (ignore-errors (with-open-file (s path) (let ((acc nil)) (dotimes (i max-lines) (let ((l (read-line s nil nil))) (unless l (return)) (push l acc))) (nreverse acc))))))
+                           (cond ((null text) (list "(cannot be read)"))
+                                 ((%fb-text-p (apply #'%string-concat text)) text)
+                                 (t (list (format nil "binary file, ~A bytes" (caddr e))))))))))
+          (setf (fb-preview-cache w) (cons path lines))
+          lines))))
+
+(defmethod window-draw-content ((w file-browser-window) screen ix iy iw ih focused)
+  (declare (ignore focused))
+  (let* ((rows (max 1 (- ih 2))) (entries (fb-entries w)) (n (length entries))
+         (list-w (if (and (fb-preview w) (>= iw 70)) (min 60 (floor (* iw 3) 5)) iw)))
+    (setf (fb-rows w) rows (fb-list-w w) list-w)
+    (when (< (fb-sel w) (fb-top w)) (setf (fb-top w) (fb-sel w)))
+    (when (>= (fb-sel w) (+ (fb-top w) rows)) (setf (fb-top w) (+ (- (fb-sel w) rows) 1)))
+    ;; the header: the directory and the sort
+    (let ((head (format nil "~A   (~D, by ~(~A~)~:[~;, hidden shown~])" (fb-dir w) n (fb-sort w) (fb-hidden w))))
+      (screen-draw-string screen iy ix head (tc :prompt) (tc :bg) +bold+ 0 (utf8-prefix-end head 0 iw)))
+    (dotimes (i rows)
+      (let ((k (+ (fb-top w) i)))
+        (when (< k n)
+          (let* ((e (nth k entries)) (sel (= k (fb-sel w))) (dirp (eq (cadr e) :directory))
+                 (name (%string-concat (car e) (if dirp "/" "")))
+                 (info (if dirp (format nil "~16A" (%fb-date (cadddr e))) (format nil "~7@A  ~16A" (%fb-size (caddr e)) (%fb-date (cadddr e)))))
+                 (name-w (max 8 (- list-w (length info) 3)))
+                 (fg (cond (sel (tc :sel-fg)) (dirp (tc :link)) (t (tc :fg)))) (bg (if sel (tc :sel-bg) (tc :bg)))
+                 (attr (if (and sel (= -1 (tc :sel-bg))) +reverse+ (if dirp +bold+ 0))))
+            (screen-fill screen (+ iy 1 i) ix 1 list-w 32 fg bg attr)
+            (screen-draw-string screen (+ iy 1 i) (+ ix 1) name fg bg attr 0 (utf8-prefix-end name 0 name-w))
+            (screen-draw-string screen (+ iy 1 i) (+ ix list-w (- (length info)) -1) info (if sel fg (tc :dim)) bg (if sel attr 0))))))
+    (when (= n 0) (screen-draw-string screen (+ iy 1) (+ ix 1) "(empty)" (tc :dim) (tc :bg) 0))
+    ;; the preview
+    (when (and (< list-w iw) (fb-selected w))
+      (let ((px (+ ix list-w 1)) (pw (- iw list-w 1)))
+        (dotimes (i (+ rows 1)) (screen-put screen (+ iy i) (+ ix list-w) #x2502 (tc :border) (tc :bg) 0))
+        (let ((r 0))
+          (dolist (line (%fb-preview-lines w (fb-selected w) rows))
+            (when (< r rows)
+              (let ((l (substitute #\Space (code-char 9) line)))
+                (screen-draw-string screen (+ iy 1 r) (+ px 1) l (tc :dim) (tc :bg) 0 0 (utf8-prefix-end l 0 (max 1 (- pw 1))))))
+            (setq r (+ r 1))))))
+    ;; the bottom line: a prompt, a message or the keys
+    (let* ((p (fb-prompt w))
+           (text (cond (p (%string-concat (car p) (cadr p)))
+                       ((fb-message w) (fb-message w))
+                       (t "RET open  BS up  e edit  v view  d delete  r rename  + new dir  c copy path  s sort  . hidden  p preview  g refresh"))))
+      (screen-draw-string screen (+ iy ih -1) ix text (if p (tc :fg) (tc :dim)) (tc :bg) 0 0 (utf8-prefix-end text 0 iw))
+      (when p (setf (window-cursor w) (cons (+ iy ih -1) (+ ix (min (- iw 1) (utf8-length text)))))))))
+
+(defun fb-open (w)
+  (let ((e (fb-selected w)))
+    (when e
+      (if (eq (cadr e) :directory)
+          (progn (setf (fb-dir w) (%fb-dir-name (%fb-entry-path w e)) (fb-sel w) 0 (fb-top w) 0) (fb-refresh w))
+          (open-editor (window-wm w) :file (%fb-entry-path w e))))))
+
+(defun fb-up (w)
+  (let* ((d (string-right-trim "/" (fb-dir w))) (slash (position #\/ d :from-end t)))
+    (when (and slash (> (length d) 0))
+      (let ((name (subseq d (+ slash 1))))
+        (setf (fb-dir w) (%fb-dir-name (if (= slash 0) "/" (subseq d 0 slash))) (fb-top w) 0)
+        (fb-refresh w)
+        (setf (fb-sel w) (or (position name (fb-entries w) :key #'car :test #'string=) 0))))))
+
+(defun fb-view (w)
+  (let ((e (fb-selected w)))
+    (when (and e (not (eq (cadr e) :directory)))
+      (let* ((path (%fb-entry-path w e))
+             (lines (or (ignore-errors (with-open-file (s path) (let ((acc nil)) (dotimes (i 20000) (let ((l (read-line s nil nil))) (unless l (return)) (push (substitute #\Space (code-char 9) l) acc))) (nreverse acc))))
+                        (list "(cannot be read)")))
+             (wm (window-wm w)))
+        (wm-add-window wm (make-instance 'text-window :lines lines :title (format nil "View: ~A  (q closes)" (car e))
+                                         :x 6 :y 2 :w (max 40 (- (wm-cols wm) 12)) :h (max 8 (- (wm-area-height wm) 4))))))))
+
+(defun fb-ask (w label callback &optional (initial ""))
+  (setf (fb-prompt w) (list label initial callback)))
+
+(defun %fb-key-prompt (w key)
+  (destructuring-bind (label input callback) (fb-prompt w)
+    (let ((c (key-code key)) (ctrl (/= 0 (logand (key-mods key) +ctrl+))))
+      (cond ((eq c :return) (setf (fb-prompt w) nil) (handler-case (funcall callback input) (error (e) (setf (fb-message w) (princ-to-string e)))))
+            ((or (eq c :escape) (and ctrl (eql c 103))) (setf (fb-prompt w) nil (fb-message w) "Cancelled"))
+            ((eq c :backspace) (when (> (length input) 0) (setf (fb-prompt w) (list label (subseq input 0 (char-start input (length input))) callback))))
+            ((and (integerp c) (not ctrl) (>= c 32))
+             (setf (fb-prompt w) (list label (%string-concat input (if (< c 128) (string (code-char c)) (%utf8-encode c))) callback)))))))
+
+(defmethod window-key ((w file-browser-window) key)
+  (setf (fb-message w) nil)
+  (if (fb-prompt w)
+      (%fb-key-prompt w key)
+      (let* ((c (key-code key)) (m (key-mods key)) (ctrl (/= 0 (logand m +ctrl+))) (n (length (fb-entries w))) (e (fb-selected w)))
+        (cond ((or (eq c :down) (and ctrl (eql c 110))) (setf (fb-sel w) (min (max 0 (- n 1)) (+ (fb-sel w) 1))))
+              ((or (eq c :up) (and ctrl (eql c 112))) (setf (fb-sel w) (max 0 (- (fb-sel w) 1))))
+              ((eq c :pgdn) (setf (fb-sel w) (min (max 0 (- n 1)) (+ (fb-sel w) (fb-rows w)))))
+              ((eq c :pgup) (setf (fb-sel w) (max 0 (- (fb-sel w) (fb-rows w)))))
+              ((eq c :home) (setf (fb-sel w) 0))
+              ((eq c :end) (setf (fb-sel w) (max 0 (- n 1))))
+              ((or (eq c :return) (eq c :right)) (fb-open w))
+              ((or (eq c :backspace) (eq c :left) (eql c 94)) (fb-up w))
+              ((and (integerp c) (not ctrl) (zerop m))
+               (case (code-char c)
+                 (#\e (when (and e (not (eq (cadr e) :directory))) (open-editor (window-wm w) :file (%fb-entry-path w e))))
+                 (#\v (fb-view w))
+                 (#\g (fb-refresh w t) (setf (fb-message w) "Refreshed"))
+                 (#\s (setf (fb-sort w) (case (fb-sort w) (:name :size) (:size :date) (t :name))) (fb-refresh w t))
+                 (#\. (setf (fb-hidden w) (not (fb-hidden w))) (fb-refresh w t))
+                 (#\p (setf (fb-preview w) (not (fb-preview w))))
+                 (#\q (wm-close-window (window-wm w) w))
+                 (#\c (when e
+                        (let ((lw (and (boundp '*main-listener*) *main-listener*)))
+                          (if lw (progn (%insert-text lw (prin1-to-string (%fb-entry-path w e))) (setf (fb-message w) "Copied to the Listener's input"))
+                              (setf (fb-message w) "No Listener")))))
+                 (#\d (when e
+                        (let ((path (%fb-entry-path w e)))
+                          (fb-ask w (format nil "Delete ~A? (yes or no) " (car e))
+                                  (lambda (answer)
+                                    (if (string-equal (string-trim " " answer) "yes")
+                                        (progn (if (eq (cadr e) :directory)
+                                                   (unless (eql 0 (nth-value 1 (%run-program "rmdir" (list path)))) (error "~A is not empty" (car e)))
+                                                   (unless (delete-file path) (error "Cannot delete ~A" (car e))))
+                                               (fb-refresh w) (setf (fb-message w) (format nil "Deleted ~A" (car e))))
+                                        (setf (fb-message w) "Not deleted")))))))
+                 (#\r (when e
+                        (fb-ask w (format nil "Rename ~A to: " (car e))
+                                (lambda (new)
+                                  (unless (%rename-file (string-right-trim "/" (%fb-entry-path w e)) (%string-concat (fb-dir w) new)) (error "Cannot rename ~A" (car e)))
+                                  (fb-refresh w) (setf (fb-sel w) (or (position new (fb-entries w) :key #'car :test #'string=) 0)))
+                                (car e))))
+                 (#\+ (fb-ask w "New directory: "
+                              (lambda (name) (unless (%make-directory (%string-concat (fb-dir w) name)) (error "Cannot make ~A" name))
+                                (fb-refresh w) (setf (fb-sel w) (or (position name (fb-entries w) :key #'car :test #'string=) 0)))))
+                 (t ;; a letter jumps to the next entry starting with it
+                  (let ((ch (code-char c)) (k (fb-sel w)))
+                    (dotimes (i n)
+                      (setq k (mod (+ k 1) n))
+                      (when (char-equal ch (char (car (nth k (fb-entries w))) 0)) (setf (fb-sel w) k) (return)))))))
+              (t nil))))
+  (setf (wm-dirty (window-wm w)) t)
+  t)
+
+(defun %fb-entry-at (w ly)
+  (let ((k (+ (fb-top w) (- ly 1)))) (and (>= ly 1) (<= ly (fb-rows w)) (< k (length (fb-entries w))) k)))
+
+(defun %fb-pres (w k) (make-pres (pathname (%fb-entry-path w (nth k (fb-entries w)))) 'pathname))
+
+(defmethod window-mouse ((w file-browser-window) kind lx ly button mods)
+  (declare (ignore mods))
+  (when (and (eq kind :press) (< lx (fb-list-w w)))
+    (let ((k (%fb-entry-at w ly)))
+      (when k
+        (cond ((and (= button 0) (%accept-click (%fb-pres w k))) nil)         ; answers an ACCEPT of a pathname
+              ((and (= button 0) (= k (fb-sel w))) (fb-open w))              ; a second click opens
+              (t (setf (fb-sel w) k))))))
+  (setf (wm-dirty (window-wm w)) t)
+  t)
+
+(defmethod window-hover-doc ((w file-browser-window) lx ly)
+  (let ((k (and (< lx (fb-list-w w)) (%fb-entry-at w ly))))
+    (and k (or (%accept-hover-doc (%fb-pres w k))
+               (format nil "L: select (again: open)   ~A" (%fb-entry-path w (nth k (fb-entries w))))))))
+
+(defmethod window-scroll-by ((w file-browser-window) n)
+  (setf (fb-sel w) (max 0 (min (max 0 (- (length (fb-entries w)) 1)) (- (fb-sel w) n)))))
+
+(define-command (files :documentation "Open the file browser") ((dir string :prompt "Directory" :default (namestring (truename "."))))
+  (open-file-browser *wm* dir))
+
+(define-select-activity #\F "Files" (lambda (w) (typep w 'file-browser-window)) (lambda (wm) (open-file-browser wm)))

@@ -184,7 +184,11 @@
 ;;; ---- second batch: the rest of the standard names -------------------------------------------------
 
 (%doc-bulk '%doc-function
- '(abort "Invoke the innermost `abort` restart, abandoning the current computation."
+ '(pathnamep "True for a pathname (logical pathnames included)." readtablep "True for a readtable."
+   complexp "True for a complex number." realpart "The real part of a number." imagpart "The imaginary part of a number (0 for a rational)."
+   conjugate "The complex conjugate of a number." phase "The angle of a number in the complex plane, in radians."
+   cis "The complex number cos(x) + i sin(x)."
+   abort "Invoke the innermost `abort` restart, abandoning the current computation."
    abs "Absolute value of a number."
    acons "Add a (key . value) pair to the front of an association list."
    acos "Arc cosine in radians."
@@ -372,13 +376,15 @@
    synonym-stream "Gray stream forwarding to the stream in a special variable." broadcast-stream "Gray stream writing to several streams."
    two-way-stream "Gray stream combining an input and an output stream." echo-stream "Two-way stream that echoes input to its output."
    concatenated-stream "Gray stream reading several streams in turn."
+   readtable "A table of reader syntax: see `copy-readtable` and `set-macro-character`." pathname "A file name of six components: host, device, directory, name, type and version."
    fundamental-stream "Base class of Gray streams." fundamental-input-stream "Base class of Gray input streams." fundamental-output-stream "Base class of Gray output streams."))
 
 (%doc-bulk '%doc-variable
  '(*print-escape* "True when objects are printed with escape characters (as `prin1`)." *print-pretty* "Reserved: pretty printing is requested with `pprint`."
    *terminal-io* "The terminal as a two-way stream." *query-io* "Stream for questions to the user." *debug-io* "Stream used by the debugger."
    *trace-output* "Stream receiving trace output." *gensym-counter* "Counter used to name `gensym` symbols." *read-eval* "True when `#.` is allowed in the reader."
-   *load-pathname* "The file being loaded." *print-packages* "Reserved."
+   *load-pathname* "The file being loaded, as a pathname." *print-packages* "Reserved."
+   *readtable* "The readtable `read` uses: macro characters, dispatch characters and the case of symbol names."
    *ng-version* "The NeoGenera version string."
    most-negative-fixnum "The smallest fixnum, -2^60."
    internal-time-units-per-second "Units of `get-internal-real-time` per second: 1000000."
@@ -396,6 +402,8 @@
    slotd-allocation slotd-initargs slotd-initfn slotd-name slotd-readers slotd-writers slot-definition slot-definition-p
    slot-definition-allocation slot-definition-initargs get-default-initargs-cache set-default-initargs-cache
    restart-fn restart-p restart-report restart-test restart-lambda-list restart-report-string restart classp conditionp
+   logical-pathname-device logical-pathname-directory logical-pathname-host logical-pathname-name logical-pathname-p
+   logical-pathname-type logical-pathname-version (setf readtable-case) (setf logical-pathname-translations)
    loop-pairs loop-while-trim member-by merge-lists list-length-safe do-list-tails identity-fn assq assql memq memql
    string-to-list unwind-protect* method-qualifiers-of describe-object-slots ng-toplevel pretty-string
    stream-error-stream class-finalized-p arithmetic-error-operands arithmetic-error-operation cell-error-name

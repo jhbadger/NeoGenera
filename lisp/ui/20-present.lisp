@@ -17,8 +17,12 @@
 
 (defun make-obuf () (let ((b (%make-obuf))) (setf (ob-rlines b) (list (make-oline))) b))
 
+(defvar *dribble-stream* nil "The file stream a session is being recorded to (see DRIBBLE), or NIL.")
+(defvar *dribble-pane* nil "The output buffer of the window Listener being recorded, or NIL.")
+
 (defun ob-write (b string style pres)
   "Append STRING (which may contain newlines) to the buffer."
+  (when (and *dribble-stream* (eq b *dribble-pane*)) (write-string string *dribble-stream*))
   (let ((start 0) (n (length string)))
     (loop
       (let ((nl (%string-position-char string #\Newline start)))

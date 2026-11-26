@@ -70,7 +70,7 @@ static Obj vm_execute(int stop_vfp) {
     case OP_GSET: {
       Obj s = consts[ip[pc++]];
       if (UNFIX(SYM_FLAGS(s)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_DATA(SYM_NAME(s)));
-      SYM_VALUE(s) = vstack[--vsp];
+      SYM_VALUE(s) = vstack[--vsp]; WB(s, SYM_VALUE(s));
       break;
     }
     case OP_GFUN: {
@@ -152,7 +152,7 @@ static Obj vm_execute(int stop_vfp) {
     }
     case OP_BOX: vstack[vsp - 1] = cons(vstack[vsp - 1], NIL); break;
     case OP_UNBOX: vstack[vsp - 1] = CAR(vstack[vsp - 1]); break;
-    case OP_BOXSET: { Obj v = vstack[--vsp]; Obj b = vstack[vsp - 1]; CAR(b) = v; vstack[vsp - 1] = v; break; }
+    case OP_BOXSET: { Obj v = vstack[--vsp]; Obj b = vstack[vsp - 1]; CAR(b) = v; WB(b, v); vstack[vsp - 1] = v; break; }
     case OP_BIND: { Obj s = consts[ip[pc++]]; dynbind(s, vstack[--vsp]); break; }
     case OP_UNBIND: { int n = ip[pc++]; unbind_to(spsp - n); break; }
     case OP_SLIDE: { int n = ip[pc++]; Obj top = vstack[vsp - 1]; vsp -= n; vstack[vsp - 1] = top; break; }
@@ -182,7 +182,9 @@ static Obj vm_execute(int stop_vfp) {
     CMPOP(OP_GT, >)
     CMPOP(OP_LE, <=)
     CMPOP(OP_GE, >=)
-    CMPOP(OP_NUMEQ, ==)
+    case OP_NUMEQ: { Obj b = vstack[--vsp], a = vstack[vsp - 1];
+      vstack[vsp - 1] = (FIXP(a) && FIXP(b)) ? BOOL(a == b) : BOOL(num_equal(a, b));
+      break; }
     default:
       lisp_error("VM: bad opcode %d", ip[pc - 1]);
     }

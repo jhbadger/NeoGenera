@@ -10,7 +10,7 @@ colour themes and a Genera-style status line.
 | F6 or Meta-o | next window |
 | F7 or Meta-t | re-tile: horizontal, vertical, main and stack, grid |
 | F8 | next colour theme: classic, green, amber, mono |
-| F9, then a letter | **select** an activity, like Genera's SELECT key: `L` Listener, `E` Editor, `P` Peek, `D` Documentation, `I` Inspector, `S` Settings |
+| F9, then a letter | **select** an activity, like Genera's SELECT key: `L` Listener, `E` Editor, `P` Peek, `F` Files, `D` Documentation, `I` Inspector, `S` Settings |
 | F10 | quit: asks first (and mentions modified buffers and background processes); F10 again or `y` quits, any other key cancels |
 
 F9 followed by a letter brings the most recent window of that kind to the front; if one is already selected
@@ -41,6 +41,44 @@ A line that starts with a colon is a command. Abbreviate each word (`:sh pack` i
 arguments are prompted for: type the answer, or click any object on the screen that fits (the mouse
 documentation line says *L: use this for ...* over the ones that do). Tab completes command names, package
 names and symbols. `:help` lists them all.
+
+## Lists and trees in output
+
+`format-textual-list` prints a list as prose, and each element is a presentation:
+
+```lisp
+(format-textual-list '(1 2 3) #'princ :conjunction "and")      ; 1, 2, and 3
+```
+
+`format-graph-from-root` draws a tree or a graph. Give it the root, a function that prints a node, and a function
+that returns a node's children:
+
+```lisp
+(format-graph-from-root 'number #'princ
+                        (lambda (c) (mapcar #'class-name (class-direct-subclasses (find-class c)))))
+```
+
+It draws the tree sideways, with lines like a directory tree; `:orientation :vertical` draws it top-down. A node
+reached a second time is drawn with `...` and without its children, so graphs with shared nodes or cycles are drawn
+once. `:depth-limit` stops the drawing at that depth. Each node is a presentation, so it can be clicked.
+
+## The file browser
+
+`:files`, or F9 then `F`, opens a window on a directory. It lists directories first, with sizes and dates, and shows a
+preview of the selected file or directory on the right.
+
+| Key | Action |
+|---|---|
+| Up/Down, Page Up/Down, Home/End | move; a letter jumps to the next name starting with it |
+| Return or Right | open a directory, or edit a file; a second click does the same |
+| Backspace or Left | the parent directory |
+| `v` `e` | view the file, edit it |
+| `d` `r` `+` | delete (asks first), rename, make a directory |
+| `c` | copy the path to the Listener's input |
+| `s` `.` `p` `g` | sort by name, size or date; show hidden files; the preview; reread the directory |
+| `q` | close |
+
+When something asks for a file name (an `accept` of `pathname`, or a command argument), clicking an entry answers it.
 
 ## Asking for input
 

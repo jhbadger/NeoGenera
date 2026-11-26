@@ -95,7 +95,7 @@ void stream_write(Obj s, const char *buf, size_t n) {
       while (cap < len + n + 1) cap *= 2;
       Obj nb = make_string(NULL, cap);
       memcpy(STR_DATA(nb), STR_DATA(SLOT(s, ST_BUF)), len);
-      SLOT(s, ST_BUF) = nb; b = nb;
+      SLOT(s, ST_BUF) = nb; WB(s, nb); b = nb;
     }
     memcpy(STR_DATA(b) + len, buf, n);
     SLOT(s, ST_LEN) = FIX(len + n);

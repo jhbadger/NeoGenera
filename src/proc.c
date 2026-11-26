@@ -76,7 +76,7 @@ static long long now_us(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONI
 static void save_state(Proc *p) {
   for (int i = spsp - 1; i >= 0; i--) {             /* undo the bindings, keeping their values */
     Obj s = specpdl[i].sym, v = SYM_VALUE(s);
-    SYM_VALUE(s) = specpdl[i].old; specpdl[i].old = v;
+    SYM_VALUE(s) = specpdl[i].old; WB(s, SYM_VALUE(s)); specpdl[i].old = v;
   }
   p->vstack = vstack; p->vsp = vsp; p->vstack_size = vstack_size;
   p->vframes = vframes; p->vfp = vfp; p->vframe_size = vframe_size;
@@ -100,7 +100,7 @@ static void restore_state(Proc *p) {
   for (int i = 0; i < mv_count && i < MAX_MV; i++) mv_vals[i] = p->mv[i];
   for (int i = 0; i < spsp; i++) {                   /* redo the bindings */
     Obj s = specpdl[i].sym, v = SYM_VALUE(s);
-    SYM_VALUE(s) = specpdl[i].old; specpdl[i].old = v;
+    SYM_VALUE(s) = specpdl[i].old; WB(s, SYM_VALUE(s)); specpdl[i].old = v;
   }
   p->t_in = now_us(); p->switches++;
   if (p->interrupt || p->arrested) ng_attention = 1;

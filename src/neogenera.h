@@ -44,11 +44,12 @@ typedef intptr_t SObj;
 #define EOF_OBJ       MK_IMM(IMM_SPEC, 1)
 #define UNSUPPLIED    MK_IMM(IMM_SPEC, 2)
 #define FWD_MARK      MK_IMM(IMM_SPEC, 3)
+#define NOVALUE       MK_IMM(IMM_SPEC, 9)      /* the reader read a comment or a macro that returned no values */
 
 /* ---- heap objects ----------------------------------------------------- */
 enum {
   T_SYMBOL = 1, T_STRING, T_VECTOR, T_FLONUM, T_EVALFN, T_CLOSURE, T_CODE,
-  T_PRIM, T_STREAM, T_PACKAGE, T_STRUCT, T_ADVEC, T_BIGNUM, T_RATIO
+  T_PRIM, T_STREAM, T_PACKAGE, T_STRUCT, T_ADVEC, T_BIGNUM, T_RATIO, T_COMPLEX, T_MDARRAY
 };
 
 #define HDR(n, t)      (((Obj)(n) << 16) | ((Obj)(t) << 8) | TAG_HDR)
@@ -103,6 +104,9 @@ enum { SK_STDIN, SK_STDOUT, SK_STDERR, SK_FILE_IN, SK_FILE_OUT, SK_STR_IN, SK_ST
 enum { PK_NAME, PK_NICK, PK_INTERNAL, PK_EXTERNAL, PK_USES, PK_USEDBY, PK_SLOTS };
 /* adjustable vectors */
 enum { AV_DATA, AV_FILL, AV_SLOTS };
+/* a multi-dimensional array: its elements in row-major order (a simple vector, or a string for characters) and its
+   dimensions (a list of fixnums; rank 0 has one element) */
+enum { AR_DATA, AR_DIMS, AR_SLOTS };
 
 /* ---- memory ----------------------------------------------------------- */
 void  init_memory(void);
@@ -116,14 +120,28 @@ Obj   make_vector(size_t n, Obj init);
 Obj   make_symbol_obj(Obj name);                /* uninterned symbol        */
 double flonum_value(Obj o);
 void  add_root(Obj *p);
-void  gc(void);
-void  gc_check(void);                           /* safe point               */
-extern int    gc_pending, gc_stress, gc_verbose;
-extern size_t gc_count;
+void  gc(void);                                 /* collect at a safe point (minor, or major when due) */
+void  gc_full(void);                            /* a full (major) collection */
+void  gc_check(void);                           /* safe point: a minor collection when the nursery is full */
+extern int    gc_pending, gc_stress, gc_verbose, gc_verify;
+extern size_t gc_count, gc_minor_count, gc_major_count;
+
+/* ---- the write barrier (generational GC, docs/design/gc.md) ----
+ * Storing a pointer to a nursery object into an object outside the nursery must record that object, so the next
+ * minor collection treats its slots as roots.  WB(container, value) does that; call it after every store of a
+ * Lisp value into an object that may not have been allocated since the last safe point. */
+extern char *ng_old_lo, *ng_old_hi, *ng_nur_lo, *ng_nur_hi;
+void  wb_record(Obj container);
+static inline int ng_heap_ptr(Obj v) { int t = (int)(v & 7); return t == 1 || t == 2; }
+#define WB(container, value) do { Obj wb_v_ = (value), wb_c_ = (container); \
+    if (ng_heap_ptr(wb_v_) && (char *)(wb_v_ & ~(Obj)7) >= ng_nur_lo && (char *)(wb_v_ & ~(Obj)7) < ng_nur_hi && \
+        (char *)(wb_c_ & ~(Obj)7) >= ng_old_lo && (char *)(wb_c_ & ~(Obj)7) < ng_old_hi) wb_record(wb_c_); } while (0)
 extern int    heap_fixed;
 size_t heap_bytes_used(void);
 void  heap_info(size_t *obj_used, size_t *cons_used, size_t *semispace);
 int   save_image(const char *path);
+int   request_save(const char *path);            /* save at the next safe point */
+int   save_result(void);
 int   load_image(const char *path);
 
 /* root stack for C locals */
@@ -176,7 +194,8 @@ Obj   fn_symbol(Obj name);                      /* (setf x) -> symbol       */
   X(package,"*PACKAGE*") X(stdout,"*STANDARD-OUTPUT*") X(stdin,"*STANDARD-INPUT*") \
   X(stderr,"*ERROR-OUTPUT*") X(features,"*FEATURES*") X(signal_error,"%SIGNAL-ERROR") \
   X(sf_eval,"EVAL") X(print_pkg,"*PRINT-PACKAGES*") X(read_eval,"*READ-EVAL*") \
-  X(in_signal,"*IN-ERROR-SIGNAL*") X(print_hook,"%PRINT-HOOK") X(struct_parent,"%STRUCT-PARENT")
+  X(in_signal,"*IN-ERROR-SIGNAL*") X(print_hook,"%PRINT-HOOK") X(struct_parent,"%STRUCT-PARENT") \
+  X(readtable,"*READTABLE*")
 #define X(id, str) extern Obj Q_##id;
 SYMBOL_LIST(X)
 #undef X
@@ -282,6 +301,8 @@ double int_to_double(Obj a); Obj int_from_double(double d);
 uint64_t int_hash(Obj a); int int_eql(Obj a, Obj b);
 void  int_print(Buf *b, Obj a, int radix);
 Obj   int_parse(const char *s, size_t len, int radix);       /* UNBOUND if invalid */
+Obj   make_complex(Obj re, Obj im);
+int   num_equal(Obj a, Obj b);
 Obj   make_ratio(Obj n, Obj d); Obj ratio_numerator(Obj o); Obj ratio_denominator(Obj o);
 Obj   float_to_rational(double d);
 int   num_sign(Obj a); int num_eql(Obj a, Obj b); uint64_t num_hash(Obj a);
@@ -345,6 +366,8 @@ Obj   open_file_stream(const char *path, int output, int append);
 void  init_streams(void);
 
 Obj   read_form(Obj stream, int *eof);          /* sets *eof=1 at EOF       */
+void  init_reader_prims(void);
+Obj   read_form_recursive(Obj stream, int *eof); /* from a reader macro: keeps the backquote depth */
 Obj   read_from_cstring(const char *s);
 
 void  buf_init(Buf *b);

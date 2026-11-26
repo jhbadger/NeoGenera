@@ -34,7 +34,7 @@ static void init_all(void) {
   init_vm();
   init_prims_core();
   init_prims_data(); init_prims_num(); init_prims_term(); init_prims_sys();
-  init_prims_io(); init_prims_bio(); init_prims_proc(); init_prims_gfx();
+  init_prims_io(); init_prims_bio(); init_prims_proc(); init_prims_gfx(); init_reader_prims();
   init_proc();
 }
 
@@ -64,6 +64,7 @@ static void *real_main(void *p) {
     else if (!strcmp(argv[i], "--save-image") && i + 1 < argc) save = argv[++i];
     else if (!strcmp(argv[i], "--gc-stress")) gc_stress = 1;
     else if (!strcmp(argv[i], "--gc-verbose")) gc_verbose = 1;
+    else if (!strcmp(argv[i], "--gc-verify")) gc_verify = 1;
     else if (!strcmp(argv[i], "--no-toplevel")) toplevel = 0;
     else if (!strcmp(argv[i], "--ui")) top_name = "NG-UI";
     else if (!strcmp(argv[i], "--toplevel") && i + 1 < argc) top_name = argv[++i];
@@ -84,6 +85,7 @@ static void *real_main(void *p) {
       if (rc != 0) { fprintf(stderr, "cannot load image %s (code %d)\n", img, rc); a->rc = 2; return NULL; }
     }
   }
+  if (getenv("NG_GC_VERIFY")) gc_verify = 1;
   gc_pending = gc_stress;
 
   int li = 0, ei = 0;

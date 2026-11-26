@@ -1,5 +1,6 @@
 /* prims_io.c -- streams, printing, reading and file primitives. */
 #include "neogenera.h"
+#include <limits.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -56,7 +57,7 @@ PRIM(p_stream_column) { UNUSED_ARGS; return SLOT(designate_out(argv[0]), ST_COL)
 PRIM(p_read) {
   Obj st = in_arg(argc, argv, 0);
   int eof;
-  Obj r = read_form(st, &eof);
+  Obj r = (argc > 3 && argv[3] != NIL) ? read_form_recursive(st, &eof) : read_form(st, &eof);
   if (eof) {
     if (argc > 1 && argv[1] == NIL) return argc > 2 ? argv[2] : NIL;
     lisp_error("End of file while reading");
@@ -132,6 +133,15 @@ PRIM(p_open) {
 }
 PRIM(p_close) { UNUSED_ARGS; if (IS_TYPE(argv[0], T_STREAM)) stream_close(argv[0]); return TT; }
 PRIM(p_probe_file) { UNUSED_ARGS; struct stat st; return stat(STR_DATA(need_str(argv[0])), &st) == 0 ? argv[0] : NIL; }
+PRIM(p_truename) {
+  /* (%truename path) -> the absolute path with symbolic links resolved, or NIL */
+  UNUSED_ARGS;
+  char buf[PATH_MAX];
+  if (!realpath(STR_DATA(need_str(argv[0])), buf)) return NIL;
+  struct stat st;
+  if (stat(buf, &st) == 0 && S_ISDIR(st.st_mode) && strlen(buf) + 1 < sizeof buf && buf[strlen(buf) - 1] != '/') strcat(buf, "/");
+  return make_cstring(buf);
+}
 PRIM(p_delete_file) { UNUSED_ARGS; return BOOL(unlink(STR_DATA(need_str(argv[0]))) == 0); }
 PRIM(p_file_write_date) { UNUSED_ARGS; struct stat st; if (stat(STR_DATA(need_str(argv[0])), &st) != 0) return NIL; return FIX((SObj)st.st_mtime + 2208988800LL); }
 PRIM(p_load_c) {
@@ -166,6 +176,10 @@ void init_prims_io(void) {
   defprim("%OPEN", p_open, 3, 3); defprim("CLOSE", p_close, 1, 2);
   defprim("PROBE-FILE", p_probe_file, 1, 1); defprim("DELETE-FILE", p_delete_file, 1, 1);
   defprim("FILE-WRITE-DATE", p_file_write_date, 1, 1);
+  /* the same, under names that stay primitive when lisp/core/64-pathnames.lisp redefines the public ones */
+  ALIAS("PROBE-FILE", p_probe_file, 1, 1); ALIAS("DELETE-FILE", p_delete_file, 1, 1);
+  ALIAS("FILE-WRITE-DATE", p_file_write_date, 1, 1);
+  defprim("%TRUENAME", p_truename, 1, 1);
   defprim("%LOAD-FILE", p_load_c, 1, 1);
 }
 
@@ -204,7 +218,7 @@ int load_file(const char *path, int verbose) {
     status = -1;
   }
   unbind_to(ssp); vsp = svsp; nroots = snroots;
-  SYM_VALUE(Q_package) = pkg_root;
+  SYM_VALUE(Q_package) = pkg_root; WB(Q_package, pkg_root);
   if (verbose) fprintf(stderr, "; loaded %s\n", path);
   stream_close(st);
   return status;

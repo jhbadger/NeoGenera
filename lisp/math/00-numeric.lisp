@@ -83,85 +83,21 @@
 (defun cube (x) "X cubed." (* x x x))
 
 ;;; ---- complex numbers ------------------------------------------------------------------------------------------
+;;; Complex numbers are built in (COMPLEX, REALPART, #C(1 2), and + - * / SQRT EXP LOG EXPT and the trigonometric
+;;; functions accept them).  These names remain from when they were a library type.
 
-(defstruct (cx (:constructor %make-cx (re im)) (:copier nil)) re im)
-
-(defmethod print-object ((z cx) stream)
-  (format stream "#C(~A ~A)" (cx-re z) (cx-im z)))
-
-(defun complex (re &optional (im 0))
-  "A complex number; a real number when IM is the exact integer 0."
-  (if (and (integerp im) (zerop im)) re (%make-cx re im)))
-
-(defun complexp (x) "True when X is a complex number." (cx-p x))
-(defun realpart (z) "Real part of Z." (if (cx-p z) (cx-re z) z))
-(defun imagpart (z) "Imaginary part of Z." (if (cx-p z) (cx-im z) 0))
-(defun conjugate (z) "Complex conjugate of Z." (if (cx-p z) (%make-cx (cx-re z) (- (cx-im z))) z))
-
-(defun cabs (z) "Magnitude of Z."
-  (if (cx-p z)
-      (let ((a (abs (cx-re z))) (b (abs (cx-im z))))
-        (cond ((zerop a) b) ((zerop b) a)
-              ((> a b) (let ((r (/ b a))) (* a (sqrt (+ 1.0 (* r r))))))
-              (t (let ((r (/ a b))) (* b (sqrt (+ 1.0 (* r r))))))))
-      (abs z)))
-
-(defun phase (z) "Argument (angle) of Z in radians."
-  (if (cx-p z) (atan (cx-im z) (cx-re z)) (if (< z 0) pi 0.0)))
-
-(defun %simplify-c (re im) (if (and (rationalp im) (zerop im)) re (%make-cx re im)))
-
-(defun c+ (a b) "Sum of two numbers, real or complex."
-  (if (or (cx-p a) (cx-p b)) (%simplify-c (+ (realpart a) (realpart b)) (+ (imagpart a) (imagpart b))) (+ a b)))
-(defun c- (a &optional (b nil bp)) "Difference (or negation) of numbers, real or complex."
-  (cond ((not bp) (if (cx-p a) (%make-cx (- (cx-re a)) (- (cx-im a))) (- a)))
-        ((or (cx-p a) (cx-p b)) (%simplify-c (- (realpart a) (realpart b)) (- (imagpart a) (imagpart b))))
-        (t (- a b))))
-(defun c* (a b) "Product of two numbers, real or complex."
-  (if (or (cx-p a) (cx-p b))
-      (let ((ar (realpart a)) (ai (imagpart a)) (br (realpart b)) (bi (imagpart b)))
-        (%simplify-c (- (* ar br) (* ai bi)) (+ (* ar bi) (* ai br))))
-      (* a b)))
-(defun c/ (a b) "Quotient of two numbers, real or complex."
-  (if (or (cx-p a) (cx-p b))
-      (let* ((ar (realpart a)) (ai (imagpart a)) (br (realpart b)) (bi (imagpart b)) (d (+ (* br br) (* bi bi))))
-        (%simplify-c (/ (+ (* ar br) (* ai bi)) d) (/ (- (* ai br) (* ar bi)) d)))
-      (/ a b)))
-(defun c= (a b) "True when two numbers (real or complex) are equal."
-  (and (= (realpart a) (realpart b)) (= (imagpart a) (imagpart b))))
-
-(defun cexp (z) "e raised to the complex power Z."
-  (let ((m (exp (realpart z))) (y (imagpart z))) (%simplify-c (* m (cos y)) (* m (sin y)))))
-(defun clog (z) "Natural logarithm of the complex number Z (principal branch)."
-  (%simplify-c (log (cabs z)) (phase z)))
-(defun csqrt (z) "Principal square root; negative reals give imaginary results."
-  (let ((re (realpart z)) (im (imagpart z)))
-    (if (and (rationalp im) (zerop im))
-        (if (>= re 0) (sqrt re) (%make-cx 0.0 (sqrt (- re))))
-        (let* ((m (cabs z)) (a (sqrt (/ (+ m re) 2.0))) (b (sqrt (/ (- m re) 2.0))))
-          (%make-cx a (if (< im 0) (- b) b))))))
-(defun cexpt (z w) "Z raised to the power W (either may be complex)."
-  (cond ((and (not (cx-p z)) (not (cx-p w))) (expt z w))
-        ((and (integerp w) (>= w 0)) (let ((r 1)) (dotimes (i w) (setq r (c* r z))) r))
-        ((c= z 0) 0)
-        (t (cexp (c* w (clog z))))))
-(defun csin (z) "Complex sine."
-  (%simplify-c (* (sin (realpart z)) (cosh (imagpart z))) (* (cos (realpart z)) (sinh (imagpart z)))))
-(defun ccos (z) "Complex cosine."
-  (%simplify-c (* (cos (realpart z)) (cosh (imagpart z))) (- (* (sin (realpart z)) (sinh (imagpart z))))))
-
-(let ((%real-sqrt #'sqrt) (%real-log #'log))
-  (defun sqrt (x)
-    "Square root; a negative real argument returns a complex number."
-    (cond ((cx-p x) (csqrt x))
-          ((and (realp x) (< x 0)) (%make-cx 0.0 (funcall %real-sqrt (- x))))
-          (t (funcall %real-sqrt x))))
-  (defun log (x &optional (base nil bp))
-    "Natural logarithm, or logarithm to BASE; negative reals and complex numbers give complex results."
-    (let ((v (cond ((cx-p x) (clog x))
-                   ((and (realp x) (< x 0)) (%make-cx (funcall %real-log (- x)) pi))
-                   (t (funcall %real-log x)))))
-      (if bp (c/ v (log base)) v))))
+(defun cabs (z) "Magnitude of Z (as ABS)." (abs z))
+(defun c+ (a b) "Sum of two numbers (as +)." (+ a b))
+(defun c- (a &optional (b nil bp)) "Difference or negation (as -)." (if bp (- a b) (- a)))
+(defun c* (a b) "Product of two numbers (as *)." (* a b))
+(defun c/ (a b) "Quotient of two numbers (as /)." (/ a b))
+(defun c= (a b) "True when two numbers are equal (as =)." (= a b))
+(defun cexp (z) "e raised to the power Z (as EXP)." (exp z))
+(defun clog (z) "Natural logarithm, principal branch (as LOG)." (log z))
+(defun csqrt (z) "Principal square root (as SQRT)." (sqrt z))
+(defun cexpt (z w) "Z raised to the power W (as EXPT)." (expt z w))
+(defun csin (z) "Sine (as SIN)." (sin z))
+(defun ccos (z) "Cosine (as COS)." (cos z))
 
 (defun polynomial-roots (coeffs)
   "Roots of the polynomial with COEFFS (highest degree first) by the Durand-Kerner method; a list of numbers."
@@ -170,7 +106,7 @@
     (if (< n 1) nil
         (let* ((lead (float (car cs))) (a (mapcar (lambda (c) (/ c lead)) cs))
                (roots (let ((acc nil))
-                        (dotimes (k n) (setq acc (cons (cexpt (%make-cx 0.4 0.9) k) acc)))
+                        (dotimes (k n) (setq acc (cons (expt (complex 0.4 0.9) k) acc)))
                         (reverse acc))))
           (dotimes (iter 500)
             (let ((delta 0.0) (new nil))

@@ -10,13 +10,14 @@ Integers and exact ratios never overflow, and large products use Karatsuba multi
 is fast. Floats are IEEE doubles with real infinities and NaNs: `+infinity+`, `-infinity+`, `+nan+`, and the predicates
 [float-nan-p](fn:float-nan-p), [float-infinity-p](fn:float-infinity-p) and [finite-p](fn:finite-p).
 
-Complex numbers are a library type. [complex](fn:complex) makes one and prints as `#C(re im)`. The operators `+ - * /`
-stay real-only for speed; use [c+](fn:c+), [c-](fn:c-), [c*](fn:c*), [c/](fn:c/) and [cexp](fn:cexp), [clog](fn:clog), [csqrt](fn:csqrt),
-[cexpt](fn:cexpt). [sqrt](fn:sqrt) and [log](fn:log) of a negative real return a complex result. [polynomial-roots](fn:polynomial-roots) finds all roots of a polynomial.
+Complex numbers are built in: [complex](fn:complex) makes one, `#C(1 2)` reads one, and `+ - * /`, `expt`, `sqrt`, `exp`, `log` and
+the trigonometric functions accept them. [sqrt](fn:sqrt) and [log](fn:log) of a negative real return a complex result.
+[realpart](fn:realpart), [imagpart](fn:imagpart), [conjugate](fn:conjugate), [phase](fn:phase) and `abs` take them apart. The older names
+[c+](fn:c+), [c*](fn:c*), [cexp](fn:cexp), [csqrt](fn:csqrt) and so on still work. [polynomial-roots](fn:polynomial-roots) finds all roots of a polynomial.
 
 ```
 (sqrt -4)                        ; => #C(0.0 2.0)
-(c* (complex 1 2) (complex 3 4)) ; => #C(-5 10)
+(* #C(1 2) #C(3 4))              ; => #C(-5 10)
 (polynomial-roots '(1 -6 11 -6)) ; => (1.0 2.0 3.0)
 ```
 

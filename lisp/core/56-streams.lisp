@@ -166,10 +166,9 @@
 (defun listen (&optional stream)
   (let ((s (%in stream))) (if (%native-stream-p s) t (stream-listen s))))
 (defun read (&optional stream (eof-error-p t) eof-value recursive)
-  (declare (ignore recursive))
   (let ((s (%in stream)))
     (if (%native-stream-p s)
-        (%c-read s eof-error-p eof-value)
+        (%c-read s eof-error-p eof-value recursive)
         (let ((acc ""))
           (loop
             (multiple-value-bind (line missing) (stream-read-line s)

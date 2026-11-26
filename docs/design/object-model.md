@@ -50,8 +50,12 @@ Fixnum (61 bit), **bignum**, **ratio** and double-float. Arithmetic on fixnums o
 results are always normalized (a value that fits a fixnum is a fixnum). A bignum is a raw object:
 `payload[0] = (limb-count << 1) | sign`, then 32-bit limbs, two per word (`src/bignum.c`). Multiplication
 is the schoolbook algorithm (O(n*m)); division is Knuth's algorithm D. A ratio is an object with a
-numerator and a (positive, >1) denominator in lowest terms; `/` of integers is exact. There are no
-complex numbers (`sqrt` of a negative number is an error), no `rationalize`, and floats print and read
+numerator and a (positive, >1) denominator in lowest terms; `/` of integers is exact. A complex number
+(`T_COMPLEX`) has a real and an imaginary part, both rational or both floats; one with an exact zero
+imaginary part is made a real number. The generic operations (`num_add` and so on) handle it
+componentwise, `=` uses `num_equal` (complex numbers have no order), and the transcendental functions
+use C99 `<complex.h>`. A multi-dimensional array (`T_MDARRAY`) holds its elements in row-major order in a
+simple vector (or a string) and its dimensions as a list; vectors stay one-dimensional objects. Floats print and read
 as doubles only.
 
 ## Characters and strings

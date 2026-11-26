@@ -37,8 +37,8 @@ static Obj str_designator(Obj o) {
 PRIM(p_cons) { UNUSED_ARGS; return cons(argv[0], argv[1]); }
 PRIM(p_car) { UNUSED_ARGS; return car_of(argv[0]); }
 PRIM(p_cdr) { UNUSED_ARGS; return cdr_of(argv[0]); }
-PRIM(p_rplaca) { UNUSED_ARGS; if (!CONSP(argv[0])) type_error("CONS", argv[0]); CAR(argv[0]) = argv[1]; return argv[0]; }
-PRIM(p_rplacd) { UNUSED_ARGS; if (!CONSP(argv[0])) type_error("CONS", argv[0]); CDR(argv[0]) = argv[1]; return argv[0]; }
+PRIM(p_rplaca) { UNUSED_ARGS; if (!CONSP(argv[0])) type_error("CONS", argv[0]); CAR(argv[0]) = argv[1]; WB(argv[0], argv[1]); return argv[0]; }
+PRIM(p_rplacd) { UNUSED_ARGS; if (!CONSP(argv[0])) type_error("CONS", argv[0]); CDR(argv[0]) = argv[1]; WB(argv[0], argv[1]); return argv[0]; }
 PRIM(p_caar) { UNUSED_ARGS; return car_of(car_of(argv[0])); }
 PRIM(p_cadr) { UNUSED_ARGS; return car_of(cdr_of(argv[0])); }
 PRIM(p_cdar) { UNUSED_ARGS; return cdr_of(car_of(argv[0])); }
@@ -82,8 +82,8 @@ PRIM(p_nconc) {
   for (int i = 0; i < argc; i++) {
     Obj l = argv[i];
     if (l == NIL) continue;
-    if (i == argc - 1 || !CONSP(l)) { if (result == NIL) result = l; else CDR(tail) = l; break; }
-    if (result == NIL) result = l; else CDR(tail) = l;
+    if (i == argc - 1 || !CONSP(l)) { if (result == NIL) result = l; else { CDR(tail) = l; WB(tail, l); } break; }
+    if (result == NIL) result = l; else { CDR(tail) = l; WB(tail, l); }
     tail = l; while (CONSP(CDR(tail))) tail = CDR(tail);
   }
   return result;
@@ -200,7 +200,7 @@ PRIM(p_symbol_value) {
 PRIM(p_set) {
   UNUSED_ARGS; Obj s = need_sym(argv[0]);
   if (UNFIX(SYM_FLAGS(s)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_DATA(SYM_NAME(s)));
-  SYM_VALUE(s) = argv[1];
+  SYM_VALUE(s) = argv[1]; WB(s, argv[1]);
   return argv[1];
 }
 PRIM(p_symbol_function) {
@@ -208,14 +208,14 @@ PRIM(p_symbol_function) {
   if (f == NIL) lisp_error("The function %s is undefined", STR_DATA(SYM_NAME(s)));
   return CONSP(f) ? CDR(f) : f;
 }
-PRIM(p_set_symbol_function) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = argv[1]; return argv[1]; }
+PRIM(p_set_symbol_function) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = argv[1]; WB(argv[0], argv[1]); return argv[1]; }
 PRIM(p_macro_function) {
   UNUSED_ARGS;
   if (!SYMBOLP(argv[0])) return NIL;
   Obj f = SYM_FUNC(argv[0]);
   return (CONSP(f) && CAR(f) == Q_macro_marker) ? CDR(f) : NIL;
 }
-PRIM(p_set_macro_function) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = cons(Q_macro_marker, argv[1]); return argv[1]; }
+PRIM(p_set_macro_function) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = cons(Q_macro_marker, argv[1]); WB(argv[0], SYM_FUNC(argv[0])); return argv[1]; }
 PRIM(p_special_operator_p) {
   UNUSED_ARGS;
   if (!SYMBOLP(argv[0])) return NIL;
@@ -230,10 +230,10 @@ PRIM(p_special_operator_p) {
   }
 }
 PRIM(p_symbol_plist) { UNUSED_ARGS; return SYM_PLIST(need_sym(argv[0])); }
-PRIM(p_set_symbol_plist) { UNUSED_ARGS; SYM_PLIST(need_sym(argv[0])) = argv[1]; return argv[1]; }
+PRIM(p_set_symbol_plist) { UNUSED_ARGS; SYM_PLIST(need_sym(argv[0])) = argv[1]; WB(argv[0], argv[1]); return argv[1]; }
 PRIM(p_symbol_package) { UNUSED_ARGS; return SYM_PKG(need_sym(argv[0])); }
 PRIM(p_get) { return plist_get(SYM_PLIST(need_sym(argv[0])), argv[1], argc > 2 ? argv[2] : NIL); }
-PRIM(p_put) { UNUSED_ARGS; Obj s = need_sym(argv[0]); SYM_PLIST(s) = plist_put(SYM_PLIST(s), argv[1], argv[2]); return argv[2]; }
+PRIM(p_put) { UNUSED_ARGS; Obj s = need_sym(argv[0]); SYM_PLIST(s) = plist_put(SYM_PLIST(s), argv[1], argv[2]); WB(s, SYM_PLIST(s)); return argv[2]; }
 PRIM(p_boundp) { UNUSED_ARGS; return BOOL(SYM_VALUE(need_sym(argv[0])) != UNBOUND); }
 PRIM(p_fboundp) { UNUSED_ARGS; return BOOL(SYM_FUNC(need_sym(argv[0])) != NIL); }
 PRIM(p_makunbound) { UNUSED_ARGS; SYM_VALUE(need_sym(argv[0])) = UNBOUND; return argv[0]; }
@@ -310,8 +310,8 @@ PRIM(p_import) {
     uint64_t h = 1469598103934665603ULL;
     for (size_t i = 0; i < STR_LEN(name); i++) { h ^= (unsigned char)STR_DATA(name)[i]; h *= 1099511628211ULL; }
     size_t idx = h % OBJ_NWORDS(tab);
-    SLOT(tab, idx) = cons(s, SLOT(tab, idx));
-    if (SYM_PKG(s) == NIL) SYM_PKG(s) = pkg;
+    SLOT(tab, idx) = cons(s, SLOT(tab, idx)); WB(tab, SLOT(tab, idx));
+    if (SYM_PKG(s) == NIL) { SYM_PKG(s) = pkg; WB(s, pkg); }
   }
   return TT;
 }
@@ -492,8 +492,8 @@ PRIM(p_function_name) {
 PRIM(p_set_function_name) {
   UNUSED_ARGS;
   Obj f = argv[0];
-  if (IS_TYPE(f, T_EVALFN)) SLOT(f, EF_NAME) = argv[1];
-  else if (IS_TYPE(f, T_CLOSURE)) SLOT(SLOT(f, 0), C_NAME) = argv[1];
+  if (IS_TYPE(f, T_EVALFN)) { SLOT(f, EF_NAME) = argv[1]; WB(f, argv[1]); }
+  else if (IS_TYPE(f, T_CLOSURE)) { SLOT(SLOT(f, 0), C_NAME) = argv[1]; WB(SLOT(f, 0), argv[1]); }
   return f;
 }
 PRIM(p_function_lambda_expression) {
@@ -519,7 +519,8 @@ PRIM(p_struct_set) {
   if (!IS_TYPE(argv[0], T_STRUCT)) type_error("STRUCTURE", argv[0]);
   SObj i = need_fix(argv[1]);
   if (i < 0 || (size_t)i >= OBJ_NWORDS(argv[0])) lisp_error("structure index out of range");
-  return SLOT(argv[0], i) = argv[2];
+  SLOT(argv[0], i) = argv[2]; WB(argv[0], argv[2]);
+  return argv[2];
 }
 PRIM(p_struct_type) { UNUSED_ARGS; if (!IS_TYPE(argv[0], T_STRUCT)) return NIL; return SLOT(argv[0], 0); }
 
@@ -555,7 +556,8 @@ PRIM(p_struct_set_typed) {
   /* (%struct-set-typed obj index type-name value) */
   UNUSED_ARGS;
   if (!struct_typep(argv[0], argv[2])) type_error(STR_DATA(print_to_string(argv[2], 1, 0)), argv[0]);
-  return SLOT(argv[0], UNFIX(argv[1])) = argv[3];
+  SLOT(argv[0], UNFIX(argv[1])) = argv[3]; WB(argv[0], argv[3]);
+  return argv[3];
 }
 
 PRIM(p_backtrace) {
@@ -607,7 +609,7 @@ PRIM(p_utf8_decode) {
 }
 
 /* ---- system ------------------------------------------------------------ */
-PRIM(p_gc) { UNUSED_ARGS; gc(); return FIX((SObj)heap_bytes_used()); }
+PRIM(p_gc) { UNUSED_ARGS; gc_full(); return FIX((SObj)heap_bytes_used()); }
 PRIM(p_gc_stress) { UNUSED_ARGS; gc_stress = argv[0] != NIL; gc_pending = gc_stress; return argv[0]; }
 PRIM(p_gc_count) { UNUSED_ARGS; return FIX((SObj)gc_count); }
 PRIM(p_heap_info) {
@@ -657,6 +659,8 @@ PRIM(p_command_line) {
   return l;
 }
 PRIM(p_save_image) { UNUSED_ARGS; return FIX(save_image(STR_DATA(need_str(argv[0])))); }
+PRIM(p_request_save) { UNUSED_ARGS; return FIX(request_save(STR_DATA(need_str(argv[0])))); }
+PRIM(p_save_result) { UNUSED_ARGS; int rc = save_result(); return rc == -99 ? NIL : FIX(rc); }
 PRIM(p_set_signal_hook_dummy) { UNUSED_ARGS; return NIL; }
 
 void init_prims_core(void) {
@@ -728,6 +732,6 @@ void init_prims_core(void) {
   defprim("EXIT", p_exit, 0, 1); defprim("QUIT", p_exit, 0, 1);
   defprim("GET-INTERNAL-REAL-TIME", p_real_time, 0, 0); defprim("GET-UNIVERSAL-TIME", p_universal_time, 0, 0); defprim_mv("%LOCAL-OFFSET", p_local_offset, 1, 1);
   defprim("SLEEP", p_sleep, 1, 1); defprim("GETENV", p_getenv, 1, 1); defprim("%COMMAND-LINE", p_command_line, 0, 0);
-  defprim("%SAVE-IMAGE", p_save_image, 1, 1);
+  defprim("%SAVE-IMAGE", p_save_image, 1, 1); defprim("%REQUEST-SAVE", p_request_save, 1, 1); defprim("%SAVE-RESULT", p_save_result, 0, 0);
   (void)p_load_time_dummy; (void)p_set_signal_hook_dummy;
 }

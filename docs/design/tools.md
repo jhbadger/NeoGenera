@@ -37,6 +37,19 @@ reported; functions only reachable through data structures are not scanned.
   function names at its next safe point (a call or a backward jump). Only compiled frames are visible,
   and code that neither calls nor loops is never sampled, so the profile is biased towards call-heavy code.
 
+## Advice, dribble, systems (`15-advise.lisp`, `20-systems.lisp`)
+
+`advise` installs one wrapper per function, which reads the advice list from the symbol's plist on each call:
+`:before` functions take and return the argument list, `:around` functions get a continuation (the `:do-it` form is
+replaced by a call to it), and `:after` functions take and return the list of values. Removing the last advice
+restores the original function. `dribble` copies the window Listener's output buffer (`*dribble-pane*`, checked in
+`ob-write`), or for the line Listener binds `*standard-output*` to a broadcast stream and records each form read.
+
+`defsystem` records the components; `load-system` keeps each file's write date as loaded and reloads a file when it
+differs. Patches are `patches/NAME-N.lisp`, loaded in order past the system's patch level. `save-world` asks the
+kernel to save (`%request-save`); the image is written at the next safe point (`gc()`), where the VM reloads its
+cached pointers after the heap has been compacted, never inside the primitive itself.
+
 ## Windows
 
 Report windows (`REPORT-WINDOW`) are read-only presentation windows produced by a function. Built on

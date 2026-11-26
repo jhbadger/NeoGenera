@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+* **Systems and patches.** `defsystem` describes a program's files and the systems it needs. `load-system` loads changed files
+  only, and with `:compile` compiles them. Numbered patch files (`make-patch`, `load-patches`) update a loaded system, and their
+  number is part of the version. Commands: `:load system`, `:compile system`, `:load patches`, `:make patch`, `:describe system`,
+  `:show systems`.
+* **Saving the world.** `save-world` (and `:save world`) writes the running world to an image for `bin/neogenera -i`.
+* **Advice and dribble.** `advise` adds `:before`, `:after` and `:around` code to existing functions (`unadvise`,
+  `describe-advice`). `dribble` records a session to a file.
+* **`format-textual-list` and `format-graph-from-root`**, for lists in prose and for trees and graphs drawn with lines, sideways or
+  top-down, with clickable nodes.
+* **The file browser** (`:files`, F9 then F): directory listings with a preview, opening, viewing, renaming, deleting and making
+  directories. Clicking an entry answers a request for a file name.
+* **Generational garbage collection.** New objects are allocated in a nursery and survivors are promoted, with a write barrier and
+  remembered sets, so most collections take a millisecond or two. `--gc-verify` (or `NG_GC_VERIFY`) checks the barrier.
+* **Complex numbers** in the numeric tower (`#C(1 2)`, `complex`, `realpart`, `phase`, ..., and complex results from `sqrt`,
+  `log`, `expt`, `asin`). The math library's own complex type is gone; `c+` and the other old names remain.
+* **Multi-dimensional arrays:** `make-array` with a list of dimensions, `aref` with several subscripts, `#2A(...)`,
+  `array-dimensions`, `row-major-aref`, `adjust-array`.
+* **Readtables:** `*readtable*`, `copy-readtable`, `set-macro-character`, `make-dispatch-macro-character`,
+  `set-dispatch-macro-character`, `read-delimited-list`, `readtable-case`, `set-syntax-from-char`, `with-standard-io-syntax`.
+  Fixed: a comment or skipped `#+` form just before `)` was a read error.
+* **Pathnames:** pathname objects and their components, `merge-pathnames`, `make-pathname`, wildcards (`*` and `**`) in
+  `directory`, `pathname-match-p` and `translate-pathname`, logical pathnames, `truename`, `ensure-directories-exist`, `#P"..."`.
+  The file functions accept pathnames.
+* **`format` and the pretty printer:** `~F ~E ~G ~$ ~R ~T` with all their parameters, `~<...~>` justification, `~<...~:>` logical
+  blocks, `~_ ~I ~W ~/name/`; `pprint-logical-block`, `pprint-newline`, `pprint-indent`, `pprint-tab`, `pprint-fill`,
+  `pprint-linear`, `pprint-tabular`. `~E` now prints the exponent's sign (`1.0e+3`), as standard Common Lisp does.
+
 * **Typed input.** `accept` reads an object of a presentation type: the answer can be typed (checked, completed with Tab, with a
   default), or given by clicking any matching presentation on the screen. The types include `integer` and other classes,
   `boolean`, `expression`, `pathname`, `(member ...)`, `(integer lo hi)`, `(or ...)`, `(sequence type)` and `(null-or-type type)`.

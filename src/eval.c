@@ -43,11 +43,11 @@ void dynbind(Obj sym, Obj val) {
   specpdl[spsp].sym = sym;
   specpdl[spsp].old = SYM_VALUE(sym);
   spsp++;
-  SYM_VALUE(sym) = val;
+  SYM_VALUE(sym) = val; WB(sym, val);
 }
 
 void unbind_to(int h) {
-  while (spsp > h) { spsp--; SYM_VALUE(specpdl[spsp].sym) = specpdl[spsp].old; }
+  while (spsp > h) { spsp--; SYM_VALUE(specpdl[spsp].sym) = specpdl[spsp].old; WB(specpdl[spsp].sym, specpdl[spsp].old); }
 }
 
 /* ---- frames and non-local exit ---------------------------------------- */
@@ -451,7 +451,7 @@ static Obj sf_flet(Obj form, Obj vars, Obj funs, int labels) {
       Obj e = lookup_fun_cell(fnname, entries);
       Obj bname = SYMBOLP(CAR(spec)) ? CAR(spec) : CAR(CDR(CAR(spec)));
       Obj blk = cons(Q_block, cons(bname, CDR(CDR(spec))));
-      CDR(e) = make_evalfn(fnname, CAR(CDR(spec)), list1(blk), vars, newfuns);
+      CDR(e) = make_evalfn(fnname, CAR(CDR(spec)), list1(blk), vars, newfuns); WB(e, CDR(e));
     }
   } else {
     for (b = bindings; CONSP(b); b = CDR(b)) {
@@ -614,9 +614,9 @@ static Obj sf_progv(Obj form, Obj vars, Obj funs) {
 
 static void assign_var(Obj sym, Obj val, Obj vars) {
   Obj cell = lookup_var_cell(sym, vars);
-  if (cell != NIL) { CDR(cell) = val; return; }
+  if (cell != NIL) { CDR(cell) = val; WB(cell, val); return; }
   if (UNFIX(SYM_FLAGS(sym)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_DATA(SYM_NAME(sym)));
-  SYM_VALUE(sym) = val;
+  SYM_VALUE(sym) = val; WB(sym, val);
 }
 
 static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
@@ -759,7 +759,7 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
     Obj name = CAR(CDR(form)), sym = fn_symbol(name);
     Obj ll = CAR(CDR(CDR(form))), body = skip_docstring(CDR(CDR(CDR(form))));
     Obj blk = cons(Q_block, cons(SYMBOLP(name) ? name : sym, body));
-    SYM_FUNC(sym) = make_evalfn(sym, ll, list1(blk), vars, funs);
+    SYM_FUNC(sym) = make_evalfn(sym, ll, list1(blk), vars, funs); WB(sym, SYM_FUNC(sym));
     mv_count = 1;
     RET(sym);
   }
@@ -768,7 +768,7 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
     Obj sym = CAR(CDR(form));
     Obj fn = make_evalfn(sym, CAR(CDR(CDR(form))), skip_docstring(CDR(CDR(CDR(form)))), vars, funs);
     SLOT(fn, EF_SIMPLE) = FIX(-2);
-    SYM_FUNC(sym) = cons(Q_macro_marker, fn);
+    SYM_FUNC(sym) = cons(Q_macro_marker, fn); WB(sym, SYM_FUNC(sym));
     mv_count = 1;
     RET(sym);
   }
@@ -780,10 +780,10 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
     long fl = UNFIX(SYM_FLAGS(sym)) | SF_SPECIAL | (sf == SFID_DEFCONSTANT ? SF_CONSTANT : 0);
     if (sf == SFID_DEFCONSTANT) {
       Obj v = eval(CAR(rest), vars, funs);
-      SYM_VALUE(sym) = v;
+      SYM_VALUE(sym) = v; WB(sym, v);
     } else if (CONSP(rest) && (sf == SFID_DEFPARAMETER || SYM_VALUE(sym) == UNBOUND)) {
       Obj v = eval(CAR(rest), vars, funs);
-      SYM_VALUE(sym) = v;
+      SYM_VALUE(sym) = v; WB(sym, v);
     }
     SYM_FLAGS(sym) = FIX(fl);
     mv_count = 1;
@@ -831,7 +831,7 @@ Obj eval(Obj form, Obj vars, Obj funs) {
     if (CONSP(f) && CAR(f) == Q_macro_marker) {
       Obj exp = call2(CDR(f), form, NIL);
       CAR(form) = Q_progn;                 /* displace: memoize expansion */
-      CDR(form) = cons(exp, NIL);
+      CDR(form) = cons(exp, NIL); WB(form, CDR(form));
       r = eval(form, vars, funs);
       eval_depth--; nroots = saved; return r;
     }

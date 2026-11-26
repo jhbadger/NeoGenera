@@ -445,18 +445,51 @@ Obj ratio_numerator(Obj o) { return rnum(o); }
 Obj ratio_denominator(Obj o) { return rden(o); }
 
 /* ---- generic numbers --------------------------------------------------- */
-enum { K_NONE = -1, K_INT, K_RATIO, K_FLO };
+enum { K_NONE = -1, K_INT, K_RATIO, K_FLO, K_CPX };
+#define CPXP(o) IS_TYPE(o, T_COMPLEX)
 static int kind(Obj o) {
   if (FIXP(o) || BIGP(o)) return K_INT;
   if (RATIOP(o)) return K_RATIO;
   if (FLONUMP(o)) return K_FLO;
+  if (CPXP(o)) return K_CPX;
   return K_NONE;
 }
 int is_number(Obj o) { return kind(o) != K_NONE; }
 static int need(Obj o) { int k = kind(o); if (k == K_NONE) type_error("NUMBER", o); return k; }
+static int need_real(Obj o) { int k = need(o); if (k == K_CPX) type_error("REAL", o); return k; }
+
+/* ---- complex numbers: (real . imaginary), both rational or both floats; an exact zero imaginary part makes a real */
+static Obj cre(Obj o) { return CPXP(o) ? SLOT(o, 0) : o; }
+static Obj cim(Obj o) { return CPXP(o) ? SLOT(o, 1) : FIX(0); }
+Obj num_add(Obj a, Obj b);
+Obj num_sub(Obj a, Obj b);
+Obj num_mul(Obj a, Obj b);
+Obj num_div(Obj a, Obj b);
+Obj make_complex(Obj re, Obj im) {
+  need_real(re); need_real(im);
+  if (FLONUMP(re) || FLONUMP(im)) {
+    re = FLONUMP(re) ? re : make_flonum(num_to_double(re));
+    im = FLONUMP(im) ? im : make_flonum(num_to_double(im));
+  } else if (im == FIX(0)) return re;
+  Obj o = make_obj(T_COMPLEX, 2);
+  SLOT(o, 0) = re; SLOT(o, 1) = im;
+  return o;
+}
+static Obj cpx_add(Obj a, Obj b) { return make_complex(num_add(cre(a), cre(b)), num_add(cim(a), cim(b))); }
+static Obj cpx_sub(Obj a, Obj b) { return make_complex(num_sub(cre(a), cre(b)), num_sub(cim(a), cim(b))); }
+static Obj cpx_mul(Obj a, Obj b) {
+  Obj ar = cre(a), ai = cim(a), br = cre(b), bi = cim(b);
+  return make_complex(num_sub(num_mul(ar, br), num_mul(ai, bi)), num_add(num_mul(ar, bi), num_mul(ai, br)));
+}
+static Obj cpx_div(Obj a, Obj b) {
+  Obj ar = cre(a), ai = cim(a), br = cre(b), bi = cim(b);
+  Obj den = num_add(num_mul(br, br), num_mul(bi, bi));
+  return make_complex(num_div(num_add(num_mul(ar, br), num_mul(ai, bi)), den),
+                      num_div(num_sub(num_mul(ai, br), num_mul(ar, bi)), den));
+}
 
 double num_to_double(Obj o) {
-  switch (need(o)) {
+  switch (need_real(o)) {
   case K_INT: return int_to_double(o);
   case K_FLO: return flonum_value(o);
   default: {
@@ -472,24 +505,31 @@ double num_to_double(Obj o) {
 
 Obj num_add(Obj a, Obj b) {
   int ka = need(a), kb = need(b);
+  if (ka == K_CPX || kb == K_CPX) return cpx_add(a, b);
   if (ka == K_FLO || kb == K_FLO) return make_flonum(num_to_double(a) + num_to_double(b));
   if (ka == K_INT && kb == K_INT) return int_add(a, b);
   return make_ratio(int_add(int_mul(rnum(a), rden(b)), int_mul(rnum(b), rden(a))), int_mul(rden(a), rden(b)));
 }
 Obj num_sub(Obj a, Obj b) {
   int ka = need(a), kb = need(b);
+  if (ka == K_CPX || kb == K_CPX) return cpx_sub(a, b);
   if (ka == K_FLO || kb == K_FLO) return make_flonum(num_to_double(a) - num_to_double(b));
   if (ka == K_INT && kb == K_INT) return int_sub(a, b);
   return make_ratio(int_sub(int_mul(rnum(a), rden(b)), int_mul(rnum(b), rden(a))), int_mul(rden(a), rden(b)));
 }
 Obj num_mul(Obj a, Obj b) {
   int ka = need(a), kb = need(b);
+  if (ka == K_CPX || kb == K_CPX) return cpx_mul(a, b);
   if (ka == K_FLO || kb == K_FLO) return make_flonum(num_to_double(a) * num_to_double(b));
   if (ka == K_INT && kb == K_INT) return int_mul(a, b);
   return make_ratio(int_mul(rnum(a), rnum(b)), int_mul(rden(a), rden(b)));
 }
 Obj num_div(Obj a, Obj b) {
   int ka = need(a), kb = need(b);
+  if (ka == K_CPX || kb == K_CPX) {
+    if (kind(b) != K_CPX && num_sign(b) == 0) lisp_error("Division by zero");
+    return cpx_div(a, b);
+  }
   if (ka == K_FLO || kb == K_FLO) {
     double d = num_to_double(b);
     if (d == 0.0) lisp_error("Division by zero");
@@ -499,25 +539,35 @@ Obj num_div(Obj a, Obj b) {
   return make_ratio(int_mul(rnum(a), rden(b)), int_mul(rden(a), rnum(b)));
 }
 int num_cmp(Obj a, Obj b) {
-  int ka = need(a), kb = need(b);
+  int ka = need_real(a), kb = need_real(b);
   if (ka == K_FLO || kb == K_FLO) { double x = num_to_double(a), y = num_to_double(b); return x < y ? -1 : x > y; }
   if (ka == K_INT && kb == K_INT) return int_cmp(a, b);
   return int_cmp(int_mul(rnum(a), rden(b)), int_mul(rnum(b), rden(a)));
 }
+/* = : numbers of any kind (complex numbers have no order) */
+int num_equal(Obj a, Obj b) {
+  int ka = need(a), kb = need(b);
+  if (ka == K_CPX || kb == K_CPX) return num_cmp(cre(a), cre(b)) == 0 && num_cmp(cim(a), cim(b)) == 0;
+  return num_cmp(a, b) == 0;
+}
 int num_sign(Obj a) {
-  switch (need(a)) { case K_INT: return int_sign(a); case K_RATIO: return int_sign(rnum(a)); default: { double d = flonum_value(a); return (d > 0) - (d < 0); } }
+  switch (need_real(a)) { case K_INT: return int_sign(a); case K_RATIO: return int_sign(rnum(a)); default: { double d = flonum_value(a); return (d > 0) - (d < 0); } }
 }
 int num_eql(Obj a, Obj b) {
+  if (CPXP(a) && CPXP(b)) return eql(SLOT(a, 0), SLOT(b, 0)) && eql(SLOT(a, 1), SLOT(b, 1));
   if (BIGP(a) && BIGP(b)) return int_cmp(a, b) == 0;
   if (RATIOP(a) && RATIOP(b)) return int_cmp(rnum(a), rnum(b)) == 0 && int_cmp(rden(a), rden(b)) == 0;
   return 0;
 }
 uint64_t num_hash(Obj a) {
+  if (CPXP(a)) { Obj r = SLOT(a, 0), i = SLOT(a, 1); return (FLONUMP(r) ? (uint64_t)flonum_value(r) : (FIXP(r) ? (uint64_t)UNFIX(r) : num_hash(r))) * 131 + (FLONUMP(i) ? (uint64_t)flonum_value(i) : (FIXP(i) ? (uint64_t)UNFIX(i) : num_hash(i))); }
   if (BIGP(a)) return int_hash(a);
   return int_hash(rnum(a)) * 31 + int_hash(rden(a));
 }
 
+void print_object_rec(Buf *b, Obj o);
 void number_print(Buf *b, Obj o, int radix) {
+  if (CPXP(o)) { buf_puts(b, "#C("); print_object_rec(b, SLOT(o, 0)); buf_putc(b, ' '); print_object_rec(b, SLOT(o, 1)); buf_putc(b, ')'); return; }
   if (RATIOP(o)) { int_print(b, rnum(o), radix); buf_putc(b, '/'); int_print(b, rden(o), radix); }
   else int_print(b, o, radix);
 }

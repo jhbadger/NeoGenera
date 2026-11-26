@@ -4,17 +4,39 @@ Status: implemented in `src/memory.c`.
 
 ## Algorithm
 
-A Cheney copying collector with **two separate semispace pairs**: one for header-prefixed
-objects and one for conses. Conses carry no header, so mixing them into one space would
-make linear scanning of to-space ambiguous. Collection scans both to-spaces alternately
-until neither has unscanned data.
+A **generational** copying collector with two generations.
 
-Both semispaces are mapped at a fixed virtual address (the first of `heap_hints` in `memory.c` the kernel honours; a lower one exists for 39-bit Android address spaces) so a heap image is a
-raw dump (see `bootstrap.md`). Space is reserved with `MAP_NORESERVE`; only touched pages
-cost memory. The collector triggers when allocation since the last collection exceeds
-`max(48 MB, 2 × live data)`.
+* **The nursery** (8 MB for objects and 8 MB for conses, after the NIL page) is where `alloc_o` and `cons` allocate.
+* **The old generation** is a Cheney semispace pair for header-prefixed objects and another for conses. Conses
+  carry no header, so mixing them into one space would make linear scanning of to-space ambiguous.
 
-The collector is not generational yet; that is planned for roadmap Phase 4.
+A **minor collection** runs at a safe point once the nursery is full. It copies the live nursery objects to the end
+of the old generation ("promotes" them; there is no aging). The roots are the usual ones plus the **remembered
+set**, then the promoted region is scanned Cheney-style, and the nursery is reset. A **major collection** copies the
+live objects of the old generation and of the nursery into the other old semispace. It runs when the old generation
+has grown past `max(48 MB, 2 × live data)` since the last one, when the old generation could not take the nursery's
+survivors, and on `(gc)` and `save-image`.
+
+**The write barrier.** A minor collection does not scan the old generation, so any pointer from it into the
+nursery must be known. After every store of a Lisp value into an object that may already be old, C code calls
+`WB(container, value)`. If the value points into the nursery and the container lies in the old generation, it
+records the container: an object gets a header bit (`REM_BIT`, bit 3, outside the tag, type and size fields) and
+goes on `rs_o`; a cons gets a bit in the cons bitmap of its semispace and goes on `rs_c`. Objects allocated
+directly in the old generation (larger than 1/16 of the nursery, or when the nursery is full before the next safe
+point) are remembered when allocated, because their creator fills them without barriers. Stores into objects
+allocated since the last safe point need no barrier: they are in the nursery (or remembered already). The primitives
+that mutate (`rplaca`, `%aset`, `%struct-set`, `set`, `(setf symbol-function)`, ...), special binding and
+unbinding, the VM's global and box stores, `nconc`/`nreverse`, the evaluator's `setq`/`defun`/macro memoization
+and the package tables all have barriers; Lisp code mutates only through these.
+
+**Verifying the barrier.** With `--gc-verify` (or `NG_GC_VERIFY=1`), every minor collection first scans the whole
+old generation and aborts, naming the container and slot, if a pointer into the nursery comes from an object or cons
+that is not remembered. `NG_NURSERY_KB=64` makes the nursery tiny, so that collections, and checks, happen
+thousands of times in a test run.
+
+All the spaces are mapped at a fixed virtual address (the first of `heap_hints` in `memory.c` the kernel honours; a
+lower one exists for 39-bit Android address spaces), so a heap image is a raw dump of the old generation after a
+major collection (see `bootstrap.md`). Space is reserved with `MAP_NORESERVE`; only touched pages cost memory.
 
 ## Safe points
 

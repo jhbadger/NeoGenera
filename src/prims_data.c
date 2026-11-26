@@ -108,9 +108,26 @@ PRIM(p_vector_to_list) {
   if (LISTP(x)) return x;
   type_error("SEQUENCE", x);
 }
+/* the row-major index of the subscripts argv[1 .. 1+n) in the multi-dimensional array X */
+static SObj md_index(Obj x, Obj *subs, int n) {
+  Obj dims = SLOT(x, AR_DIMS);
+  if (list_length(dims) != n) lisp_error("Wrong number of subscripts: %d for an array of rank %ld", n, list_length(dims));
+  SObj idx = 0;
+  for (int k = 0; k < n; k++, dims = CDR(dims)) {
+    SObj d = UNFIX(CAR(dims)), s = need_fix(subs[k]);
+    if (s < 0 || s >= d) lisp_error("Subscript %ld out of bounds for dimension %d (size %ld)", (long)s, k, (long)d);
+    idx = idx * d + s;
+  }
+  return idx;
+}
+static Obj md_get(Obj data, SObj i) { return STRINGP(data) ? MK_CHAR((unsigned char)STR_DATA(data)[i]) : SLOT(data, i); }
+static void md_set(Obj data, SObj i, Obj v) { if (STRINGP(data)) STR_DATA(data)[i] = (char)need_char(v); else { SLOT(data, i) = v; WB(data, v); } }
+
 PRIM(p_aref) {
-  UNUSED_ARGS;
-  Obj x = argv[0]; SObj i = need_fix(argv[1]);
+  Obj x = argv[0];
+  if (IS_TYPE(x, T_MDARRAY)) return md_get(SLOT(x, AR_DATA), md_index(x, argv + 1, argc - 1));
+  if (argc != 2) lisp_error("Wrong number of subscripts: %d for a vector", argc - 1);
+  SObj i = need_fix(argv[1]);
   if (VECTORP(x)) { if (i < 0 || (size_t)i >= OBJ_NWORDS(x)) lisp_error("Index %ld out of bounds for vector of length %zu", (long)i, OBJ_NWORDS(x)); return SLOT(x, i); }
   if (STRINGP(x)) { if (i < 0 || (size_t)i >= STR_LEN(x)) lisp_error("Index %ld out of bounds for string of length %zu", (long)i, STR_LEN(x)); return MK_CHAR((unsigned char)STR_DATA(x)[i]); }
   if (IS_TYPE(x, T_ADVEC)) {
@@ -121,14 +138,17 @@ PRIM(p_aref) {
   type_error("ARRAY", x);
 }
 PRIM(p_aset) {
-  UNUSED_ARGS;
-  Obj x = argv[0]; SObj i = need_fix(argv[1]); Obj v = argv[2];
-  if (VECTORP(x)) { if (i < 0 || (size_t)i >= OBJ_NWORDS(x)) lisp_error("Index %ld out of bounds", (long)i); SLOT(x, i) = v; return v; }
+  /* (%aset array subscript... value) */
+  Obj x = argv[0], v = argv[argc - 1];
+  if (IS_TYPE(x, T_MDARRAY)) { md_set(SLOT(x, AR_DATA), md_index(x, argv + 1, argc - 2), v); return v; }
+  if (argc != 3) lisp_error("Wrong number of subscripts: %d for a vector", argc - 2);
+  SObj i = need_fix(argv[1]);
+  if (VECTORP(x)) { if (i < 0 || (size_t)i >= OBJ_NWORDS(x)) lisp_error("Index %ld out of bounds", (long)i); SLOT(x, i) = v; WB(x, v); return v; }
   if (STRINGP(x)) { if (i < 0 || (size_t)i >= STR_LEN(x)) lisp_error("Index %ld out of bounds", (long)i); STR_DATA(x)[i] = (char)need_char(v); return v; }
   if (IS_TYPE(x, T_ADVEC)) {
     Obj d = SLOT(x, AV_DATA); long f = (long)UNFIX(SLOT(x, AV_FILL));
     if (i < 0 || i >= f) lisp_error("Index %ld out of bounds", (long)i);
-    if (STRINGP(d)) STR_DATA(d)[i] = (char)need_char(v); else SLOT(d, i) = v;
+    if (STRINGP(d)) STR_DATA(d)[i] = (char)need_char(v); else { SLOT(d, i) = v; WB(d, v); }
     return v;
   }
   type_error("ARRAY", x);
@@ -153,15 +173,25 @@ PRIM(p_vector_push_extend) {
     Obj nd = STRINGP(d) ? make_string(NULL, ncap) : make_vector(ncap, NIL);
     if (STRINGP(d)) memcpy(STR_DATA(nd), STR_DATA(d), (size_t)f);
     else for (long i = 0; i < f; i++) SLOT(nd, i) = SLOT(d, i);
-    SLOT(v, AV_DATA) = nd; d = nd;
+    SLOT(v, AV_DATA) = nd; WB(v, nd); d = nd;
   }
-  if (STRINGP(d)) STR_DATA(d)[f] = (char)need_char(argv[0]); else SLOT(d, f) = argv[0];
+  if (STRINGP(d)) STR_DATA(d)[f] = (char)need_char(argv[0]); else { SLOT(d, f) = argv[0]; WB(d, argv[0]); }
   SLOT(v, AV_FILL) = FIX(f + 1);
   return FIX(f);
 }
 PRIM(p_fill_pointer) { UNUSED_ARGS; if (!IS_TYPE(argv[0], T_ADVEC)) return NIL; return SLOT(argv[0], AV_FILL); }
 PRIM(p_set_fill_pointer) { UNUSED_ARGS; if (!IS_TYPE(argv[0], T_ADVEC)) type_error("ADJUSTABLE-VECTOR", argv[0]); SLOT(argv[0], AV_FILL) = FIX(need_fix(argv[1])); return argv[1]; }
 PRIM(p_advecp) { UNUSED_ARGS; return BOOL(IS_TYPE(argv[0], T_ADVEC)); }
+PRIM(p_make_mdarray) {
+  /* (%make-md-array data dims) */
+  UNUSED_ARGS;
+  Obj a = make_obj(T_MDARRAY, AR_SLOTS);
+  SLOT(a, AR_DATA) = argv[0]; SLOT(a, AR_DIMS) = argv[1];
+  return a;
+}
+PRIM(p_mdarrayp) { UNUSED_ARGS; return BOOL(IS_TYPE(argv[0], T_MDARRAY)); }
+PRIM(p_md_data) { UNUSED_ARGS; if (!IS_TYPE(argv[0], T_MDARRAY)) type_error("ARRAY", argv[0]); return SLOT(argv[0], AR_DATA); }
+PRIM(p_md_dims) { UNUSED_ARGS; if (!IS_TYPE(argv[0], T_MDARRAY)) type_error("ARRAY", argv[0]); return SLOT(argv[0], AR_DIMS); }
 PRIM(p_subseq) {
   Obj x = argv[0]; SObj s = need_fix(argv[1]);
   if (LISTP(x)) {
@@ -199,8 +229,10 @@ void init_prims_data(void) {
   defprim("%STRING-SEARCH", p_string_search, 3, 3); defprim("%STRING-POSITION-CHAR", p_string_position_char, 3, 3);
   defprim("%LIST-TO-VECTOR", p_list_to_vector, 1, 1); defprim("VECTOR", p_vector, 0, -1);
   defprim("%MAKE-VECTOR", p_make_vector, 2, 2); defprim("%VECTOR-TO-LIST", p_vector_to_list, 1, 1);
-  defprim("AREF", p_aref, 2, 2); defprim("SVREF", p_aref, 2, 2); defprim("CHAR", p_aref, 2, 2); defprim("SCHAR", p_aref, 2, 2);
-  defprim("%ASET", p_aset, 3, 3);
+  defprim("AREF", p_aref, 1, -1); defprim("SVREF", p_aref, 2, 2); defprim("CHAR", p_aref, 2, 2); defprim("SCHAR", p_aref, 2, 2);
+  defprim("%ASET", p_aset, 2, -1);
+  defprim("%MAKE-MD-ARRAY", p_make_mdarray, 2, 2); defprim("%MD-ARRAY-P", p_mdarrayp, 1, 1);
+  defprim("%MD-DATA", p_md_data, 1, 1); defprim("%MD-DIMS", p_md_dims, 1, 1);
   defprim("%MAKE-ADJUSTABLE", p_make_adjustable, 2, 2); defprim("VECTOR-PUSH-EXTEND", p_vector_push_extend, 2, 3);
   defprim("FILL-POINTER", p_fill_pointer, 1, 1); defprim("%SET-FILL-POINTER", p_set_fill_pointer, 2, 2);
   defprim("%ADVEC-P", p_advecp, 1, 1);

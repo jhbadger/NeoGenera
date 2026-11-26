@@ -17,8 +17,8 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 ## Deliberate deviations
 
 **Numbers**
-* No complex numbers in the numeric tower. A library type (`complex`, `c+`, `c*`, ...) provides them, and `sqrt` and `log` return it for negative reals.
-  The operators `+ - * /` accept only reals.
+* Complex numbers are in the tower (rational or float parts); `abs` of a complex number is always a float, and the transcendental
+  functions use the C library's branch cuts.
 * Floats are a single type (double); there are no single-float, short-float or long-float distinctions, and `float` takes no prototype.
 * Division by zero with `/` signals `division-by-zero` for floats too; infinities and NaN arise from overflow and `+infinity+`, `+nan+`.
 * `*print-base*` and `*print-radix*` are not honoured by the printer; use `~B ~O ~X ~R`.
@@ -27,13 +27,13 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 * Strings are byte vectors holding UTF-8; `length` counts bytes, `char` indexes bytes, and `char-code` of a non-ASCII byte is the byte value.
   Non-ASCII text round-trips but is not character-addressable. Case conversion and `alpha-char-p` are ASCII-only.
 * `string<`, `string>`, `string<=`, `string>=` and `string/=` return a boolean rather than the mismatch index, and do not take `:start`/`:end` keywords.
-* `format` lacks `~E ~G` field-width options beyond digits, `~<..~:>` justification, `~/fn/`, `~T` tabulation and `~(`...`~)` with nesting corner cases;
-  `~R` supports cardinal, ordinal, Roman and radix forms only.
+* `format` implements the standard directives, including `~E ~F ~G ~$` with all their parameters, `~<...~>` justification and
+  `~<...~:>` logical blocks, `~_ ~I ~W ~/name/` and `~T`. `~R` spells numbers in English up to the quintillions.
 
 **Arrays**
-* Only one-dimensional arrays (vectors and strings) exist. `make-array` with a list of dimensions makes a vector of the first dimension; the
-  matrix type of the numerical library is the substitute. No displaced arrays, no `array-dimensions`, no specialised element types (the `:element-type` is accepted and ignored except for strings).
-* `arrayp` is true of vectors and strings only.
+* Arrays of any rank exist (`make-array` with a list of dimensions, `aref` with several subscripts, `#2A(...)`); there are no displaced
+  arrays and no specialised element types (the `:element-type` is accepted and ignored except for `character`). `adjust-array` returns a new
+  array unless the vector is adjustable.
 
 **Evaluation and the compiler**
 * There is one lexical environment model and no `compile-file` external format: the compiler writes text fasls; `compile` and `compiled-eval` compile to bytecode.
@@ -52,12 +52,15 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 
 **Packages, reading and printing**
 * Packages are simple: `defpackage`/`in-package` exist but package locks, `shadowing-import` subtleties and nicknames are minimal. Most library symbols live in `COMMON-LISP` (they are not exported from it in the strict sense).
-* The reader and printer are written in C; readtables are not extensible. `#S` structure syntax, `#+`/`#-` feature expressions beyond simple features and `#.` (controlled by `*read-eval*`) are supported; `#C`, `#P`, `#A` and user reader macros are not.
-* `pprint` is a line-filling printer without `pprint-logical-block`.
+* The reader is written in C and consults `*readtable*`: macro characters, dispatch characters and the readtable case are supported for
+  characters below 128; `set-syntax-from-char` copies macro syntax only (a character cannot be made whitespace). `#C`, `#P` and `#A` read.
+* `pprint` is a line-filling printer for code; `pprint-logical-block`, `pprint-newline`, `pprint-indent`, `pprint-tab` and `pprint-fill`/`-linear`/`-tabular`
+  lay out logical blocks. `*print-pretty*` does not make `print` use them.
 
 **System interface**
-* `directory` is not provided; use `run-program` or the Dired commands. `with-open-file` supports `:direction`, `:if-exists`, `:if-does-not-exist` for text files only.
-* There are no threads, no weak hash tables, no finalization, and the garbage collector is a non-generational two-space copier.
+* Pathnames are Unix paths with Common Lisp components; logical pathnames translate through `logical-pathname-translations`. `directory`
+  handles `*` and `**`. `with-open-file` supports `:direction`, `:if-exists`, `:if-does-not-exist` for text files only.
+* There are no weak hash tables and no finalization. The garbage collector is a generational copier (a nursery and a two-space old generation).
 
 ## Extensions
 
