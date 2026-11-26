@@ -177,3 +177,31 @@ b" (format nil "a~%b"))
   (is-equal :bound (let ((*dyn* :bound)) (read-dyn)))
   (is-equal :global (progn (let ((*dyn* :tmp)) nil) (read-dyn)))
   (is-equal :global (progn (ignore-errors (let ((*dyn* :tmp)) (error "x"))) (read-dyn))))
+
+(deftest calendar-time
+  ;; fixed time zones: these hold wherever the tests run
+  (is-equal '(0 0 0 1 1 1900 0 nil 0) (multiple-value-list (decode-universal-time 0 0)))   ; a Monday
+  (is-equal 3155673600 (encode-universal-time 0 0 0 1 1 2000 0))
+  (is-equal '(0 0 0 1 1 2000 5 nil 0) (multiple-value-list (decode-universal-time 3155673600 0)))  ; a Saturday
+  (is-equal '(59 59 23 28 2 2024 2 nil 0) (multiple-value-list (decode-universal-time (encode-universal-time 59 59 23 28 2 2024 0) 0)))
+  (is-equal '(0 0 0 29 2 2024 3 nil 0) (multiple-value-list (decode-universal-time (+ 1 (encode-universal-time 59 59 23 28 2 2024 0)) 0))) ; leap day
+  (is-equal '(0 0 0 1 3 2100 0 nil 0) (multiple-value-list (decode-universal-time (+ 86400 (encode-universal-time 0 0 0 28 2 2100 0)) 0))) ; 2100 is not a leap year
+  ;; time zones are hours west of Greenwich; fractions are allowed
+  (is-equal '(0 0 19 31 12 1999) (subseq (multiple-value-list (decode-universal-time 3155673600 5)) 0 6))
+  (is-equal '(0 30 5 1 1 2000) (subseq (multiple-value-list (decode-universal-time 3155673600 -11/2)) 0 6))
+  (is-equal 3155673600 (encode-universal-time 0 0 19 31 12 1999 5))
+  ;; round trips every 37 hours or so for a few years, in a fixed zone
+  (let ((ok t))
+    (do ((u 3155673600 (+ u 133331))) ((> u 3300000000))
+      (multiple-value-bind (s mi h d mo y) (decode-universal-time u 3)
+        (unless (= u (encode-universal-time s mi h d mo y 3)) (setq ok nil))))
+    (is ok))
+  ;; the local zone: decoding and encoding agree, and the zone is a rational number of hours
+  (let ((now (get-universal-time)))
+    (multiple-value-bind (s mi h d mo y dow dst tz) (decode-universal-time now)
+      (is (<= 0 dow 6)) (is (rationalp tz)) (is (member dst '(t nil)))
+      (is-equal now (encode-universal-time s mi h d mo y))))
+  (is-equal 9 (length (multiple-value-list (get-decoded-time))))
+  ;; two-digit years are within 50 years of now
+  (let ((this (nth-value 5 (get-decoded-time))))
+    (is-equal this (nth-value 5 (decode-universal-time (encode-universal-time 0 0 12 1 6 (mod this 100) 0) 0)))))

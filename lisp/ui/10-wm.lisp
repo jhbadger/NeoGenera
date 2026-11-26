@@ -283,8 +283,10 @@
           (dotimes (i size) (screen-put s (+ y 1 (min (- ih 1) (+ pos i))) x2 +block+ (tc :scroll-thumb) bg 0)))))))
 
 (defun %clock-string ()
-  (let* ((u (mod (get-universal-time) 86400)) (hh (floor u 3600)) (mm (floor (mod u 3600) 60)))
-    (format nil "~2,'0D:~2,'0D" hh mm)))
+  "The local time of day as HH:MM, for the who-line."
+  (multiple-value-bind (sec min hour) (get-decoded-time)
+    (declare (ignore sec))
+    (format nil "~2,'0D:~2,'0D" hour min)))
 
 (defun %pad-to (str n) (if (>= (length str) n) (subseq str 0 n) (%string-concat str (make-string (- n (length str)) #\Space))))
 

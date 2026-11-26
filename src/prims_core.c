@@ -627,6 +627,17 @@ PRIM(p_real_time) {
   return FIX((SObj)ts.tv_sec * 1000000 + ts.tv_nsec / 1000);
 }
 PRIM(p_universal_time) { UNUSED_ARGS; return FIX((SObj)time(NULL) + 2208988800LL); }
+PRIM(p_local_offset) {
+  /* (%local-offset universal-time) -> (values seconds-east-of-UTC daylight-saving-p) for the local time zone */
+  UNUSED_ARGS;
+  if (!is_integer(argv[0]) || !FIXP(argv[0])) type_error("FIXNUM", argv[0]);
+  time_t t = (time_t)(UNFIX(argv[0]) - 2208988800LL);
+  struct tm tm;
+  if (!localtime_r(&t, &tm)) { mv_vals[0] = FIX(0); mv_vals[1] = NIL; mv_count = 2; return FIX(0); }
+  long off = (long)tm.tm_gmtoff;
+  mv_vals[0] = FIX(off); mv_vals[1] = BOOL(tm.tm_isdst > 0); mv_count = 2;
+  return FIX(off);
+}
 PRIM(p_sleep) {
   UNUSED_ARGS;
   double d = num_to_double(argv[0]);
@@ -715,7 +726,7 @@ void init_prims_core(void) {
   defprim("GC", p_gc, 0, 0); defprim("%GC-STRESS", p_gc_stress, 1, 1); defprim("%GC-COUNT", p_gc_count, 0, 0); defprim("%HEAP-INFO", p_heap_info, 0, 0);
   defprim("%HEAP-USED", p_heap_used, 0, 0);
   defprim("EXIT", p_exit, 0, 1); defprim("QUIT", p_exit, 0, 1);
-  defprim("GET-INTERNAL-REAL-TIME", p_real_time, 0, 0); defprim("GET-UNIVERSAL-TIME", p_universal_time, 0, 0);
+  defprim("GET-INTERNAL-REAL-TIME", p_real_time, 0, 0); defprim("GET-UNIVERSAL-TIME", p_universal_time, 0, 0); defprim_mv("%LOCAL-OFFSET", p_local_offset, 1, 1);
   defprim("SLEEP", p_sleep, 1, 1); defprim("GETENV", p_getenv, 1, 1); defprim("%COMMAND-LINE", p_command_line, 0, 0);
   defprim("%SAVE-IMAGE", p_save_image, 1, 1);
   (void)p_load_time_dummy; (void)p_set_signal_hook_dummy;

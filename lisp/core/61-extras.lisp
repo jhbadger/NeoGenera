@@ -48,3 +48,55 @@
 (defun mapcon (fn list &rest more)
   "Apply FN to successive tails and NCONC the results."
   (apply #'nconc (apply #'maplist fn list more)))
+
+;;; ---- calendar time ----------------------------------------------------------------------------------------
+;;; Universal time counts seconds from 1900-01-01 00:00 UTC.  TIME-ZONE follows Common Lisp: hours *west* of
+;;; Greenwich, not counting daylight saving time (New York is 5).  Without a TIME-ZONE argument the local zone
+;;; of the operating system is used, with its daylight saving rules (%LOCAL-OFFSET asks localtime_r).
+
+(defun %civil-from-days (days)
+  "Year, month (1-12) and day of the date DAYS days after 1900-01-01 (proleptic Gregorian calendar)."
+  (let* ((z (+ (- days 25567) 719468))                 ; days since 0000-03-01
+         (era (floor z 146097)) (doe (- z (* era 146097)))
+         (yoe (floor (- doe (floor doe 1460) (- (floor doe 36524)) (floor doe 146096)) 365))
+         (doy (- doe (- (+ (* 365 yoe) (floor yoe 4)) (floor yoe 100))))
+         (mp (floor (+ (* 5 doy) 2) 153))
+         (d (+ (- doy (floor (+ (* 153 mp) 2) 5)) 1))
+         (m (if (< mp 10) (+ mp 3) (- mp 9)))
+         (y (+ yoe (* era 400) (if (<= m 2) 1 0))))
+    (values y m d)))
+
+(defun %days-from-civil (y m d)
+  "Days from 1900-01-01 to the date Y-M-D."
+  (let* ((y (if (<= m 2) (- y 1) y))
+         (era (floor y 400)) (yoe (- y (* era 400)))
+         (doy (+ (floor (+ (* 153 (if (> m 2) (- m 3) (+ m 9))) 2) 5) (- d 1)))
+         (doe (+ (* yoe 365) (floor yoe 4) (- (floor yoe 100)) doy)))
+    (+ (* era 146097) doe -719468 25567)))
+
+(defun decode-universal-time (universal-time &optional time-zone)
+  "Decode UNIVERSAL-TIME into nine values: second, minute, hour, date, month, year, day of the week (0 is
+Monday), daylight-saving-p and the time zone (hours west of Greenwich).  Without TIME-ZONE, the local time
+zone and its daylight saving time are used."
+  (multiple-value-bind (offset dst)
+      (if time-zone (values (- (round (* time-zone 3600))) nil) (%local-offset universal-time))
+    (let* ((local (+ universal-time offset)) (days (floor local 86400)) (secs (- local (* days 86400))))
+      (multiple-value-bind (y m d) (%civil-from-days days)
+        (values (mod secs 60) (mod (floor secs 60) 60) (floor secs 3600) d m y (mod days 7) (and dst t)
+                (or time-zone (/ (- (if dst 3600 0) offset) 3600)))))))
+
+(defun get-decoded-time ()
+  "The current time as the nine values of DECODE-UNIVERSAL-TIME, in the local time zone."
+  (decode-universal-time (get-universal-time)))
+
+(defun encode-universal-time (second minute hour date month year &optional time-zone)
+  "The universal time of a calendar time.  Without TIME-ZONE the local time zone (with daylight saving time)
+is used.  A YEAR below 100 means the year within 50 years of now with those last two digits."
+  (when (< year 100)
+    (let* ((now (nth-value 5 (get-decoded-time))) (y (+ year (* 100 (floor now 100)))))
+      (setq year (cond ((> (- y now) 50) (- y 100)) ((> (- now y) 50) (+ y 100)) (t y)))))
+  (let ((u (+ (* 86400 (%days-from-civil year month date)) (* 3600 hour) (* 60 minute) second)))
+    (if time-zone
+        (+ u (round (* time-zone 3600)))
+        (let* ((off1 (%local-offset u)) (guess (- u off1)) (off2 (%local-offset guess)))
+          (if (= off1 off2) guess (- u off2))))))

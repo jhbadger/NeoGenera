@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **Local time.** The who-line clock showed UTC; it now shows local time. Added `decode-universal-time`, `encode-universal-time` and
+  `get-decoded-time`, using the operating system's time zone and daylight saving rules (or a given `time-zone`).
+
 * **Window system: Select key and a quit confirmation.** F9 then a letter selects an activity, like Genera's SELECT key (`L` Listener,
   `E` Editor, `P` Peek, `D` Documentation, `I` Inspector, `S` Settings; `define-select-activity` adds more). F10 now asks before quitting,
   naming modified buffers and background processes; F10 again or `y` quits.
