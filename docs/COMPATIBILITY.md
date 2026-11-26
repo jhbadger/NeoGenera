@@ -24,8 +24,11 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 * `*print-base*` and `*print-radix*` are not honoured by the printer; use `~B ~O ~X ~R`.
 
 **Strings and characters**
-* Strings are byte vectors holding UTF-8; `length` counts bytes, `char` indexes bytes, and `char-code` of a non-ASCII byte is the byte value.
-  Non-ASCII text round-trips but is not character-addressable. Case conversion and `alpha-char-p` are ASCII-only.
+* Strings hold characters: `length`, `char`, `schar`, `subseq` and `position` count code points. Files, the terminal,
+  the OS and `run-program` exchange UTF-8, decoded on input and encoded on output; a malformed byte reads as the
+  character with that code. There are no external formats other than UTF-8. Case conversion and the character
+  predicates cover Latin, Greek, Cyrillic and the other scripts of `lisp/core/63-unicode.lisp`; a mapping that changes
+  a string's length (`ß` → `SS`) is not made. `base-char` is the same type as `character`.
 * `string<`, `string>`, `string<=`, `string>=` and `string/=` return a boolean rather than the mismatch index, and do not take `:start`/`:end` keywords.
 * `format` implements the standard directives, including `~E ~F ~G ~$` with all their parameters, `~<...~>` justification and
   `~<...~:>` logical blocks, `~_ ~I ~W ~/name/` and `~T`. `~R` spells numbers in English up to the quintillions.
@@ -60,7 +63,14 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 **System interface**
 * Pathnames are Unix paths with Common Lisp components; logical pathnames translate through `logical-pathname-translations`. `directory`
   handles `*` and `**`. `with-open-file` supports `:direction`, `:if-exists`, `:if-does-not-exist` for text files only.
-* There are no weak hash tables and no finalization. The garbage collector is a generational copier (a nursery and a two-space old generation).
+* The garbage collector is a generational copier (a nursery and a two-space old generation). `make-hash-table` takes
+  `:weakness` (`:key`, `:value`, `:key-and-value`, `:key-or-value`, as in SBCL); `:key` entries are ephemerons, so
+  a value that refers to its own key does not keep the entry. `make-weak-pointer`, `weak-pointer-value`,
+  `finalize` (with `:dont-save`) and `cancel-finalization` follow SBCL. An object in the old generation is found
+  dead only by a major collection, so a weak entry or finalizer may wait for one; `(gc)` forces it. Finalizers run at
+  the next safe point after the collection, not during it. `eq` hash tables hash structure and CLOS instances to a
+  single bucket (there are no address-based hashes in a moving collector), so a large `eq` table keyed by instances
+  is slow, weak or not.
 
 ## Extensions
 

@@ -68,8 +68,8 @@
 
 (defun %pascal-template-at (line i)
   "The end (after ⊃) of the template item starting at byte I of LINE, or NIL."
-  (and (< (+ i 2) (length line)) (string= (subseq line i (+ i 3)) +template-open-string+)
-       (let ((e (search +template-close-string+ line :start2 (+ i 3)))) (and e (+ e 3)))))
+  (and (<= (+ i +template-mark-length+) (length line)) (string= (subseq line i (+ i +template-mark-length+)) +template-open-string+)
+       (let ((e (search +template-close-string+ line :start2 (+ i +template-mark-length+)))) (and e (+ e +template-mark-length+)))))
 
 (defun pascal-line-syntax (line state)
   "Syntax spans of one line of Pascal: (values spans end-state).  A span is (start end class), CLASS one of :COMMENT
@@ -720,10 +720,10 @@ being declared) :CONSTANT (true, false, nil and template items).  STATE is NIL, 
 
 (defun %pascal-item-at-point (b)
   "(values start end item-text) of the template item at or around point on its line."
-  (let* ((text (buf-current-line b)) (c (point-col b)) (open (search +template-open-string+ (subseq text 0 (min (length text) (+ c 3))) :from-end t)))
+  (let* ((text (buf-current-line b)) (c (point-col b)) (open (search +template-open-string+ (subseq text 0 (min (length text) (+ c +template-mark-length+))) :from-end t)))
     (when open
       (let ((e (%pascal-template-at text open)))
-        (when (and e (< c e)) (values open e (subseq text (+ open 3) (- e 3))))))))
+        (when (and e (< c e)) (values open e (subseq text (+ open +template-mark-length+) (- e +template-mark-length+))))))))
 
 (defcmd pascal-complete (ed arg)
   ;; COMPLETE: refine the template item at point, or complete the reserved word or predeclared name before point
@@ -766,7 +766,7 @@ being declared) :CONSTANT (true, false, nil and template items).  STATE is NIL, 
 (defcmd pascal-next-template-item (ed arg)
   (with-b (b ed)
     (let* ((s (buffer-string b)) (off (point-offset b))
-           (p (search +template-open-string+ s :start2 (min (length s) (if (%pascal-template-at s off) (+ off 3) off)))))
+           (p (search +template-open-string+ s :start2 (min (length s) (if (%pascal-template-at s off) (+ off +template-mark-length+) off)))))
       (if p (%pascal-goto b p) (ed-message* ed "No more template items")))))
 
 (defcmd pascal-previous-template-item (ed arg)

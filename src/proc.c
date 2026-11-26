@@ -174,22 +174,28 @@ static Proc *find_proc(Obj obj) {
 
 /* ---- safe points ------------------------------------------------------------------------------------ */
 
+/* call the Lisp function NAME with no arguments at a safe point, keeping the current multiple values */
+static void run_hook(const char *name) {
+  Obj fn = SYM_FUNC(intern_cl(name));
+  if (fn == NIL || CONSP(fn)) return;
+  Obj saved = NIL;                                    /* the multiple values may be live at a CALL */
+  if (mv_count != 1) for (int i = mv_count - 1; i >= 0; i--) saved = cons(mv_vals[i], saved);
+  int cnt = mv_count;
+  PROTECT(saved);
+  PUSH(fn); apply_stack(0);
+  UNPROTECT(1);
+  if (cnt != 1) values_list(saved); else mv_count = 1;
+}
+
 void proc_attention(void) {
   ng_attention = 0;
   Proc *p = me;
-  if (!p || no_preempt) return;
+  if (no_preempt) return;
+  if (finalizers_pending) run_hook("%RUN-FINALIZERS");    /* (it clears the flag, and does nothing when nested) */
+  if (!p) return;
   if (p->interrupt) {
     p->interrupt = 0;
-    Obj fn = SYM_FUNC(intern_cl("%PROCESS-RUN-INTERRUPTS"));
-    if (fn != NIL && !CONSP(fn)) {
-      Obj saved = NIL;                                /* the multiple values may be live at a CALL */
-      if (mv_count != 1) for (int i = mv_count - 1; i >= 0; i--) saved = cons(mv_vals[i], saved);
-      int cnt = mv_count;
-      PROTECT(saved);
-      PUSH(fn); apply_stack(0);
-      UNPROTECT(1);
-      if (cnt != 1) values_list(saved); else mv_count = 1;
-    }
+    run_hook("%PROCESS-RUN-INTERRUPTS");
   }
   if (nlive > 1 || p->arrested) yield(p);
 }
@@ -404,7 +410,7 @@ PRIM(p_preempt_inhibit) {
   UNUSED_ARGS;
   no_preempt += (int)UNFIX(argv[0]);
   if (no_preempt < 0) no_preempt = 0;
-  if (no_preempt == 0 && me && (me->interrupt || me->arrested || nlive > 1)) ng_attention = 1;
+  if (no_preempt == 0 && (finalizers_pending || (me && (me->interrupt || me->arrested || nlive > 1)))) ng_attention = 1;
   return FIX(no_preempt);
 }
 

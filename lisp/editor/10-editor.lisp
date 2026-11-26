@@ -1388,7 +1388,11 @@ the argument texts ARGS so far): (values text start end)."
           (let* ((end (char-end line c)) (codes (utf8-codes (subseq line c end))))
             (ed-message* ed "Char: ~A (~{U+~4,'0X~^ ~}, ~D byte~:P, width ~D)  point=~D of ~D  column=~D"
                          (let ((s (subseq line c end))) (if (< (char-code (char s 0)) 32) (format nil "^~C" (code-char (+ 64 (char-code (char s 0))))) s))
-                         codes (- end c) (string-display-width (subseq line c end)) off total (display-col line c)))))))
+                         codes (reduce #'+ (mapcar #'utf8-byte-count codes)) (string-display-width (subseq line c end)) off total (display-col line c)))))))
+
+(defun utf8-byte-count (code)
+  "How many bytes the code point CODE takes in UTF-8."
+  (cond ((< code #x80) 1) ((< code #x800) 2) ((< code #x10000) 3) (t 4)))
 
 (defun %parse-code-point (text)
   (let* ((s (string-trim " " text))

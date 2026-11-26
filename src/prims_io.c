@@ -13,15 +13,15 @@ static Obj in_arg(int argc, Obj *argv, int i) { return designate_in(argc > i ? a
 PRIM(p_write_string) {
   Obj s = argv[0];
   if (!STRINGP(s)) {
-    if (IS_TYPE(s, T_ADVEC) && STRINGP(SLOT(s, AV_DATA))) s = make_string(STR_DATA(SLOT(s, AV_DATA)), (size_t)UNFIX(SLOT(s, AV_FILL)));
+    if (IS_TYPE(s, T_ADVEC) && STRINGP(SLOT(s, AV_DATA))) s = substring(SLOT(s, AV_DATA), 0, (size_t)UNFIX(SLOT(s, AV_FILL)));
     else type_error("STRING", s);
   }
   Obj st = out_arg(argc, argv, 1);
-  size_t start = 0, end = STR_LEN(s);
+  size_t start = 0, end = str_len(s);
   if (argc > 2 && argv[2] != NIL) start = (size_t)need_fix(argv[2]);
   if (argc > 3 && argv[3] != NIL) end = (size_t)need_fix(argv[3]);
-  if (start > end || end > STR_LEN(s)) lisp_error("WRITE-STRING: bad bounds");
-  stream_write(st, STR_DATA(s) + start, end - start);
+  if (start > end || end > str_len(s)) lisp_error("WRITE-STRING: bad bounds");
+  stream_write_str(st, s, start, end);
   return argv[0];
 }
 PRIM(p_write_char) {
@@ -45,7 +45,7 @@ PRIM(p_print) {
 PRIM(p_write_line) {
   Obj st = out_arg(argc, argv, 1);
   Obj s = need_str(argv[0]);
-  stream_write(st, STR_DATA(s), STR_LEN(s)); stream_putc(st, '\n');
+  stream_write_str(st, s, 0, str_len(s)); stream_putc(st, '\n');
   return argv[0];
 }
 PRIM(p_finish_output) { stream_flush(out_arg(argc, argv, 0)); return NIL; }
@@ -96,14 +96,14 @@ PRIM(p_read_line) {
   Obj st = in_arg(argc, argv, 0);
   Buf b; buf_init(&b);
   int c, got = 0, nl = 0;
-  while ((c = stream_getc(st)) >= 0) { got = 1; if (c == '\n') { nl = 1; break; } buf_putc(&b, c); }
+  while ((c = stream_getc(st)) >= 0) { got = 1; if (c == '\n') { nl = 1; break; } buf_put_cp(&b, c); }
   if (!got) {
     buf_free(&b);
     mv_vals[0] = (argc > 2) ? argv[2] : NIL; mv_vals[1] = TT; mv_count = 2;
     if (argc > 1 && argv[1] == NIL) return mv_vals[0];
     lisp_error("End of file");
   }
-  Obj s = make_string(b.buf ? b.buf : "", b.len);
+  Obj s = make_string_utf8(b.buf ? b.buf : "", b.len);
   buf_free(&b);
   mv_vals[0] = s; mv_vals[1] = BOOL(!nl); mv_count = 2;
   return s;
@@ -127,27 +127,27 @@ PRIM(p_open) {
   /* (%open path direction if-exists) direction :input|:output|:append */
   UNUSED_ARGS;
   Obj path = need_str(argv[0]);
-  const char *d = STR_DATA(SYM_NAME(argv[1]));
+  const char *d = STR_C(SYM_NAME(argv[1]));
   int output = strcmp(d, "INPUT") != 0, append = strcmp(d, "APPEND") == 0;
-  return open_file_stream(STR_DATA(path), output, append);
+  return open_file_stream(STR_C(path), output, append);
 }
 PRIM(p_close) { UNUSED_ARGS; if (IS_TYPE(argv[0], T_STREAM)) stream_close(argv[0]); return TT; }
-PRIM(p_probe_file) { UNUSED_ARGS; struct stat st; return stat(STR_DATA(need_str(argv[0])), &st) == 0 ? argv[0] : NIL; }
+PRIM(p_probe_file) { UNUSED_ARGS; struct stat st; return stat(STR_C(need_str(argv[0])), &st) == 0 ? argv[0] : NIL; }
 PRIM(p_truename) {
   /* (%truename path) -> the absolute path with symbolic links resolved, or NIL */
   UNUSED_ARGS;
   char buf[PATH_MAX];
-  if (!realpath(STR_DATA(need_str(argv[0])), buf)) return NIL;
+  if (!realpath(STR_C(need_str(argv[0])), buf)) return NIL;
   struct stat st;
   if (stat(buf, &st) == 0 && S_ISDIR(st.st_mode) && strlen(buf) + 1 < sizeof buf && buf[strlen(buf) - 1] != '/') strcat(buf, "/");
   return make_cstring(buf);
 }
-PRIM(p_delete_file) { UNUSED_ARGS; return BOOL(unlink(STR_DATA(need_str(argv[0]))) == 0); }
-PRIM(p_file_write_date) { UNUSED_ARGS; struct stat st; if (stat(STR_DATA(need_str(argv[0])), &st) != 0) return NIL; return FIX((SObj)st.st_mtime + 2208988800LL); }
+PRIM(p_delete_file) { UNUSED_ARGS; return BOOL(unlink(STR_C(need_str(argv[0]))) == 0); }
+PRIM(p_file_write_date) { UNUSED_ARGS; struct stat st; if (stat(STR_C(need_str(argv[0])), &st) != 0) return NIL; return FIX((SObj)st.st_mtime + 2208988800LL); }
 PRIM(p_load_c) {
   /* (%load-file path) -- evaluator-level load used during bootstrap */
   UNUSED_ARGS;
-  return BOOL(load_file(STR_DATA(need_str(argv[0])), 0) == 0);
+  return BOOL(load_file(STR_C(need_str(argv[0])), 0) == 0);
 }
 
 #define ALIAS(n, f, a, b) defprim("%C-" n, f, a, b)
@@ -188,7 +188,7 @@ int quit_requested, quit_code;
 
 void print_error_message(Obj msg) {
   fflush(stdout);
-  fprintf(stderr, "Error: %s\n", STRINGP(msg) ? STR_DATA(msg) : "(unknown)");
+  fprintf(stderr, "Error: %s\n", STRINGP(msg) ? STR_C(msg) : "(unknown)");
   fflush(stderr);
 }
 
@@ -214,7 +214,7 @@ int load_file(const char *path, int verbose) {
   } else {
     frame_top = f.prev;
     fflush(stdout);
-    fprintf(stderr, "Error while loading %s: %s\n", path, STRINGP(f.value) ? STR_DATA(f.value) : "?");
+    fprintf(stderr, "Error while loading %s: %s\n", path, STRINGP(f.value) ? STR_C(f.value) : "?");
     status = -1;
   }
   unbind_to(ssp); vsp = svsp; nroots = snroots;

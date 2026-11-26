@@ -32,11 +32,12 @@ These are scope decisions, not oversights; each is a candidate for a later phase
 
 **Phase 2-3 (earlier)**
 * The reader and printer are still written in C (readtables are not extensible).
-* Strings are byte vectors (UTF-8 passes through; `length` counts bytes).
+* ~~Strings are byte vectors~~ Done: strings hold characters (narrow Latin-1 or wide code points).
 * The collector is a non-generational two-space copier.
 
 **Phase 4**
-* **Not done:** a generational collector, weak hash tables, finalization hooks, and the `ansi-test`
+* **Done since:** the generational collector, weak hash tables and finalization.
+* **Not done:** the `ansi-test`
   conformance baseline (the suite is not available offline, so no pass rate is published).
 * Numbers: bignums and exact ratios are implemented (schoolbook multiplication; no fast multiplication
   or complex numbers). `/` of integers is now exact.
@@ -215,7 +216,7 @@ Phases 8–9 can start in parallel with Phases 6–7 once the compiler is stable
 - Streams: character and binary streams, string streams, synonym/broadcast/two-way streams, gray-stream-style extension protocol (needed by the window system).
 - `format` with directives, `pprint` and the pretty printer.
 - Full numeric support begins here: bignums, ratios, then floats (see Phase 8 for complex and higher math).
-- Generational GC and weak hash tables; finalization hooks.
+- Generational GC and weak hash tables; finalization hooks. (Done.)
 - Conformance checkpoint: run `ansi-test`, record the baseline pass rate, and set a target (for example 80% by Phase 6, 90% by 1.0).
 
 **Exit criteria:** you can port a mid-sized portable CL library (e.g., a parser or test framework) with minimal changes.

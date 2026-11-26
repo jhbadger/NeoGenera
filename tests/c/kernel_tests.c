@@ -21,7 +21,7 @@ static Obj ev(const char *s) { return eval(rd(s), NIL, NIL); }
 static char *show(Obj o) {
   static char buf[4096];
   Obj s = print_to_string(o, 1, 0);
-  snprintf(buf, sizeof buf, "%s", STR_DATA(s));
+  snprintf(buf, sizeof buf, "%s", STR_C(s));
   return buf;
 }
 static int prints_as(Obj o, const char *expect) { return strcmp(show(o), expect) == 0; }
@@ -35,7 +35,7 @@ static void test_tagging(void) {
   CHECK(SYMBOLP(NIL) && SYMBOLP(TT) && NIL != TT);
   CHECK(LISTP(NIL) && LISTP(c) && !LISTP(FIX(3)));
   Obj s = make_cstring("hello");
-  CHECK(STRINGP(s) && STR_LEN(s) == 5 && strcmp(STR_DATA(s), "hello") == 0);
+  CHECK(STRINGP(s) && str_len(s) == 5 && strcmp(STR_C(s), "hello") == 0);
   Obj f = make_flonum(2.5);
   CHECK(FLONUMP(f) && flonum_value(f) == 2.5);
 }
@@ -138,7 +138,7 @@ static void test_gc(void) {
   Obj sym = intern("GC-TEST-SYMBOL", PKG_CL); PROTECT(sym);
   SYM_VALUE(sym) = v;
   gc();
-  CHECK(strcmp(STR_DATA(SLOT(SYM_VALUE(sym), 999)), "str999") == 0);
+  CHECK(strcmp(STR_C(SLOT(SYM_VALUE(sym), 999)), "str999") == 0);
   CHECK(intern("GC-TEST-SYMBOL", PKG_CL) == sym);
   UNPROTECT(3);
   /* allocation-heavy Lisp code collects automatically */
@@ -162,7 +162,7 @@ static void test_image(void) {
 int main(void) {
   init_all();
   Frame top; frame_push(&top, F_TOP, NIL);
-  if (setjmp(top.jb) != 0) { fprintf(stderr, "uncaught Lisp error in test harness: %s\n", STRINGP(top.value) ? STR_DATA(top.value) : "?"); return 2; }
+  if (setjmp(top.jb) != 0) { fprintf(stderr, "uncaught Lisp error in test harness: %s\n", STRINGP(top.value) ? STR_C(top.value) : "?"); return 2; }
   test_tagging();
   test_reader_printer();
   test_evaluator();

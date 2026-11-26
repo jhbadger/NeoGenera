@@ -59,6 +59,7 @@ int heap_fixed;
 int gc_pending, gc_stress, gc_verbose, gc_verify;
 int gc_inhibit;
 size_t gc_count, gc_minor_count, gc_major_count;
+volatile int finalizers_pending;
 
 /* ---- the nursery: new objects are allocated here; a minor collection promotes the survivors into the old
    generation (the semispaces above), a major collection copies everything into the other semispace. */
@@ -275,7 +276,6 @@ Obj make_string(const char *s, size_t len) {
   return MK_OBJ(p);
 }
 
-Obj make_cstring(const char *s) { return make_string(s, strlen(s)); }
 
 Obj make_flonum(double d) {
   Obj *p = alloc_o(2);
@@ -318,7 +318,7 @@ static inline int in_obj_from(Obj *p) { return (char *)p >= o_base && (char *)p 
 static inline int in_cons_from(Obj *p) { return (char *)p >= c_base && (char *)p < c_limit; }
 static inline int in_nur_o(Obj *p) { return (char *)p >= n_o_base && (char *)p < n_o_limit; }
 static inline int in_nur_c(Obj *p) { return (char *)p >= n_c_base && (char *)p < n_c_limit; }
-static inline int raw_type(int t) { return t == T_STRING || t == T_FLONUM || t == T_BIGNUM; }
+static inline int raw_type(int t) { return t == T_STRING || t == T_WSTRING || t == T_FLONUM || t == T_BIGNUM; }
 
 static Obj copy_cons(Obj *p) {
   if (p[0] == FWD_MARK) return p[1];
@@ -354,7 +354,45 @@ static Obj forward_minor(Obj o) {
   }
 }
 
-static void scavenge(Obj *oscan, Obj *cscan, Obj (*fwd)(Obj)) {
+/* ---- weak objects ----
+   The scavenger does not trace a weak object's key and value; it records the object here.  After the strong
+   graph is copied, PROCESS_WEAK keeps what each mode says to keep (repeating until nothing more becomes
+   reachable, since a kept value may make another weak object's key reachable) and breaks the rest. */
+typedef struct { Obj *p; int done; } WeakRec;
+static WeakRec *weak_recs;
+static size_t weak_n, weak_cap;
+static int collecting_minor;
+
+static void weak_found(Obj *p, Obj (*fwd)(Obj)) {
+  if (weak_n == weak_cap) {
+    weak_cap = weak_cap ? weak_cap * 2 : 256;
+    weak_recs = realloc(weak_recs, weak_cap * sizeof *weak_recs);
+    if (!weak_recs) { fprintf(stderr, "out of memory recording weak objects\n"); abort(); }
+  }
+  weak_recs[weak_n].p = p; weak_recs[weak_n].done = 0; weak_n++;
+  if (p[1 + WK_MODE] == FIX(WKM_FINAL) || p[1 + WK_MODE] == FIX(WKM_FIRED))
+    p[1 + WK_VALUE] = fwd(p[1 + WK_VALUE]);               /* the finalizer itself is held strongly */
+}
+
+/* is O reachable so far?  (anything outside the space being collected counts as reachable) */
+static int obj_live(Obj o) {
+  switch (o & TAG_MASK) {
+  case TAG_CONS: {
+    Obj *p = (Obj *)(o - TAG_CONS);
+    int collected = collecting_minor ? in_nur_c(p) : (in_cons_from(p) || in_nur_c(p));
+    return !collected || p[0] == FWD_MARK;
+  }
+  case TAG_OBJ: {
+    Obj *p = PTR(o);
+    int collected = collecting_minor ? in_nur_o(p) : (in_obj_from(p) || in_nur_o(p));
+    return !collected || (p[0] & TAG_MASK) != TAG_HDR;
+  }
+  default: return 1;
+  }
+}
+
+static void scavenge(Obj **oscanp, Obj **cscanp, Obj (*fwd)(Obj)) {
+  Obj *oscan = *oscanp, *cscan = *cscanp;
   for (;;) {
     int progress = 0;
     while (cscan < c_to_hp) {
@@ -365,12 +403,55 @@ static void scavenge(Obj *oscan, Obj *cscan, Obj (*fwd)(Obj)) {
     while (oscan < o_to_hp) {
       Obj h = oscan[0];
       size_t n = (size_t)(h >> 16);
-      if (!raw_type((int)((h >> 8) & 0xff)))
+      int t = (int)((h >> 8) & 0xff);
+      if (t == T_WEAK) weak_found(oscan, fwd);
+      else if (!raw_type(t))
         for (size_t i = 0; i < n; i++) oscan[1 + i] = fwd(oscan[1 + i]);
       oscan += 1 + n; progress = 1;
     }
     if (!progress) break;
   }
+  *oscanp = oscan; *cscanp = cscan;
+}
+
+static void process_weak(Obj **oscan, Obj **cscan, Obj (*fwd)(Obj)) {
+  for (;;) {                                            /* keep what a reachable key or value holds */
+    int changed = 0;
+    for (size_t i = 0; i < weak_n; i++) {
+      if (weak_recs[i].done) continue;
+      Obj *p = weak_recs[i].p + 1;
+      Obj k = p[WK_KEY], v = p[WK_VALUE];
+      int keep;
+      switch ((int)UNFIX(p[WK_MODE])) {
+      case WKM_KEY: keep = obj_live(k); break;
+      case WKM_VALUE: keep = obj_live(v); break;
+      case WKM_OR: keep = obj_live(k) || obj_live(v); break;
+      default: continue;
+      }
+      if (keep) { p[WK_KEY] = fwd(k); p[WK_VALUE] = fwd(v); weak_recs[i].done = 1; changed = 1; }
+    }
+    if (!changed) break;
+    scavenge(oscan, cscan, fwd);                        /* (may record more weak objects) */
+  }
+  for (size_t i = 0; i < weak_n; i++) {                 /* break the rest */
+    if (weak_recs[i].done) continue;
+    Obj *p = weak_recs[i].p + 1;
+    int mode = (int)UNFIX(p[WK_MODE]);
+    Obj k = p[WK_KEY], v = p[WK_VALUE];
+    switch (mode) {
+    case WKM_POINTER: case WKM_AND:
+      if (obj_live(k) && obj_live(v)) { p[WK_KEY] = fwd(k); p[WK_VALUE] = fwd(v); continue; }
+      break;
+    case WKM_FINAL:
+      if (obj_live(k)) { p[WK_KEY] = fwd(k); continue; }
+      p[WK_MODE] = FIX(WKM_FIRED); p[WK_KEY] = NIL; finalizers_pending = 1; ng_attention = 1;
+      continue;
+    case WKM_FIRED: case WKM_BROKEN: continue;          /* (key NIL; a fired one's finalizer was forwarded) */
+    default: break;
+    }
+    p[WK_MODE] = FIX(WKM_BROKEN); p[WK_KEY] = NIL; p[WK_VALUE] = NIL;
+  }
+  weak_n = 0;
 }
 
 static void forward_all_roots(Obj (*fwd)(Obj)) {
@@ -406,7 +487,7 @@ static void clear_remembered(void) {
    remembered object or cons; otherwise a write barrier is missing. */
 static int describe_container(Obj *p, char *buf, size_t n) {
   int t = (int)((p[0] >> 8) & 0xff);
-  if (t == T_SYMBOL && STRINGP(p[1 + S_NAME])) return snprintf(buf, n, "symbol %s", STR_DATA(p[1 + S_NAME]));
+  if (t == T_SYMBOL && STRINGP(p[1 + S_NAME])) return snprintf(buf, n, "symbol %s", STR_C(p[1 + S_NAME]));
   return snprintf(buf, n, "object of type %d with %zu slots", t, (size_t)(p[0] >> 16));
 }
 static void verify_old_generation(void) {
@@ -449,8 +530,9 @@ static void gc_major(void) {
   UNPOISON(o_space[to], semi); UNPOISON(c_space[to], semi);
   UNPOISON(n_o_base, nursery); UNPOISON(n_c_base, nursery);
   o_to_hp = o_to_base; c_to_hp = c_to_base;
+  collecting_minor = 0; weak_n = 0;
   forward_all_roots(forward_major);
-  scavenge(o_to_base, c_to_base, forward_major);
+  { Obj *os = o_to_base, *cs = c_to_base; scavenge(&os, &cs, forward_major); process_weak(&os, &cs, forward_major); }
   clear_remembered();                                   /* (the bits of the from-space bitmap) */
 
   size_t live_o = (size_t)((char *)o_to_hp - (char *)o_to_base);
@@ -480,19 +562,22 @@ static void gc_minor(void) {
   size_t before = n_o_used + n_c_used;
   Obj *oscan = o_hp, *cscan = c_hp;
   o_to_hp = o_hp; c_to_hp = c_hp;
+  collecting_minor = 1; weak_n = 0;
   forward_all_roots(forward_minor);
   /* the remembered objects' slots are roots too */
   for (size_t i = 0; i < rs_o_n; i++) {
     Obj *p = PTR(rs_o[i]);
     if (!in_old_o(p) || (p[0] & TAG_MASK) != TAG_HDR) continue;
     size_t n = (size_t)(p[0] >> 16);
-    if (!raw_type((int)((p[0] >> 8) & 0xff))) for (size_t k = 0; k < n; k++) p[1 + k] = forward_minor(p[1 + k]);
+    int t = (int)((p[0] >> 8) & 0xff);
+    if (t == T_WEAK) weak_found(p, forward_minor);
+    else if (!raw_type(t)) for (size_t k = 0; k < n; k++) p[1 + k] = forward_minor(p[1 + k]);
   }
   for (size_t i = 0; i < rs_c_n; i++) {
     Obj *p = (Obj *)(rs_c[i] - TAG_CONS);
     if (in_old_c(p)) { p[0] = forward_minor(p[0]); p[1] = forward_minor(p[1]); }
   }
-  scavenge(oscan, cscan, forward_minor);
+  { Obj *os = oscan, *cs = cscan; scavenge(&os, &cs, forward_minor); process_weak(&os, &cs, forward_minor); }
   clear_remembered();
   o_hp = o_to_hp; c_hp = c_to_hp;
   reset_nursery();
@@ -561,7 +646,7 @@ int save_image(const char *path) {
   if (snprintf(tmp, sizeof tmp, "%s.tmp.%ld", path, (long)getpid()) >= (int)sizeof tmp) return -1;
   FILE *f = fopen(tmp, "wb");
   if (!f) return -1;
-  ImgHdr h; memset(&h, 0, sizeof h); memcpy(h.magic, "NGIMG005", 8);
+  ImgHdr h; memset(&h, 0, sizeof h); memcpy(h.magic, "NGIMG006", 8);
   h.obj_base = (uint64_t)(uintptr_t)o_base; h.cons_base = (uint64_t)(uintptr_t)c_base;
   h.obj_used = (uint64_t)((char *)o_hp - o_base); h.cons_used = (uint64_t)((char *)c_hp - c_base);
   h.nroots = (uint64_t)nglobal_roots; h.semi = semi;
@@ -589,7 +674,7 @@ int load_image(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f) return -1;
   ImgHdr h;
-  if (fread(&h, sizeof h, 1, f) != 1 || memcmp(h.magic, "NGIMG005", 8) != 0) { fclose(f); return -2; }
+  if (fread(&h, sizeof h, 1, f) != 1 || memcmp(h.magic, "NGIMG006", 8) != 0) { fclose(f); return -2; }
   if (!heap_fixed || h.obj_base != (uint64_t)(uintptr_t)o_space[0] ||
       h.cons_base != (uint64_t)(uintptr_t)c_space[0] || h.semi != semi ||
       h.nroots != (uint64_t)nglobal_roots) { fclose(f); return -3; }

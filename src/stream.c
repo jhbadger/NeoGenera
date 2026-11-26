@@ -32,19 +32,19 @@ static int kind_of(Obj s) { return (int)UNFIX(SLOT(s, ST_KIND)); }
 
 Obj make_string_out_stream(void) {
   Obj s = make_stream(SK_STR_OUT, -1);
-  SLOT(s, ST_BUF) = make_string(NULL, 64);     /* STR_LEN == capacity */
+  SLOT(s, ST_BUF) = make_string(NULL, 64);     /* its length is the capacity; it widens for a wide character */
   return s;
 }
 
 Obj make_string_in_stream(Obj str) {
   Obj s = make_stream(SK_STR_IN, -1);
   SLOT(s, ST_BUF) = str;
-  SLOT(s, ST_LEN) = FIX(STR_LEN(str));
+  SLOT(s, ST_LEN) = FIX(str_len(str));
   return s;
 }
 
 Obj stream_output_string(Obj s) {
-  return make_string(STR_DATA(SLOT(s, ST_BUF)), (size_t)UNFIX(SLOT(s, ST_LEN)));
+  return substring(SLOT(s, ST_BUF), 0, (size_t)UNFIX(SLOT(s, ST_LEN)));
 }
 
 Obj open_file_stream(const char *path, int output, int append) {
@@ -75,44 +75,68 @@ Obj designate_in(Obj s) {
   return s;
 }
 
+/* the column after UTF-8 text BUF: characters are counted, not bytes */
 static void update_col(Obj s, const char *buf, size_t n) {
   if (!n) return;
   long col = (long)UNFIX(SLOT(s, ST_COL));
-  for (size_t i = 0; i < n; i++) { if (buf[i] == '\n') col = 0; else col++; }
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)buf[i];
+    if (c == '\n') col = 0; else if ((c & 0xC0) != 0x80) col++;
+  }
   SLOT(s, ST_COL) = FIX(col);
 }
 
+/* append character C to a string output stream */
+static void sout_put(Obj s, int c) {
+  size_t len = (size_t)UNFIX(SLOT(s, ST_LEN));
+  Obj b = SLOT(s, ST_BUF);
+  int wide = str_wide_p(b);
+  if (len + 1 > str_len(b) || (c > 255 && !wide)) {
+    size_t cap = str_len(b);
+    if (len + 1 > cap) cap *= 2;
+    Obj nb = (wide || c > 255) ? make_wstring(cap) : make_string(NULL, cap);
+    b = SLOT(s, ST_BUF);
+    if (IS_TYPE(nb, T_WSTRING)) for (size_t i = 0; i < len; i++) WSTR_DATA(nb)[i] = (uint32_t)str_ref(b, i);
+    else memcpy(NSTR_DATA(nb), NSTR_DATA(b), len);
+    SLOT(s, ST_BUF) = nb; WB(s, nb); b = nb;
+  }
+  if (IS_TYPE(b, T_WSTRING)) WSTR_DATA(b)[len] = (uint32_t)c; else NSTR_DATA(b)[len] = (char)c;
+  SLOT(s, ST_LEN) = FIX(len + 1);
+  long col = (long)UNFIX(SLOT(s, ST_COL));
+  SLOT(s, ST_COL) = FIX(c == '\n' ? 0 : col + 1);
+}
+
+/* write UTF-8 text */
 void stream_write(Obj s, const char *buf, size_t n) {
   switch (kind_of(s)) {
   case SK_STDOUT: case SK_STDERR: case SK_FILE_OUT:
     fwrite(buf, 1, n, files[UNFIX(SLOT(s, ST_FILE))]);
+    update_col(s, buf, n);
     break;
   case SK_STR_OUT: {
-    size_t len = (size_t)UNFIX(SLOT(s, ST_LEN));
-    Obj b = SLOT(s, ST_BUF);
-    if (len + n + 1 > STR_LEN(b)) {
-      size_t cap = STR_LEN(b) * 2;
-      while (cap < len + n + 1) cap *= 2;
-      Obj nb = make_string(NULL, cap);
-      memcpy(STR_DATA(nb), STR_DATA(SLOT(s, ST_BUF)), len);
-      SLOT(s, ST_BUF) = nb; WB(s, nb); b = nb;
-    }
-    memcpy(STR_DATA(b) + len, buf, n);
-    SLOT(s, ST_LEN) = FIX(len + n);
+    const unsigned char *u = (const unsigned char *)buf; size_t i = 0;
+    while (i < n) sout_put(s, u[i] < 0x80 ? u[i++] : utf8_decode(u, n, &i));
     break;
   }
   default: lisp_error("stream is not an output stream");
   }
-  update_col(s, buf, n);
 }
 
 void stream_putc(Obj s, int c) {
+  if (kind_of(s) == SK_STR_OUT) { sout_put(s, c); return; }
+  Buf b; char small[8]; b.buf = small; b.len = 0; b.cap = sizeof small;
   if (c < 128) { char ch = (char)c; stream_write(s, &ch, 1); return; }
-  char b[4]; int n;
-  if (c < 0x800) { b[0] = (char)(0xC0 | (c >> 6)); b[1] = (char)(0x80 | (c & 0x3F)); n = 2; }
-  else if (c < 0x10000) { b[0] = (char)(0xE0 | (c >> 12)); b[1] = (char)(0x80 | ((c >> 6) & 0x3F)); b[2] = (char)(0x80 | (c & 0x3F)); n = 3; }
-  else { b[0] = (char)(0xF0 | (c >> 18)); b[1] = (char)(0x80 | ((c >> 12) & 0x3F)); b[2] = (char)(0x80 | ((c >> 6) & 0x3F)); b[3] = (char)(0x80 | (c & 0x3F)); n = 4; }
-  stream_write(s, b, (size_t)n);
+  buf_put_cp(&b, c);
+  stream_write(s, b.buf, b.len);
+}
+
+/* write the characters of string STR (from START to END) */
+void stream_write_str(Obj s, Obj str, size_t start, size_t end) {
+  if (kind_of(s) == SK_STR_OUT) { for (size_t i = start; i < end; i++) sout_put(s, str_ref(str, i)); return; }
+  Buf b; buf_init(&b);
+  for (size_t i = start; i < end; i++) buf_put_cp(&b, str_ref(str, i));
+  stream_write(s, b.buf ? b.buf : "", b.len);
+  buf_free(&b);
 }
 
 int stream_getc(Obj s) {
@@ -121,15 +145,29 @@ int stream_getc(Obj s) {
     long pk = (long)UNFIX(SLOT(s, ST_PEEK));
     if (pk >= 0) { SLOT(s, ST_PEEK) = FIX(-1); SLOT(s, ST_POS) = FIX(UNFIX(SLOT(s, ST_POS)) + 1); return (int)pk; }
     if (kind_of(s) == SK_STDIN) fflush(stdout);
-    int c = fgetc(files[UNFIX(SLOT(s, ST_FILE))]);
-    if (c >= 0) SLOT(s, ST_POS) = FIX(UNFIX(SLOT(s, ST_POS)) + 1);
-    return c;
+    FILE *f = files[UNFIX(SLOT(s, ST_FILE))];
+    int c = fgetc(f);
+    if (c < 0) return c;
+    SLOT(s, ST_POS) = FIX(UNFIX(SLOT(s, ST_POS)) + 1);
+    if (c < 0x80) return c;
+    /* a UTF-8 sequence: decode it; a malformed byte stands for itself */
+    int len = (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 1;
+    unsigned char seq[4]; seq[0] = (unsigned char)c; int k = 1;
+    for (; k < len; k++) {
+      int d = fgetc(f);
+      if (d < 0) break;
+      if ((d & 0xC0) != 0x80) { ungetc(d, f); break; }
+      seq[k] = (unsigned char)d;
+    }
+    if (k < len) return c;              /* (the bytes read after it are lost: they were not a character) */
+    size_t i = 0;
+    return utf8_decode(seq, (size_t)len, &i);
   }
   case SK_STR_IN: {
     long pos = (long)UNFIX(SLOT(s, ST_POS)), len = (long)UNFIX(SLOT(s, ST_LEN));
     if (pos >= len) return -1;
     SLOT(s, ST_POS) = FIX(pos + 1);
-    return (unsigned char)STR_DATA(SLOT(s, ST_BUF))[pos];
+    return str_ref(SLOT(s, ST_BUF), (size_t)pos);
   }
   default: lisp_error("stream is not an input stream");
   }

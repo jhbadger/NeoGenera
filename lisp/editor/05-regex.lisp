@@ -194,7 +194,7 @@ Signals REGEX-SYNTAX-ERROR for an invalid pattern."
            next))))
 
 (defun %rx-word-before-p (s i)
-  (and (> i 0) (let ((j (- i 1))) (loop (unless (and (> j 0) (= (logand (char-code (char s j)) #xC0) #x80)) (return)) (setq j (- j 1)))
+  (and (> i 0) (let ((j (- i 1)))
                  (unicode-word-char-p (utf8-char-at s j)))))
 (defun %rx-word-after-p (s i) (and (< i *rx-end*) (unicode-word-char-p (utf8-char-at s i))))
 
@@ -288,8 +288,7 @@ or NIL."
       (multiple-value-bind (e groups) (regex-match re string i limit)
         (when e (return (values i e groups))))
       (when (<= i 0) (return nil))
-      (setq i (- i 1))
-      (loop (unless (and (> i 0) (= (logand (char-code (char string i)) #xC0) #x80)) (return)) (setq i (- i 1))))))
+      (setq i (- i 1)))))
 
 (defun regex-expand (template string groups)
   "The replacement TEMPLATE with \\& or \\0 replaced by the whole match in STRING and \\1 .. \\9 by the groups

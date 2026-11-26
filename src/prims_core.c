@@ -29,7 +29,7 @@ static Obj need_str(Obj o) { if (!STRINGP(o)) type_error("STRING", o); return o;
 static Obj str_designator(Obj o) {
   if (STRINGP(o)) return o;
   if (SYMBOLP(o)) return SYM_NAME(o);
-  if (CHARP(o)) { char c = (char)CHAR_CODE(o); return make_string(&c, 1); }
+  if (CHARP(o)) { uint32_t c = (uint32_t)CHAR_CODE(o); return make_string_codes(&c, 1); }
   type_error("STRING-DESIGNATOR", o);
 }
 
@@ -93,7 +93,7 @@ PRIM(p_length) {
   Obj x = argv[0];
   if (x == NIL) return FIX(0);
   if (CONSP(x)) { long n = list_length(x); if (n < 0) type_error("PROPER-LIST", x); return FIX(n); }
-  if (STRINGP(x)) return FIX(STR_LEN(x));
+  if (STRINGP(x)) return FIX(str_len(x));
   if (VECTORP(x)) return FIX(OBJ_NWORDS(x));
   if (IS_TYPE(x, T_ADVEC)) return SLOT(x, AV_FILL);
   type_error("SEQUENCE", x);
@@ -102,7 +102,7 @@ PRIM(p_reverse) {
   UNUSED_ARGS;
   Obj x = argv[0];
   if (LISTP(x)) { Obj r = NIL; for (; CONSP(x); x = CDR(x)) r = cons(CAR(x), r); return r; }
-  if (STRINGP(x)) { size_t n = STR_LEN(x); Obj s = make_string(NULL, n); for (size_t i = 0; i < n; i++) STR_DATA(s)[i] = STR_DATA(x)[n - 1 - i]; return s; }
+  if (STRINGP(x)) { size_t n = str_len(x); Obj s = substring(x, 0, n); for (size_t i = 0; i < n; i++) str_set(s, i, str_ref(x, n - 1 - i)); return s; }
   if (VECTORP(x)) { size_t n = OBJ_NWORDS(x); Obj v = make_vector(n, NIL); for (size_t i = 0; i < n; i++) SLOT(v, i) = SLOT(x, n - 1 - i); return v; }
   type_error("SEQUENCE", x);
 }
@@ -194,18 +194,18 @@ PRIM(p_unsupplied_p) { UNUSED_ARGS; return BOOL(argv[0] == UNSUPPLIED); }
 PRIM(p_symbol_name) { UNUSED_ARGS; return SYM_NAME(need_sym(argv[0])); }
 PRIM(p_symbol_value) {
   UNUSED_ARGS; Obj s = need_sym(argv[0]); Obj v = SYM_VALUE(s);
-  if (v == UNBOUND) lisp_error("The variable %s is unbound", STR_DATA(SYM_NAME(s)));
+  if (v == UNBOUND) lisp_error("The variable %s is unbound", STR_C(SYM_NAME(s)));
   return v;
 }
 PRIM(p_set) {
   UNUSED_ARGS; Obj s = need_sym(argv[0]);
-  if (UNFIX(SYM_FLAGS(s)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_DATA(SYM_NAME(s)));
+  if (UNFIX(SYM_FLAGS(s)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_C(SYM_NAME(s)));
   SYM_VALUE(s) = argv[1]; WB(s, argv[1]);
   return argv[1];
 }
 PRIM(p_symbol_function) {
   UNUSED_ARGS; Obj s = need_sym(argv[0]); Obj f = SYM_FUNC(s);
-  if (f == NIL) lisp_error("The function %s is undefined", STR_DATA(SYM_NAME(s)));
+  if (f == NIL) lisp_error("The function %s is undefined", STR_C(SYM_NAME(s)));
   return CONSP(f) ? CDR(f) : f;
 }
 PRIM(p_set_symbol_function) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = argv[1]; WB(argv[0], argv[1]); return argv[1]; }
@@ -238,7 +238,7 @@ PRIM(p_boundp) { UNUSED_ARGS; return BOOL(SYM_VALUE(need_sym(argv[0])) != UNBOUN
 PRIM(p_fboundp) { UNUSED_ARGS; return BOOL(SYM_FUNC(need_sym(argv[0])) != NIL); }
 PRIM(p_makunbound) { UNUSED_ARGS; SYM_VALUE(need_sym(argv[0])) = UNBOUND; return argv[0]; }
 PRIM(p_fmakunbound) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = NIL; return argv[0]; }
-PRIM(p_make_symbol) { UNUSED_ARGS; need_str(argv[0]); return make_symbol_obj(make_string(STR_DATA(argv[0]), STR_LEN(argv[0]))); }
+PRIM(p_make_symbol) { UNUSED_ARGS; need_str(argv[0]); return make_symbol_obj(substring(argv[0], 0, str_len(argv[0]))); }
 PRIM(p_keywordp) { UNUSED_ARGS; return BOOL(SYMBOLP(argv[0]) && SYM_PKG(argv[0]) == PKG_KEYWORD); }
 PRIM(p_proclaim_special) { UNUSED_ARGS; Obj s = need_sym(argv[0]); SYM_FLAGS(s) = FIX(UNFIX(SYM_FLAGS(s)) | SF_SPECIAL); return s; }
 PRIM(p_special_p) { UNUSED_ARGS; return BOOL(SYMBOLP(argv[0]) && (UNFIX(SYM_FLAGS(argv[0])) & SF_SPECIAL)); }
@@ -251,7 +251,7 @@ static Obj status_kw(int st) {
 static Obj pkg_arg(int argc, Obj *argv, int i) {
   if (argc > i && argv[i] != NIL) {
     Obj p = find_package(argv[i]);
-    if (p == NIL) lisp_error("No package named %s", STR_DATA(print_to_string(argv[i], 1, 0)));
+    if (p == NIL) lisp_error("No package named %s", STR_C(print_to_string(argv[i], 1, 0)));
     return p;
   }
   return current_package();
@@ -274,7 +274,7 @@ PRIM(p_make_package) {
   /* (%make-package name nicknames uses) */
   UNUSED_ARGS;
   Obj name = str_designator(argv[0]);
-  if (find_package(name) != NIL) lisp_error("Package %s already exists", STR_DATA(name));
+  if (find_package(name) != NIL) lisp_error("Package %s already exists", STR_C(name));
   Obj uses = NIL;
   for (Obj l = argv[2]; CONSP(l); l = CDR(l)) { Obj p = find_package(CAR(l)); if (p == NIL) lisp_error("No such package to use"); uses = cons(p, uses); }
   Obj nicks = NIL;
@@ -304,12 +304,10 @@ PRIM(p_import) {
   for (; CONSP(l); l = CDR(l)) {
     Obj s = need_sym(CAR(l)); int st; Obj name = SYM_NAME(s);
     Obj ex = find_symbol_in(name, pkg, &st);
-    if (st == 1 || st == 2) { if (ex != s) lisp_error("Import conflict for %s", STR_DATA(name)); continue; }
+    if (st == 1 || st == 2) { if (ex != s) lisp_error("Import conflict for %s", STR_C(name)); continue; }
     /* add into the package's present table */
     Obj tab = SLOT(pkg, PK_INTERNAL);
-    uint64_t h = 1469598103934665603ULL;
-    for (size_t i = 0; i < STR_LEN(name); i++) { h ^= (unsigned char)STR_DATA(name)[i]; h *= 1099511628211ULL; }
-    size_t idx = h % OBJ_NWORDS(tab);
+    size_t idx = str_hash(name) % OBJ_NWORDS(tab);
     SLOT(tab, idx) = cons(s, SLOT(tab, idx)); WB(tab, SLOT(tab, idx));
     if (SYM_PKG(s) == NIL) { SYM_PKG(s) = pkg; WB(s, pkg); }
   }
@@ -378,7 +376,7 @@ PRIM(p_catch) {
 PRIM(p_throw) {
   UNUSED_ARGS;
   Frame *t = find_frame(F_CATCH, argv[0]);
-  if (!t) lisp_error("Attempt to throw to a tag that does not exist: %s", STR_DATA(print_to_string(argv[0], 1, 0)));
+  if (!t) lisp_error("Attempt to throw to a tag that does not exist: %s", STR_C(print_to_string(argv[0], 1, 0)));
   t->mvlist = UNBOUND;
   throw_to(t, argv[1]);
 }
@@ -433,7 +431,7 @@ PRIM(p_progv) {
 PRIM(p_error_to_top) {
   UNUSED_ARGS;
   Frame *top = find_frame(F_TOP, NIL);
-  if (!top) { fprintf(stderr, "Error: %s\n", STR_DATA(argv[0])); exit(1); }
+  if (!top) { fprintf(stderr, "Error: %s\n", STR_C(argv[0])); exit(1); }
   throw_to(top, argv[0]);
 }
 PRIM(p_eval) { UNUSED_ARGS; return eval(argv[0], NIL, NIL); }
@@ -447,7 +445,7 @@ PRIM(p_make_code) {
   long n = list_length(argv[4]);
   if (n < 0) type_error("LIST", argv[4]);
   Obj bytes = make_string(NULL, (size_t)n * 4);
-  int32_t *ip = (int32_t *)STR_DATA(bytes);
+  int32_t *ip = (int32_t *)NSTR_DATA(bytes);
   long i = 0;
   for (Obj l = argv[4]; CONSP(l); l = CDR(l)) ip[i++] = (int32_t)need_fix(CAR(l));
   Obj c = make_obj(T_CODE, C_SLOTS);
@@ -462,9 +460,9 @@ PRIM(p_code_parts) {
   if (IS_TYPE(c, T_CLOSURE)) c = SLOT(c, 0);
   if (!IS_TYPE(c, T_CODE)) type_error("CODE", c);
   Obj bytes = SLOT(c, C_INSTRS);
-  size_t n = STR_LEN(bytes) / 4;
+  size_t n = NSTR_LEN(bytes) / 4;
   Obj il = NIL;
-  int32_t *ip = (int32_t *)STR_DATA(bytes);
+  int32_t *ip = (int32_t *)NSTR_DATA(bytes);
   for (size_t i = n; i > 0; i--) il = cons(FIX(ip[i - 1]), il);
   return cons(SLOT(c, C_NAME), cons(SLOT(c, C_NREQ), cons(SLOT(c, C_NOPT), cons(SLOT(c, C_REST),
          cons(il, cons(SLOT(c, C_CONSTS), cons(SLOT(c, C_ARGLIST), NIL)))))));
@@ -540,7 +538,7 @@ PRIM(p_struct_typep) { UNUSED_ARGS; return BOOL(struct_typep(argv[0], argv[1]));
 PRIM(p_struct_ref_typed) {
   /* (%struct-ref-typed obj index type-name) */
   UNUSED_ARGS;
-  if (!struct_typep(argv[0], argv[2])) type_error(STR_DATA(print_to_string(argv[2], 1, 0)), argv[0]);
+  if (!struct_typep(argv[0], argv[2])) type_error(STR_C(print_to_string(argv[2], 1, 0)), argv[0]);
   return SLOT(argv[0], UNFIX(argv[1]));
 }
 PRIM(p_copy_struct) {
@@ -555,7 +553,7 @@ PRIM(p_copy_struct) {
 PRIM(p_struct_set_typed) {
   /* (%struct-set-typed obj index type-name value) */
   UNUSED_ARGS;
-  if (!struct_typep(argv[0], argv[2])) type_error(STR_DATA(print_to_string(argv[2], 1, 0)), argv[0]);
+  if (!struct_typep(argv[0], argv[2])) type_error(STR_C(print_to_string(argv[2], 1, 0)), argv[0]);
   SLOT(argv[0], UNFIX(argv[1])) = argv[3]; WB(argv[0], argv[3]);
   return argv[3];
 }
@@ -598,13 +596,10 @@ PRIM(p_utf8_decode) {
   /* (%utf8-decode string index) -> (values code next-index) */
   UNUSED_ARGS;
   Obj str = need_str(argv[0]); SObj i = need_fix(argv[1]);
-  const unsigned char *p = (const unsigned char *)STR_DATA(str); SObj n = (SObj)STR_LEN(str);
+  /* strings hold characters now: the "decoded" character is simply the one at INDEX */
+  SObj n = (SObj)str_len(str);
   if (i < 0 || i >= n) lisp_error("%%UTF8-DECODE: index out of range");
-  int c = p[i], extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
-  int code = extra == 3 ? (c & 7) : extra == 2 ? (c & 15) : extra == 1 ? (c & 31) : c;
-  SObj j = i + 1;
-  for (; extra > 0 && j < n && (p[j] & 0xC0) == 0x80; extra--, j++) code = (code << 6) | (p[j] & 0x3F);
-  mv_vals[0] = FIX(code); mv_vals[1] = FIX(j); mv_count = 2;
+  mv_vals[0] = FIX(str_ref(str, (size_t)i)); mv_vals[1] = FIX(i + 1); mv_count = 2;
   return mv_vals[0];
 }
 
@@ -651,15 +646,15 @@ PRIM(p_sleep) {
   }
   return NIL;
 }
-PRIM(p_getenv) { UNUSED_ARGS; char *e = getenv(STR_DATA(need_str(argv[0]))); return e ? make_cstring(e) : NIL; }
+PRIM(p_getenv) { UNUSED_ARGS; char *e = getenv(STR_C(need_str(argv[0]))); return e ? make_cstring(e) : NIL; }
 PRIM(p_command_line) {
   UNUSED_ARGS;
   Obj l = NIL;
   for (int i = g_argc - 1; i >= 0; i--) l = cons(make_cstring(g_argv[i]), l);
   return l;
 }
-PRIM(p_save_image) { UNUSED_ARGS; return FIX(save_image(STR_DATA(need_str(argv[0])))); }
-PRIM(p_request_save) { UNUSED_ARGS; return FIX(request_save(STR_DATA(need_str(argv[0])))); }
+PRIM(p_save_image) { UNUSED_ARGS; return FIX(save_image(STR_C(need_str(argv[0])))); }
+PRIM(p_request_save) { UNUSED_ARGS; return FIX(request_save(STR_C(need_str(argv[0])))); }
 PRIM(p_save_result) { UNUSED_ARGS; int rc = save_result(); return rc == -99 ? NIL : FIX(rc); }
 PRIM(p_set_signal_hook_dummy) { UNUSED_ARGS; return NIL; }
 

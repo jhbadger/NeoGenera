@@ -237,12 +237,18 @@ PRIM(p_parse_integer) {
   /* (%parse-integer string start end radix) -> integer or NIL */
   UNUSED_ARGS;
   if (!STRINGP(argv[0])) type_error("STRING", argv[0]);
-  SObj s = need_fix(argv[1]), e = argv[2] == NIL ? (SObj)STR_LEN(argv[0]) : need_fix(argv[2]);
+  SObj s = need_fix(argv[1]), e = argv[2] == NIL ? (SObj)str_len(argv[0]) : need_fix(argv[2]);
   int radix = (int)need_fix(argv[3]);
-  const char *p = STR_DATA(argv[0]);
+  if (s < 0 || e > (SObj)str_len(argv[0]) || s > e) lisp_error("PARSE-INTEGER: bad bounds");
+  /* digits are ASCII: copy the characters as bytes (anything else becomes a non-digit) */
+  Buf tb; buf_init(&tb);
+  for (SObj i = 0; i < e; i++) { int c = i < s ? ' ' : str_ref(argv[0], (size_t)i); buf_putc(&tb, c < 128 ? c : '?'); }
+  buf_putc(&tb, 0);
+  const char *p = tb.buf;
   while (s < e && (p[s] == ' ' || p[s] == '\t' || p[s] == '\n')) s++;
   while (e > s && (p[e - 1] == ' ' || p[e - 1] == '\t' || p[e - 1] == '\n')) e--;
   Obj r = int_parse(p + s, (size_t)(e - s), radix);
+  buf_free(&tb);
   return r == UNBOUND ? NIL : r;
 }
 

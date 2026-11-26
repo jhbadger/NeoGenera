@@ -201,8 +201,8 @@ PRIM(p_term_parse) {
   UNUSED_ARGS;
   if (!STRINGP(argv[0])) type_error("STRING", argv[0]);
   ilen = 0;
-  size_t n = STR_LEN(argv[0]); if (n > sizeof ibuf) n = sizeof ibuf;
-  memcpy(ibuf, STR_DATA(argv[0]), n); ilen = n;
+  size_t n; const char *u = str_c(argv[0], &n); if (n > sizeof ibuf) n = sizeof ibuf;
+  memcpy(ibuf, u, n); ilen = n;
   Obj head = NIL, tail = NIL, ev;
   for (;;) {
     int r = parse_one(&ev);
@@ -353,7 +353,8 @@ static void send_image(long id, const unsigned char *px, long w, long h, long co
 static void need_image(Obj s, Obj w, Obj h) {
   if (!STRINGP(s)) type_error("STRING", s);
   if (!FIXP(w) || !FIXP(h) || UNFIX(w) <= 0 || UNFIX(h) <= 0) lisp_error("image size must be positive fixnums");
-  if ((long)STR_LEN(s) < UNFIX(w) * UNFIX(h) * 3) lisp_error("image pixel string too short");
+  if (!IS_TYPE(s, T_STRING)) type_error("STRING (of bytes)", s);
+  if ((long)NSTR_LEN(s) < UNFIX(w) * UNFIX(h) * 3) lisp_error("image pixel string too short");
 }
 
 PRIM(p_term_image_send) {
@@ -361,7 +362,7 @@ PRIM(p_term_image_send) {
      of COLS x ROWS cells, for Unicode placeholder cells to show */
   UNUSED_ARGS;
   need_image(argv[1], argv[2], argv[3]);
-  if (term_active) send_image((long)UNFIX(argv[0]), (const unsigned char *)STR_DATA(argv[1]), (long)UNFIX(argv[2]), (long)UNFIX(argv[3]),
+  if (term_active) send_image((long)UNFIX(argv[0]), (const unsigned char *)NSTR_DATA(argv[1]), (long)UNFIX(argv[2]), (long)UNFIX(argv[3]),
                               (long)UNFIX(argv[4]), (long)UNFIX(argv[5]), 1);
   return NIL;
 }
@@ -371,7 +372,7 @@ PRIM(p_term_image_inline) {
   UNUSED_ARGS;
   need_image(argv[0], argv[1], argv[2]);
   fflush(stdout);
-  send_image(0, (const unsigned char *)STR_DATA(argv[0]), (long)UNFIX(argv[1]), (long)UNFIX(argv[2]), (long)UNFIX(argv[3]), (long)UNFIX(argv[4]), 0);
+  send_image(0, (const unsigned char *)NSTR_DATA(argv[0]), (long)UNFIX(argv[1]), (long)UNFIX(argv[2]), (long)UNFIX(argv[3]), (long)UNFIX(argv[4]), 0);
   return NIL;
 }
 

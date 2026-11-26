@@ -128,7 +128,7 @@ table{border-collapse:collapse}td,th{border:1px solid #bbb;padding:.2em .6em;tex
       (let ((c (char-code (char s i))))
         (cond ((or (= c 92) (= c 40) (= c 41)) (write-char #\\ out) (write-char (code-char c) out))
               ((and (>= c 32) (< c 127)) (write-char (code-char c) out))
-              ((>= c 128) (write-char #\? out) (loop (when (or (>= (+ i 1) n) (/= (logand (char-code (char s (+ i 1))) #xC0) #x80)) (return)) (setq i (+ i 1))))
+              ((>= c 128) (write-char #\? out))
               (t (write-char #\Space out))))
       (setq i (+ i 1)))
     (get-output-stream-string out)))

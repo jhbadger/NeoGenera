@@ -11,10 +11,10 @@
 typedef struct { unsigned char *px; long w, h; } Img;
 
 static Img need_img(Obj s, Obj w, Obj h) {
-  if (!STRINGP(s)) type_error("STRING", s);
+  if (!IS_TYPE(s, T_STRING)) type_error("STRING (of bytes)", s);           /* pixels are a narrow string, changed in place */
   if (!FIXP(w) || !FIXP(h) || UNFIX(w) <= 0 || UNFIX(h) <= 0) lisp_error("image size must be positive fixnums");
-  if ((long)STR_LEN(s) < UNFIX(w) * UNFIX(h) * 3) lisp_error("image pixel string too short for %ldx%ld", (long)UNFIX(w), (long)UNFIX(h));
-  Img im = { (unsigned char *)STR_DATA(s), (long)UNFIX(w), (long)UNFIX(h) };
+  if ((long)NSTR_LEN(s) < UNFIX(w) * UNFIX(h) * 3) lisp_error("image pixel string too short for %ldx%ld", (long)UNFIX(w), (long)UNFIX(h));
+  Img im = { (unsigned char *)NSTR_DATA(s), (long)UNFIX(w), (long)UNFIX(h) };
   return im;
 }
 
@@ -120,11 +120,11 @@ PRIM(p_img_cell_colors) {
  * are drawn once, and changing the palette changes their colours without drawing anything again. */
 
 static unsigned char *need_indices(Obj s, Obj w, Obj h, long *pw, long *ph) {
-  if (!STRINGP(s)) type_error("STRING", s);
+  if (!IS_TYPE(s, T_STRING)) type_error("STRING (of bytes)", s);
   if (!FIXP(w) || !FIXP(h) || UNFIX(w) <= 0 || UNFIX(h) <= 0) lisp_error("image size must be positive fixnums");
-  if ((long)STR_LEN(s) < UNFIX(w) * UNFIX(h)) lisp_error("index string too short for %ldx%ld", (long)UNFIX(w), (long)UNFIX(h));
+  if ((long)NSTR_LEN(s) < UNFIX(w) * UNFIX(h)) lisp_error("index string too short for %ldx%ld", (long)UNFIX(w), (long)UNFIX(h));
   *pw = (long)UNFIX(w); *ph = (long)UNFIX(h);
-  return (unsigned char *)STR_DATA(s);
+  return (unsigned char *)NSTR_DATA(s);
 }
 
 PRIM(p_idx_fill) {

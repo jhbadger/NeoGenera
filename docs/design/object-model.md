@@ -60,7 +60,22 @@ as doubles only.
 
 ## Characters and strings
 
-Characters are immediates holding a code point up to U+10FFFF. Strings are byte vectors:
-UTF-8 text passes through reading, printing and file I/O unchanged, but `length`
-counts bytes. Proper Unicode strings are future work; meanwhile `lisp/core/63-unicode.lisp` works on the
-code points of such strings (`utf8-codes`, `char-display-width`, `unicode-upcase`, `utf8-upcase`, ...).
+Characters are immediates holding a code point up to U+10FFFF. Strings hold characters and come in
+two representations, both `STRINGP` and indistinguishable to Lisp code:
+
+* `T_STRING`, *narrow*: one byte per character, for code points up to 255 (Latin-1). Most strings are narrow.
+* `T_WSTRING`, *wide*: a `uint32_t` code point per character. A raw object for the collector.
+
+Storing a character above 255 into a narrow string (`(setf char)`, `fill`, `replace`) cannot grow it in
+place, so the narrow object is rewritten as a `T_STRBOX`: slot 0 points to a wide copy and every string
+operation goes through it (`str_resolve`). Identity is kept: `eq` still holds, and the box is never visible.
+Operations that build strings (`concatenate`, `subseq`, the printer, string output streams) produce a narrow
+string when every character fits and a wide one otherwise. `src/strings.c` holds the C interface:
+`str_len`, `str_ref`, `str_set`, `make_string_utf8`, `str_c` (UTF-8 for C, in rotating buffers), `str_equal`,
+`str_hash`, `cp_upcase`/`cp_downcase`.
+
+UTF-8 is used only at the edges: files and standard input are decoded by `stream_getc`, output is encoded by
+`stream_write_str`, and C literals and OS strings go through `make_string_utf8` and `str_c`. Symbol tables
+hash and compare characters, so a symbol's name may be any string. `lisp/core/63-unicode.lisp` adds display
+widths and case mapping beyond Latin-1; its old UTF-8 helpers (`utf8-codes`, `%utf8-decode`) remain and now
+step one character at a time.

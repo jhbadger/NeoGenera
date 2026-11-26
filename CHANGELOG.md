@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* **Weak hash tables and finalization.** `make-hash-table` takes `:weakness` (`:key`, `:value`, `:key-and-value`,
+  `:key-or-value`), and `hash-table-weakness` returns it; `:key` entries are ephemerons, so a value that refers to its
+  key does not keep the entry alive. `make-weak-pointer`, `weak-pointer-p` and `weak-pointer-value` give single weak
+  references. `finalize` calls a function after an object is collected (at the next safe point; `:dont-save` drops
+  it from saved worlds), and `cancel-finalization` and `run-pending-finalizers` manage the queue. The collector
+  supports all of these through one new weak object type, resolved after each minor and major collection.
+* **Strings hold characters.** `length`, `char`, `subseq`, `position`, `search` and the rest count code points rather
+  than UTF-8 bytes, and any character can be stored into any string. Strings are narrow (one byte per character, for
+  Latin-1) or wide (32 bits per character), chosen automatically; a narrow string that is given a wide character is
+  widened in place. Files, the terminal, `run-program` and the OS still exchange UTF-8. Symbol names may be any text,
+  and the reader upcases non-ASCII letters. Editor columns and stream positions count characters.
+  The world image format changed (`NGIMG006`); rebuild saved worlds.
 * **Demos.** `:demo` pops up a menu of animated graphics demos, each in its own window: Colour Circles (shaded circles
   animated by colour-map cycling, or rippling rings), Munching Squares, Lissajous, Bouncing Lines and Life. Space pauses,
   `N` restarts, `+`/`-` change the speed. Windows can now be animated (`window-frame-interval`, `window-animate`), and

@@ -225,7 +225,10 @@
 
 ;;; ---- positions and motion ----------------------------------------------------------------------------------
 
-(defun cont-byte-p (line i) (and (< i (length line)) (= (logand (char-code (char line i)) #xC0) #x80)))
+(defun cont-byte-p (line i)
+  "Strings hold characters, not UTF-8 bytes: nothing is a continuation byte.  (Kept for old callers.)"
+  (declare (ignore line i))
+  nil)
 
 (defun %zero-width-at-p (line i)
   (and (< i (length line)) (>= (char-code (char line i)) #xC0)

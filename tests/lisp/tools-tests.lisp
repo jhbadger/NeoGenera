@@ -57,11 +57,11 @@ world" (buffer-string b))
     (buf-goto b 0 6) (buf-move-vertically b 1) (is-equal 5 (point-col b))                ; clipped to line length
     (buf-move-vertically b -1) (is-equal 6 (point-col b))                                ; goal column remembered
     (is-equal 8 (display-col (format nil "~Cx" #\Tab) 1))
-    ;; UTF-8: one character is several bytes but moves as one
+    ;; columns count characters, not bytes
     (let ((u (make-buffer "u" (%string-concat "a" (%utf8-encode 955) "b"))))
-      (buf-forward-char u) (buf-forward-char u) (is-equal 3 (point-col u))
+      (buf-forward-char u) (buf-forward-char u) (is-equal 2 (point-col u))
       (buf-backward-char u) (is-equal 1 (point-col u))
-      (is-equal 3 (display-col (buf-line u 0) 4)))
+      (is-equal 3 (display-col (buf-line u 0) 3)))
     (is-equal '(0 . 4) (buf-pos-of-offset b 4))
     (is-equal '(1 . 2) (buf-pos-of-offset b 10))
     (is-equal 10 (buf-offset b 1 2))))

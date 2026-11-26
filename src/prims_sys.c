@@ -18,7 +18,7 @@ static Obj need_str(Obj o) { if (!STRINGP(o)) type_error("STRING", o); return o;
 PRIM(p_directory) {
   /* (%directory path) -> list of (name type size mtime), type :FILE :DIRECTORY :OTHER; NIL if unreadable */
   UNUSED_ARGS;
-  const char *path = STR_DATA(need_str(argv[0]));
+  const char *path = STR_C(need_str(argv[0]));
   DIR *d = opendir(path);
   if (!d) return NIL;
   Obj head = NIL, tail = NIL;
@@ -41,36 +41,38 @@ PRIM(p_directory) {
 PRIM(p_file_attrs) {
   UNUSED_ARGS;
   struct stat st;
-  if (stat(STR_DATA(need_str(argv[0])), &st) != 0) return NIL;
+  if (stat(STR_C(need_str(argv[0])), &st) != 0) return NIL;
   return list3(intern_kw(S_ISDIR(st.st_mode) ? "DIRECTORY" : "FILE"), FIX((SObj)st.st_size), FIX((SObj)st.st_mtime));
 }
-PRIM(p_rename_file) { UNUSED_ARGS; return BOOL(rename(STR_DATA(need_str(argv[0])), STR_DATA(need_str(argv[1]))) == 0); }
-PRIM(p_make_directory) { UNUSED_ARGS; return BOOL(mkdir(STR_DATA(need_str(argv[0])), 0777) == 0); }
+PRIM(p_rename_file) { UNUSED_ARGS; return BOOL(rename(STR_C(need_str(argv[0])), STR_C(need_str(argv[1]))) == 0); }
+PRIM(p_make_directory) { UNUSED_ARGS; return BOOL(mkdir(STR_C(need_str(argv[0])), 0777) == 0); }
 PRIM(p_getcwd) { UNUSED_ARGS; char b[4096]; return getcwd(b, sizeof b) ? make_cstring(b) : NIL; }
+
+static void free_args(char **av) { for (int k = 0; av[k]; k++) free(av[k]); free(av); }
 
 PRIM(p_run_program) {
   /* (%run-program program args [stdin-string]) -> (values output exit-status).  No shell: execvp. */
-  const char *prog = STR_DATA(need_str(argv[0]));
+  char *prog = strdup(STR_C(need_str(argv[0])));
   int n = 0; for (Obj l = argv[1]; CONSP(l); l = CDR(l)) n++;
   char **av = malloc((size_t)(n + 2) * sizeof(char *));
   av[0] = (char *)prog; int i = 1;
-  for (Obj l = argv[1]; CONSP(l); l = CDR(l)) av[i++] = (char *)STR_DATA(need_str(CAR(l)));
+  for (Obj l = argv[1]; CONSP(l); l = CDR(l)) av[i++] = strdup(STR_C(need_str(CAR(l))));     /* (freed with AV) */
   av[i] = NULL;
-  size_t ilen = (argc > 2 && STRINGP(argv[2])) ? STR_LEN(argv[2]) : 0;
+  size_t ilen = 0; const char *itext = (argc > 2 && STRINGP(argv[2])) ? str_c(argv[2], &ilen) : NULL;
   char *input = NULL;                                /* a C copy: other processes may move the string while we wait */
-  if (ilen) { input = malloc(ilen); if (!input) { free(av); lisp_error("RUN-PROGRAM: out of memory"); } memcpy(input, STR_DATA(argv[2]), ilen); }
+  if (ilen) { input = malloc(ilen); if (!input) { free_args(av); lisp_error("RUN-PROGRAM: out of memory"); } memcpy(input, itext, ilen); }
   int out[2], in[2];
-  if (pipe(out) != 0 || pipe(in) != 0) { free(av); free(input); lisp_error("RUN-PROGRAM: pipe failed"); }
+  if (pipe(out) != 0 || pipe(in) != 0) { free_args(av); free(input); lisp_error("RUN-PROGRAM: pipe failed"); }
   fflush(stdout); fflush(stderr);
   pid_t pid = fork();
-  if (pid < 0) { free(av); free(input); lisp_error("RUN-PROGRAM: fork failed"); }
+  if (pid < 0) { free_args(av); free(input); lisp_error("RUN-PROGRAM: fork failed"); }
   if (pid == 0) {
     dup2(in[0], 0); dup2(out[1], 1); dup2(out[1], 2);
     close(in[0]); close(in[1]); close(out[0]); close(out[1]);
     execvp(prog, av);
     _exit(127);
   }
-  free(av);
+  free_args(av);
   close(in[0]); close(out[1]);
   int tok = proc_blocking_begin();                   /* no Lisp objects are used until proc_blocking_end */
   /* Feed stdin and drain stdout at the same time (poll), so a child that writes a lot before reading
@@ -105,7 +107,7 @@ PRIM(p_run_program) {
   int status = 0; waitpid(pid, &status, 0);
   proc_blocking_end(tok);
   free(input);
-  Obj s = make_string(b.buf ? b.buf : "", b.len);
+  Obj s = make_string_utf8(b.buf ? b.buf : "", b.len);
   buf_free(&b);
   mv_vals[0] = s; mv_vals[1] = FIX(WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0));
   mv_count = 2;

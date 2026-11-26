@@ -17,8 +17,9 @@ NeoGenera implements a large subset of Common Lisp. This chapter lists what is t
 
 ## Strings and characters
 
-Strings are byte vectors: UTF-8 text passes through reading, printing and files unchanged, but
-[length](fn:length) counts bytes. Characters are code points up to U+10FFFF.
+Strings hold characters, which are code points up to U+10FFFF: [length](fn:length), [char](fn:char)
+and [subseq](fn:subseq) count characters, and `(setf (char s i) #\λ)` works on any string. Files, the
+terminal and the operating system exchange UTF-8, which is decoded on input and encoded on output.
 
 ## Arrays
 
@@ -31,7 +32,14 @@ vector; vectors can have a fill pointer and be adjustable.
 
 The sequence functions work on lists, vectors and strings: [remove](fn:remove), [find](fn:find),
 [position](fn:position), [subseq](fn:subseq), [concatenate](fn:concatenate), [coerce](fn:coerce),
-[map](fn:map). [make-hash-table](fn:make-hash-table) supports `eq`, `eql`, `equal` and `equalp` tests.
+[map](fn:map). [make-hash-table](fn:make-hash-table) supports `eq`, `eql`, `equal` and `equalp` tests, and
+`:weakness` (`:key`, `:value`, `:key-and-value` or `:key-or-value`) for tables whose entries the garbage collector
+may remove: a `:key` table, for example, forgets an entry once nothing else refers to its key.
+
+[make-weak-pointer](fn:make-weak-pointer) makes a reference that does not keep its object alive;
+[weak-pointer-value](fn:weak-pointer-value) returns the object, or NIL and NIL once it is collected.
+`(finalize object function)` calls `function` (with no arguments) after `object` has been collected; the function
+must not itself refer to the object. [cancel-finalization](fn:cancel-finalization) removes it.
 
 ## Control and binding
 

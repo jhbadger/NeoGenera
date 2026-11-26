@@ -49,7 +49,7 @@ typedef intptr_t SObj;
 /* ---- heap objects ----------------------------------------------------- */
 enum {
   T_SYMBOL = 1, T_STRING, T_VECTOR, T_FLONUM, T_EVALFN, T_CLOSURE, T_CODE,
-  T_PRIM, T_STREAM, T_PACKAGE, T_STRUCT, T_ADVEC, T_BIGNUM, T_RATIO, T_COMPLEX, T_MDARRAY
+  T_PRIM, T_STREAM, T_PACKAGE, T_STRUCT, T_ADVEC, T_BIGNUM, T_RATIO, T_COMPLEX, T_MDARRAY, T_WSTRING, T_STRBOX, T_WEAK
 };
 
 #define HDR(n, t)      (((Obj)(n) << 16) | ((Obj)(t) << 8) | TAG_HDR)
@@ -69,7 +69,7 @@ extern Obj NIL;   /* the symbol NIL (statically allocated, never moves) */
 extern Obj TT;    /* the symbol T */
 
 #define SYMBOLP(o)  IS_TYPE(o, T_SYMBOL)
-#define STRINGP(o)  IS_TYPE(o, T_STRING)
+#define STRINGP(o)  (OBJP(o) && (OBJ_TYPE(o) == T_STRING || OBJ_TYPE(o) == T_WSTRING || OBJ_TYPE(o) == T_STRBOX))
 #define VECTORP(o)  IS_TYPE(o, T_VECTOR)
 #define FLONUMP(o)  IS_TYPE(o, T_FLONUM)
 #define LISTP(o)    ((o) == NIL || CONSP(o))
@@ -88,8 +88,13 @@ enum { S_NAME, S_VALUE, S_FUNC, S_PLIST, S_PKG, S_FLAGS, SYM_SLOTS };
 #define SYM_SFID(s)   ((int)(UNFIX(SYM_FLAGS(s)) >> 8))
 
 /* strings: payload[0] = byte length (raw), bytes follow, NUL terminated */
-#define STR_LEN(o)   ((size_t)SLOT(o, 0))
-#define STR_DATA(o)  ((char *)&SLOT(o, 1))
+/* strings (src/strings.c): narrow (T_STRING, a byte per character), wide (T_WSTRING, 32 bits per character), or a
+   box (T_STRBOX) around a wide string.  NSTR_ and WSTR_ access the first two directly; anything that may hold any
+   string uses str_len, str_ref, str_set, or str_c for its UTF-8 text. */
+#define NSTR_LEN(o)  ((size_t)SLOT(o, 0))
+#define NSTR_DATA(o) ((char *)&SLOT(o, 1))
+#define WSTR_LEN(o)  ((size_t)SLOT(o, 0))
+#define WSTR_DATA(o) ((uint32_t *)&SLOT(o, 1))
 
 /* evaluator closures */
 enum { EF_NAME, EF_LAMBDA, EF_BODY, EF_VARS, EF_FUNS, EF_SIMPLE, EF_SLOTS };
@@ -113,7 +118,27 @@ void  init_memory(void);
 Obj   cons(Obj a, Obj d);
 Obj   make_obj(int type, size_t nslots);        /* slots initialised to NIL */
 Obj   make_raw(int type, size_t nwords);        /* zeroed raw payload       */
-Obj   make_string(const char *s, size_t len);
+Obj   make_string(const char *s, size_t len);   /* a narrow string of these bytes (Latin-1 characters) */
+Obj   make_string_utf8(const char *s, size_t len); /* the characters of UTF-8 text (narrow when it can be) */
+Obj   make_string_codes(const uint32_t *codes, size_t n);
+Obj   make_wstring(size_t n);
+Obj   str_resolve(Obj o);
+size_t str_len(Obj o);
+int   str_ref(Obj o, size_t i);
+void  str_set(Obj o, size_t i, int c);          /* a wide character makes a narrow string a box around a wide copy */
+int   str_wide_p(Obj o);
+Obj   substring(Obj o, size_t start, size_t end);
+Obj   str_narrow(Obj o);                        /* a narrow version of O, or NIL */
+Obj   need_narrow(Obj o);                       /* the same, or an error */
+const char *str_c(Obj o, size_t *len);          /* UTF-8 text, NUL-terminated (see strings.c for its lifetime) */
+#define STR_C(o) str_c((o), NULL)
+int   str_equal(Obj a, Obj b);
+int   str_equal_c(Obj a, const char *s, size_t n);
+uint64_t str_hash(Obj o);
+uint64_t str_hash_c(const char *s, size_t n);
+int   utf8_decode(const unsigned char *s, size_t n, size_t *i);
+int   cp_upcase(int c);
+int   cp_downcase(int c);
 Obj   make_cstring(const char *s);
 Obj   make_flonum(double d);
 Obj   make_vector(size_t n, Obj init);
@@ -125,6 +150,21 @@ void  gc_full(void);                            /* a full (major) collection */
 void  gc_check(void);                           /* safe point: a minor collection when the nursery is full */
 extern int    gc_pending, gc_stress, gc_verbose, gc_verify;
 extern size_t gc_count, gc_minor_count, gc_major_count;
+/* Weak objects (T_WEAK): slots (mode key value).  The collector does not trace KEY and VALUE; after each collection
+   it decides, by MODE, which to keep (an ephemeron keeps VALUE only while KEY is otherwise reachable) and breaks the
+   rest: a broken object's mode becomes WK_BROKEN (or WK_FIRED for a finalizer) and its key NIL. */
+enum { WK_MODE, WK_KEY, WK_VALUE, WK_SLOTS };
+enum {
+  WKM_POINTER,      /* a weak pointer to KEY (VALUE unused) */
+  WKM_KEY,          /* VALUE is held while KEY lives */
+  WKM_VALUE,        /* KEY is held while VALUE lives */
+  WKM_AND,          /* broken when either dies */
+  WKM_OR,           /* both held while either lives */
+  WKM_FINAL,        /* KEY weak, VALUE (the finalizer) strong; when KEY dies it becomes WKM_FIRED */
+  WKM_FIRED,
+  WKM_BROKEN
+};
+extern volatile int finalizers_pending;       /* a finalizer fired at the last collection */
 
 /* ---- the write barrier (generational GC, docs/design/gc.md) ----
  * Storing a pointer to a nursery object into an object outside the nursery must record that object, so the next
@@ -350,6 +390,7 @@ extern Obj stream_stdin, stream_stdout, stream_stderr;
 Obj   make_stream(int kind, int file);
 Obj   make_string_in_stream(Obj str);
 Obj   make_string_out_stream(void);
+void  stream_write_str(Obj s, Obj str, size_t start, size_t end);
 Obj   stream_output_string(Obj s);
 Obj   designate_out(Obj s);
 Obj   designate_in(Obj s);
@@ -373,6 +414,8 @@ Obj   read_from_cstring(const char *s);
 void  buf_init(Buf *b);
 void  buf_free(Buf *b);
 void  buf_put(Buf *b, const char *s, size_t n);
+void  buf_put_cp(Buf *b, int c);                  /* a code point, as UTF-8 */
+void  buf_put_str(Buf *b, Obj s);                 /* a string's characters, as UTF-8 */
 void  buf_puts(Buf *b, const char *s);
 void  buf_putc(Buf *b, int c);
 void  print_to_buf(Buf *b, Obj o, int escape, int readable);

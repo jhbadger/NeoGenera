@@ -8,7 +8,7 @@
 #include <limits.h>
 
 static SObj need_fix(Obj o) { if (!FIXP(o)) type_error("FIXNUM", o); return UNFIX(o); }
-static Obj need_str(Obj o) { if (!STRINGP(o)) type_error("STRING", o); return o; }
+static Obj need_str(Obj o) { return need_narrow(o); }      /* sequences are ASCII: a narrow string */
 
 #define NEG (-(1 << 28))
 
@@ -19,7 +19,7 @@ PRIM(p_dp_align) {
   Obj a = need_str(argv[0]), b = need_str(argv[1]), tab = argv[2];
   int open = (int)need_fix(argv[3]), ext = (int)need_fix(argv[4]), mode = (int)need_fix(argv[5]);
   long band = (long)need_fix(argv[6]);
-  size_t n = STR_LEN(a), m = STR_LEN(b);
+  size_t n = NSTR_LEN(a), m = NSTR_LEN(b);
   if (!VECTORP(tab) || OBJ_NWORDS(tab) < 65536) lisp_error("DP-ALIGN: bad score table");
   if ((n + 1) * (m + 1) > ((size_t)1 << 31)) lisp_error("DP-ALIGN: sequences too long for a full matrix (use a band)");
   int *sc = malloc(65536 * sizeof(int));
@@ -28,7 +28,7 @@ PRIM(p_dp_align) {
   unsigned char *tr = calloc((n + 1) * w, 1);
   int *buf = malloc(6 * w * sizeof(int));
   int *Mp = buf, *Xp = buf + w, *Yp = buf + 2 * w, *Mc = buf + 3 * w, *Xc = buf + 4 * w, *Yc = buf + 5 * w;
-  const unsigned char *A = (const unsigned char *)STR_DATA(a), *B = (const unsigned char *)STR_DATA(b);
+  const unsigned char *A = (const unsigned char *)NSTR_DATA(a), *B = (const unsigned char *)NSTR_DATA(b);
   long dlo = 0, dhi = 0;
   if (band >= 0) { dlo = (m > n ? 0 : (long)m - (long)n) - band; dhi = (m > n ? (long)m - (long)n : 0) + band; }
   /* row 0 */
@@ -103,10 +103,10 @@ static int cmp_suffix(const void *x, const void *y) {
 PRIM(p_suffix_array) {
   UNUSED_ARGS;
   Obj s = need_str(argv[0]);
-  size_t n = STR_LEN(s);
+  size_t n = NSTR_LEN(s);
   if (n > ((size_t)1 << 30)) lisp_error("SUFFIX-ARRAY: string too long");
   int *sa = malloc((n ? n : 1) * sizeof(int)), *rank = malloc((n ? n : 1) * sizeof(int)), *tmp = malloc((n ? n : 1) * sizeof(int));
-  for (size_t i = 0; i < n; i++) { sa[i] = (int)i; rank[i] = (unsigned char)STR_DATA(s)[i]; }
+  for (size_t i = 0; i < n; i++) { sa[i] = (int)i; rank[i] = (unsigned char)NSTR_DATA(s)[i]; }
   g_rank = rank; g_tmp = tmp; g_n = n;
   for (g_k = 1;; g_k <<= 1) {
     qsort(sa, n, sizeof(int), cmp_suffix);
@@ -130,23 +130,23 @@ PRIM(p_suffix_array) {
 PRIM(p_string_translate) {
   UNUSED_ARGS;
   Obj s = need_str(argv[0]), from = need_str(argv[1]), to = need_str(argv[2]);
-  size_t nf = STR_LEN(from);
-  if (STR_LEN(to) < nf) lisp_error("STRING-TRANSLATE: TO is shorter than FROM");
+  size_t nf = NSTR_LEN(from);
+  if (NSTR_LEN(to) < nf) lisp_error("STRING-TRANSLATE: TO is shorter than FROM");
   unsigned char map[256];
   for (int i = 0; i < 256; i++) map[i] = (unsigned char)i;
-  for (size_t i = nf; i > 0; i--) map[(unsigned char)STR_DATA(from)[i - 1]] = (unsigned char)STR_DATA(to)[i - 1];
-  size_t n = STR_LEN(s);
+  for (size_t i = nf; i > 0; i--) map[(unsigned char)NSTR_DATA(from)[i - 1]] = (unsigned char)NSTR_DATA(to)[i - 1];
+  size_t n = NSTR_LEN(s);
   Obj r = make_string(NULL, n);
-  for (size_t i = 0; i < n; i++) STR_DATA(r)[i] = (char)map[(unsigned char)STR_DATA(s)[i]];
+  for (size_t i = 0; i < n; i++) NSTR_DATA(r)[i] = (char)map[(unsigned char)NSTR_DATA(s)[i]];
   return r;
 }
 
 PRIM(p_string_reverse) {
   UNUSED_ARGS;
   Obj s = need_str(argv[0]);
-  size_t n = STR_LEN(s);
+  size_t n = NSTR_LEN(s);
   Obj r = make_string(NULL, n);
-  for (size_t i = 0; i < n; i++) STR_DATA(r)[n - 1 - i] = STR_DATA(s)[i];
+  for (size_t i = 0; i < n; i++) NSTR_DATA(r)[n - 1 - i] = NSTR_DATA(s)[i];
   return r;
 }
 
@@ -155,8 +155,8 @@ PRIM(p_string_all_in) {
   UNUSED_ARGS;
   Obj s = need_str(argv[0]), set = need_str(argv[1]);
   unsigned char in[256] = {0};
-  for (size_t i = 0; i < STR_LEN(set); i++) in[(unsigned char)STR_DATA(set)[i]] = 1;
-  for (size_t i = 0; i < STR_LEN(s); i++) if (!in[(unsigned char)STR_DATA(s)[i]]) return NIL;
+  for (size_t i = 0; i < NSTR_LEN(set); i++) in[(unsigned char)NSTR_DATA(set)[i]] = 1;
+  for (size_t i = 0; i < NSTR_LEN(s); i++) if (!in[(unsigned char)NSTR_DATA(s)[i]]) return NIL;
   return TT;
 }
 
@@ -165,11 +165,11 @@ PRIM(p_count_chars) {
   UNUSED_ARGS;
   Obj s = need_str(argv[0]), set = need_str(argv[1]);
   SObj a = need_fix(argv[2]), b = need_fix(argv[3]);
-  if (a < 0 || b < a || (size_t)b > STR_LEN(s)) lisp_error("COUNT-CHARS: bad range");
+  if (a < 0 || b < a || (size_t)b > NSTR_LEN(s)) lisp_error("COUNT-CHARS: bad range");
   unsigned char in[256] = {0};
-  for (size_t i = 0; i < STR_LEN(set); i++) in[(unsigned char)STR_DATA(set)[i]] = 1;
+  for (size_t i = 0; i < NSTR_LEN(set); i++) in[(unsigned char)NSTR_DATA(set)[i]] = 1;
   SObj n = 0;
-  for (SObj i = a; i < b; i++) n += in[(unsigned char)STR_DATA(s)[i]];
+  for (SObj i = a; i < b; i++) n += in[(unsigned char)NSTR_DATA(s)[i]];
   return FIX(n);
 }
 
@@ -187,16 +187,16 @@ PRIM(p_translate_codons) {
   UNUSED_ARGS;
   Obj s = need_str(argv[0]), am = need_str(argv[2]);
   SObj frame = need_fix(argv[1]); int to_stop = argv[3] != NIL;
-  if (STR_LEN(am) != 64 || frame < 0) lisp_error("TRANSLATE-CODONS: bad arguments");
-  size_t n = STR_LEN(s), count = n > (size_t)frame + 2 ? (n - (size_t)frame) / 3 : 0, len = 0;
+  if (NSTR_LEN(am) != 64 || frame < 0) lisp_error("TRANSLATE-CODONS: bad arguments");
+  size_t n = NSTR_LEN(s), count = n > (size_t)frame + 2 ? (n - (size_t)frame) / 3 : 0, len = 0;
   Obj r = make_string(NULL, count);
   for (size_t k = 0; k < count; k++) {
-    int ci = codon_at(STR_DATA(s), (size_t)frame + 3 * k);
-    char aa = ci < 0 ? 'X' : STR_DATA(am)[ci];
+    int ci = codon_at(NSTR_DATA(s), (size_t)frame + 3 * k);
+    char aa = ci < 0 ? 'X' : NSTR_DATA(am)[ci];
     if (to_stop && aa == '*') break;
-    STR_DATA(r)[len++] = aa;
+    NSTR_DATA(r)[len++] = aa;
   }
-  SLOT(r, 0) = (Obj)len; STR_DATA(r)[len] = 0;
+  SLOT(r, 0) = (Obj)len; NSTR_DATA(r)[len] = 0;
   return r;
 }
 
@@ -206,15 +206,15 @@ PRIM(p_orf_scan) {
   UNUSED_ARGS;
   Obj s = need_str(argv[0]), am = need_str(argv[2]), st = need_str(argv[3]);
   SObj frame = need_fix(argv[1]), minlen = need_fix(argv[4]);
-  if (STR_LEN(am) != 64 || STR_LEN(st) != 64 || frame < 0) lisp_error("ORF-SCAN: bad arguments");
-  size_t n = STR_LEN(s);
+  if (NSTR_LEN(am) != 64 || NSTR_LEN(st) != 64 || frame < 0) lisp_error("ORF-SCAN: bad arguments");
+  size_t n = NSTR_LEN(s);
   Obj head = NIL, tail = NIL;
   long open = -1;
   for (size_t i = (size_t)frame; i + 3 <= n; i += 3) {
-    int ci = codon_at(STR_DATA(s), i);
+    int ci = codon_at(NSTR_DATA(s), i);
     if (ci < 0) continue;
-    if (open < 0 && STR_DATA(st)[ci] == '1') open = (long)i;
-    else if (open >= 0 && STR_DATA(am)[ci] == '*') {
+    if (open < 0 && NSTR_DATA(st)[ci] == '1') open = (long)i;
+    else if (open >= 0 && NSTR_DATA(am)[ci] == '*') {
       if ((long)((i - (size_t)open) / 3) >= minlen) {
         Obj cell = cons(cons(FIX(open), FIX((SObj)i)), NIL);
         if (head == NIL) head = cell; else CDR(tail) = cell;

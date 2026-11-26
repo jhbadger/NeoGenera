@@ -197,10 +197,8 @@
     (setf (lw-cursor-pos w) from)))
 
 (defun %char-start (in pos)
-  "Move POS back by one character (skipping UTF-8 continuation bytes)."
-  (let ((p (max 0 (- pos 1))))
-    (loop (when (or (<= p 0) (/= (logand (char-code (char in p)) #xC0) #x80)) (return)) (setq p (- p 1)))
-    p))
+  "Move POS back by one character (and the combining marks after it)."
+  (char-start in pos))
 (defun %char-end (in pos) (utf8-prefix-end in pos 1))
 
 (defun %word-back (in pos)

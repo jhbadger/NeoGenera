@@ -253,7 +253,7 @@ static Obj bind_ll(Obj ll, Obj args, Obj vars, Obj funs, int destructure, Obj wh
     }
     switch (mode) {
     case REQ:
-      if (!CONSP(args)) lisp_error("Too few arguments in call (lambda list %s)", STR_DATA(print_to_string(ll, 1, 0)));
+      if (!CONSP(args)) lisp_error("Too few arguments in call (lambda list %s)", STR_C(print_to_string(ll, 1, 0)));
       val = CAR(args); args = CDR(args);
       if (CONSP(item) && destructure) vars = bind_ll(item, val, vars, funs, 1, NIL, body);
       else vars = bind_var(item, val, vars, body);
@@ -278,7 +278,7 @@ static Obj bind_ll(Obj ll, Obj args, Obj vars, Obj funs, int destructure, Obj wh
         if (CONSP(spec)) { def = CAR(spec); if (CONSP(CDR(spec))) svar = CAR(CDR(spec)); }
         if (CONSP(var)) { kw = CAR(var); var = CAR(CDR(var)); }
       }
-      if (kw == NIL) kw = intern(STR_DATA(SYM_NAME(var)), PKG_KEYWORD);
+      if (kw == NIL) kw = intern(STR_C(SYM_NAME(var)), PKG_KEYWORD);
       if (nknown < 48) { known[nknown] = kw; PROTECT(known[nknown]); nknown++; }
       int supplied = 0;
       for (Obj q = kargs; CONSP(q); q = CDR(CDR(q))) if (CAR(q) == kw) { val = CAR(CDR(q)); supplied = 1; break; }
@@ -307,11 +307,11 @@ static Obj bind_ll(Obj ll, Obj args, Obj vars, Obj funs, int destructure, Obj wh
         int ok = 0;
         for (int i = 0; i < nknown; i++) if (known[i] == CAR(q)) { ok = 1; break; }
         if (CAR(q) == intern_kw("ALLOW-OTHER-KEYS")) ok = 1;
-        if (!ok) lisp_error("Unknown &KEY argument: %s", STR_DATA(print_to_string(CAR(q), 1, 0)));
+        if (!ok) lisp_error("Unknown &KEY argument: %s", STR_C(print_to_string(CAR(q), 1, 0)));
       }
   }
   if (!saw_rest && !saw_key && args != NIL)
-    lisp_error("Too many arguments in call (lambda list %s)", STR_DATA(print_to_string(ll, 1, 0)));
+    lisp_error("Too many arguments in call (lambda list %s)", STR_C(print_to_string(ll, 1, 0)));
   Obj result = vars;
   nroots = saved;
   return result;
@@ -321,8 +321,8 @@ static Obj bind_ll(Obj ll, Obj args, Obj vars, Obj funs, int destructure, Obj wh
 Obj resolve_function(Obj f) {
   if (SYMBOLP(f) && f != NIL) {
     Obj fn = SYM_FUNC(f);
-    if (fn == NIL) lisp_error("The function %s is undefined", STR_DATA(SYM_NAME(f)));
-    if (CONSP(fn)) lisp_error("%s is a macro, not a function", STR_DATA(SYM_NAME(f)));
+    if (fn == NIL) lisp_error("The function %s is undefined", STR_C(SYM_NAME(f)));
+    if (CONSP(fn)) lisp_error("%s is a macro, not a function", STR_C(SYM_NAME(f)));
     return fn;
   }
   return f;
@@ -341,7 +341,7 @@ static Obj apply_evalfn(int n) {
     vars = bind_ll(SLOT(fn, EF_LAMBDA), args, vars, funs, 1, form, body);
   } else if (simple >= 0) {
     if (n != simple) lisp_error("Wrong number of arguments to %s: expected %ld, got %d",
-                                SLOT(fn, EF_NAME) == NIL ? "#<anonymous function>" : STR_DATA(print_to_string(SLOT(fn, EF_NAME), 1, 0)), simple, n);
+                                SLOT(fn, EF_NAME) == NIL ? "#<anonymous function>" : STR_C(print_to_string(SLOT(fn, EF_NAME), 1, 0)), simple, n);
     Obj ll = SLOT(fn, EF_LAMBDA);
     for (int i = 0; i < n; i++, ll = CDR(ll)) vars = bind_var(CAR(ll), vstack[base + 1 + i], vars, body);
   } else {
@@ -615,7 +615,7 @@ static Obj sf_progv(Obj form, Obj vars, Obj funs) {
 static void assign_var(Obj sym, Obj val, Obj vars) {
   Obj cell = lookup_var_cell(sym, vars);
   if (cell != NIL) { CDR(cell) = val; WB(cell, val); return; }
-  if (UNFIX(SYM_FLAGS(sym)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_DATA(SYM_NAME(sym)));
+  if (UNFIX(SYM_FLAGS(sym)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_C(SYM_NAME(sym)));
   SYM_VALUE(sym) = val; WB(sym, val);
 }
 
@@ -660,8 +660,8 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
     Obj sym = fn_symbol(arg);
     Obj cell = lookup_fun_cell(sym, funs);
     Obj f = (cell != NIL) ? CDR(cell) : SYM_FUNC(sym);
-    if (f == NIL) lisp_error("The function %s is undefined", STR_DATA(SYM_NAME(sym)));
-    if (CONSP(f)) lisp_error("%s is a macro, not a function", STR_DATA(SYM_NAME(sym)));
+    if (f == NIL) lisp_error("The function %s is undefined", STR_C(SYM_NAME(sym)));
+    if (CONSP(f)) lisp_error("%s is a macro, not a function", STR_C(SYM_NAME(sym)));
     return f;
   }
   case SFID_LAMBDA:
@@ -676,22 +676,22 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
     Obj name = CAR(CDR(form));
     PROTECT(name);
     Obj entry = lookup_tagged(Q_block, name, funs);
-    if (entry == NIL) lisp_error("RETURN-FROM: no block named %s", STR_DATA(print_to_string(name, 1, 0)));
+    if (entry == NIL) lisp_error("RETURN-FROM: no block named %s", STR_C(print_to_string(name, 1, 0)));
     Obj token = CDR(entry);
     PROTECT(token);
     Obj v = CONSP(CDR(CDR(form))) ? eval(CAR(CDR(CDR(form))), vars, funs) : (mv_count = 1, NIL);
     Frame *t = find_frame(F_BLOCK, token);
-    if (!t) lisp_error("RETURN-FROM: the block %s is no longer active", STR_DATA(print_to_string(name, 1, 0)));
+    if (!t) lisp_error("RETURN-FROM: the block %s is no longer active", STR_C(print_to_string(name, 1, 0)));
     throw_values(t, v);
   }
   case SFID_TAGBODY: return sf_tagbody(form, vars, funs);
   case SFID_GO: {
     Obj tag = CAR(CDR(form));
     Obj entry = lookup_tagged(Q_go, tag, funs);
-    if (entry == NIL) lisp_error("GO: no tag named %s", STR_DATA(print_to_string(tag, 1, 0)));
+    if (entry == NIL) lisp_error("GO: no tag named %s", STR_C(print_to_string(tag, 1, 0)));
     Obj token = CAR(CDR(entry)), rest = CDR(CDR(entry));
     Frame *t = find_frame(F_TAGBODY, token);
-    if (!t) lisp_error("GO: the tagbody for %s is no longer active", STR_DATA(print_to_string(tag, 1, 0)));
+    if (!t) lisp_error("GO: the tagbody for %s is no longer active", STR_C(print_to_string(tag, 1, 0)));
     t->mvlist = UNBOUND;
     throw_to(t, rest);
   }
@@ -749,7 +749,7 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
   case SFID_EVAL_WHEN: {
     Obj sits = CAR(CDR(form));
     for (; CONSP(sits); sits = CDR(sits))
-      if (CAR(sits) == Q_execute || (SYMBOLP(CAR(sits)) && !strcmp(STR_DATA(SYM_NAME(CAR(sits))), "EVAL")))
+      if (CAR(sits) == Q_execute || (SYMBOLP(CAR(sits)) && !strcmp(STR_C(SYM_NAME(CAR(sits))), "EVAL")))
         return eval_body(CDR(CDR(form)), vars, funs);
     mv_count = 1;
     return NIL;
@@ -811,7 +811,7 @@ Obj eval(Obj form, Obj vars, Obj funs) {
       Obj c = lookup_var_cell(form, vars);
       if (c != NIL) return CDR(c);
       Obj v = SYM_VALUE(form);
-      if (v == UNBOUND) lisp_error("The variable %s is unbound", STR_DATA(SYM_NAME(form)));
+      if (v == UNBOUND) lisp_error("The variable %s is unbound", STR_C(SYM_NAME(form)));
       return v;
     }
     return form;
@@ -827,7 +827,7 @@ Obj eval(Obj form, Obj vars, Obj funs) {
     if (sf) { r = eval_special(sf, form, vars, funs); eval_depth--; nroots = saved; return r; }
     Obj cell = lookup_fun_cell(head, funs);
     f = (cell != NIL) ? CDR(cell) : SYM_FUNC(head);
-    if (f == NIL) lisp_error("The function %s is undefined", STR_DATA(SYM_NAME(head)));
+    if (f == NIL) lisp_error("The function %s is undefined", STR_C(SYM_NAME(head)));
     if (CONSP(f) && CAR(f) == Q_macro_marker) {
       Obj exp = call2(CDR(f), form, NIL);
       CAR(form) = Q_progn;                 /* displace: memoize expansion */
@@ -838,7 +838,7 @@ Obj eval(Obj form, Obj vars, Obj funs) {
   } else if (CONSP(head) && CAR(head) == Q_lambda) {
     f = make_evalfn(NIL, CAR(CDR(head)), CDR(CDR(head)), vars, funs);
   } else {
-    lisp_error("Illegal function call: %s", STR_DATA(print_to_string(head, 1, 0)));
+    lisp_error("Illegal function call: %s", STR_C(print_to_string(head, 1, 0)));
   }
   PUSH(f);
   Obj a = CDR(form);

@@ -91,16 +91,31 @@
 (defun copy-structure (x) (%copy-struct x))
 
 ;;; ---- hash tables ------------------------------------------------------------
+;;; A bucket is a list of entries.  In an ordinary table an entry is a cons (key . value); in a weak table it is a
+;;; weak object (%MAKE-WEAK mode key value) that the collector breaks when its key or value is collected, according
+;;; to the table's weakness.  Broken entries are dropped as they are met.
 
 (defstruct (hash-table (:constructor %make-ht (test buckets)) (:predicate %hash-table-p)
                        (:conc-name %ht-) (:copier nil))
-  test (count 0) buckets)
+  test (count 0) buckets (weakness nil))
 
 (defun hash-table-p (x) (%hash-table-p x))
 
-(defun make-hash-table (&key (test 'eql) (size 16) &allow-other-keys)
-  (let ((tst (cond ((functionp test) (%function-name test)) (t test))))
-    (%make-ht tst (%make-vector (max 8 size) nil))))
+(defun %weakness-mode (weakness)
+  (case weakness
+    (:key 1) (:value 2) (:key-and-value 3) (:key-or-value 4)
+    (t (error "~S is not a hash table weakness (NIL, :KEY, :VALUE, :KEY-AND-VALUE or :KEY-OR-VALUE)" weakness))))
+
+(defun make-hash-table (&key (test 'eql) (size 16) weakness &allow-other-keys)
+  "A new hash table.  WEAKNESS, if not NIL, lets the collector remove an entry: :KEY when nothing else holds its
+key, :VALUE when nothing else holds its value, :KEY-AND-VALUE when either is unreferenced, :KEY-OR-VALUE when
+both are."
+  (let* ((tst (cond ((functionp test) (%function-name test)) (t test)))
+         (h (%make-ht tst (%make-vector (max 8 size) nil))))
+    (when weakness (%weakness-mode weakness) (setf (%ht-weakness h) weakness))
+    h))
+
+(defun hash-table-weakness (h) "The weakness of H: NIL, :KEY, :VALUE, :KEY-AND-VALUE or :KEY-OR-VALUE." (%ht-weakness h))
 
 (defun %ht-hash (h key)
   (let ((test (%ht-test h)))
@@ -110,34 +125,60 @@
 
 (defun %ht-index (h key) (mod (%ht-hash h key) (length (%ht-buckets h))))
 
+(defun %ht-key= (test a b)
+  (cond ((eq test 'eq) (eq a b)) ((eq test 'eql) (eql a b)) ((eq test 'equal) (equal a b)) (t (equalp a b))))
+
+(defun %weak-live-p (e) (< (%weak-mode e) 6))
+
+(defun %wht-prune (h idx)
+  "Drop the broken entries of bucket IDX of the weak table H; returns the bucket."
+  (let ((bucket (aref (%ht-buckets h) idx)))
+    (if (dolist (e bucket t) (unless (%weak-live-p e) (return nil)))
+        bucket
+        (let ((live (remove-if-not #'%weak-live-p bucket)))
+          (setf (%ht-count h) (- (%ht-count h) (- (length bucket) (length live))))
+          (%aset (%ht-buckets h) idx live)
+          live))))
+
 (defun %ht-find (h key)
-  (let ((test (%ht-test h)) (bucket (aref (%ht-buckets h) (%ht-index h key))))
-    (cond ((eq test 'eq) (assq key bucket))
-          ((eq test 'eql) (assql key bucket))
-          ((eq test 'equal) (%assoc-equal key bucket))
-          (t (dolist (e bucket nil) (when (equalp (car e) key) (return e)))))))
+  (let ((test (%ht-test h)))
+    (if (%ht-weakness h)
+        (dolist (e (%wht-prune h (%ht-index h key)) nil)
+          (when (%ht-key= test (%weak-key e) key) (return e)))
+        (let ((bucket (aref (%ht-buckets h) (%ht-index h key))))
+          (cond ((eq test 'eq) (assq key bucket))
+                ((eq test 'eql) (assql key bucket))
+                ((eq test 'equal) (%assoc-equal key bucket))
+                (t (dolist (e bucket nil) (when (equalp (car e) key) (return e)))))))))
 
 (defun gethash (key h &optional default)
   (let ((e (%ht-find h key)))
-    (if e (values (cdr e) t) (values default nil))))
+    (cond ((null e) (values default nil))
+          ((%ht-weakness h) (values (%weak-value e) t))
+          (t (values (cdr e) t)))))
+
+(defun %ht-entry-key (h e) (if (%ht-weakness h) (%weak-key e) (car e)))
 
 (defun %grow-ht (h)
-  (let* ((old (%ht-buckets h)) (n (* 2 (length old))) (new (%make-vector n nil)))
+  (let* ((old (%ht-buckets h)) (n (* 2 (length old))) (new (%make-vector n nil)) (weak (%ht-weakness h)) (count 0))
     (dotimes (i (length old))
       (dolist (e (aref old i))
-        (let ((idx (mod (%ht-hash h (car e)) n)))
-          (%aset new idx (cons e (aref new idx))))))
-    (setf (%ht-buckets h) new)))
+        (when (or (not weak) (%weak-live-p e))
+          (let ((idx (mod (%ht-hash h (%ht-entry-key h e)) n)))
+            (setq count (+ count 1))
+            (%aset new idx (cons e (aref new idx)))))))
+    (setf (%ht-buckets h) new (%ht-count h) count)))
 
 (defun %sethash (key h value)
-  (let ((e (%ht-find h key)))
-    (if e
-        (rplacd e value)
-        (progn
-          (when (> (%ht-count h) (* 2 (length (%ht-buckets h)))) (%grow-ht h))
-          (let ((idx (%ht-index h key)))
-            (%aset (%ht-buckets h) idx (cons (cons key value) (aref (%ht-buckets h) idx))))
-          (setf (%ht-count h) (+ 1 (%ht-count h)))))
+  (let ((e (%ht-find h key)) (weak (%ht-weakness h)))
+    (cond ((null e)
+           (when (> (%ht-count h) (* 2 (length (%ht-buckets h)))) (%grow-ht h))
+           (let ((idx (%ht-index h key)))
+             (%aset (%ht-buckets h) idx (cons (if weak (%make-weak (%weakness-mode weak) key value) (cons key value))
+                                              (aref (%ht-buckets h) idx))))
+           (setf (%ht-count h) (+ 1 (%ht-count h))))
+          (weak (%weak-set-value e value))
+          (t (rplacd e value)))
     value))
 (%def-setf 'gethash '%sethash)
 
@@ -145,24 +186,40 @@
   (let* ((idx (%ht-index h key)) (e (%ht-find h key)))
     (when e
       (%aset (%ht-buckets h) idx (remove e (aref (%ht-buckets h) idx)))
+      (when (%ht-weakness h) (%weak-break e))
       (setf (%ht-count h) (- (%ht-count h) 1))
       t)))
 (defun clrhash (h)
   (setf (%ht-buckets h) (%make-vector 8 nil))
   (setf (%ht-count h) 0)
   h)
-(defun hash-table-count (h) (%ht-count h))
+(defun hash-table-count (h)
+  (when (%ht-weakness h) (dotimes (i (length (%ht-buckets h))) (%wht-prune h i)))
+  (%ht-count h))
 (defun hash-table-test (h) (%ht-test h))
 (defun %ht-pairs (h)
-  (let ((acc nil))
+  "The entries of H as (key . value) conses: H's own entries, or for a weak table fresh conses of the live ones."
+  (let ((acc nil) (weak (%ht-weakness h)))
     (dotimes (i (length (%ht-buckets h)))
-      (dolist (e (aref (%ht-buckets h) i)) (setq acc (cons e acc))))
+      (dolist (e (if weak (%wht-prune h i) (aref (%ht-buckets h) i)))
+        (setq acc (cons (if weak (cons (%weak-key e) (%weak-value e)) e) acc))))
     (nreverse acc)))
 (defun maphash (fn h)
   (dolist (e (%ht-pairs h)) (funcall fn (car e) (cdr e)))
   nil)
 (defun hash-table-keys (h) (mapcar #'car (%ht-pairs h)))
 (defun hash-table-values (h) (mapcar #'cdr (%ht-pairs h)))
+
+;;; ---- weak pointers ------------------------------------------------------------
+
+(defun make-weak-pointer (object)
+  "A weak pointer to OBJECT: it does not keep OBJECT from being collected."
+  (%make-weak 0 object nil))
+(defun weak-pointer-p (x) "True if X is a weak pointer." (and (%weakp x) (member (%weak-mode x) '(0 7)) t))
+(defun weak-pointer-value (wp)
+  "(values object t) while the object WP points to is alive; (values nil nil) once it has been collected."
+  (unless (weak-pointer-p wp) (error 'type-error :datum wp :expected-type 'weak-pointer))
+  (if (eql (%weak-mode wp) 0) (values (%weak-key wp) t) (values nil nil)))
 
 ;;; ---- property list utilities -------------------------------------------------
 (defun remprop (sym ind)

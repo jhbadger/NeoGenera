@@ -46,6 +46,7 @@
 
 (defparameter +template-open-string+ "⊂" "The text (UTF-8) opening an editor template item.")
 (defparameter +template-close-string+ "⊃" "The text (UTF-8) closing an editor template item.")
+(defparameter +template-mark-length+ (length +template-open-string+) "The length of the template marks (characters).")
 
 (defun %pas-ident-start-p (c) (or (alpha-char-p c) (char= c #\_)))
 (defun %pas-ident-char-p (c) (or (alpha-char-p c) (digit-char-p c) (char= c #\_)))
@@ -84,10 +85,11 @@ DIRECTORY); those tokens keep the position of the directive."
             ((member c '(#\Space #\Tab #\Return #\Page)) (setq i (+ i 1)))
             ((char= c #\{) (setq i (+ i 1)) (skip-comment #\} nil start))
             ((and (char= c #\() (eql (peek 1) #\*)) (setq i (+ i 2)) (skip-comment #\* #\) start))
-            ;; template item ⊂...⊃ (UTF-8 E2 8A 82 ... E2 8A 83)
-            ((and (= (char-code c) #xE2) (< (+ i 2) n) (string= (subseq source i (+ i 3)) +template-open-string+))
-             (let ((e (search +template-close-string+ source :start2 (+ i 3))))
-               (setq i (if e (+ e 3) n))
+            ;; template item ⊂...⊃
+            ((and (char= c (char +template-open-string+ 0)) (<= (+ i +template-mark-length+) n)
+                  (string= (subseq source i (+ i +template-mark-length+)) +template-open-string+))
+             (let ((e (search +template-close-string+ source :start2 (+ i +template-mark-length+))))
+               (setq i (if e (+ e +template-mark-length+) n))
                (emit :template (subseq source start i) start)))
             ((%pas-ident-start-p c)
              (loop (when (or (>= i n) (not (%pas-ident-char-p (char source i)))) (return)) (setq i (+ i 1)))

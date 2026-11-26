@@ -11,11 +11,6 @@ SYMBOL_LIST(X)
 
 #define TABLE_SIZE 1021
 
-static uint64_t hash_bytes(const char *s, size_t n) {
-  uint64_t h = 1469598103934665603ULL;
-  for (size_t i = 0; i < n; i++) { h ^= (unsigned char)s[i]; h *= 1099511628211ULL; }
-  return h;
-}
 
 /* ---- list helpers ----------------------------------------------------- */
 Obj list1(Obj a) { return cons(a, NIL); }
@@ -79,8 +74,7 @@ static int pathname_struct_p(Obj o) {
   Obj type = SLOT(o, 0);
   Obj name = CONSP(type) ? CAR(type) : type;
   if (!SYMBOLP(name) || !STRINGP(SYM_NAME(name))) return 0;
-  const char *s = STR_DATA(SYM_NAME(name));
-  return strcmp(s, "PATHNAME") == 0 || strcmp(s, "LOGICAL-PATHNAME") == 0;
+  return str_equal_c(SYM_NAME(name), "PATHNAME", 8) || str_equal_c(SYM_NAME(name), "LOGICAL-PATHNAME", 16);
 }
 
 int equal(Obj a, Obj b) {
@@ -88,8 +82,7 @@ int equal(Obj a, Obj b) {
   for (;;) {
     if (eql(a, b)) return 1;
     if (CONSP(a) && CONSP(b)) { if (!equal(CAR(a), CAR(b))) return 0; a = CDR(a); b = CDR(b); continue; }
-    if (STRINGP(a) && STRINGP(b))
-      return STR_LEN(a) == STR_LEN(b) && memcmp(STR_DATA(a), STR_DATA(b), STR_LEN(a)) == 0;
+    if (STRINGP(a) && STRINGP(b)) return str_equal(a, b);
     if (pathname_struct_p(a) && pathname_struct_p(b) && SLOT(a, 0) == SLOT(b, 0) && OBJ_NWORDS(a) == OBJ_NWORDS(b)) {
       for (size_t i = 1; i < OBJ_NWORDS(a); i++) if (!equal(SLOT(a, i), SLOT(b, i))) return 0;   /* pathnames: by component */
       return 1;
@@ -98,7 +91,7 @@ int equal(Obj a, Obj b) {
   }
 }
 
-static int char_eqi(int a, int b) { return tolower(a) == tolower(b); }
+static int char_eqi(int a, int b) { return a == b || cp_downcase(a) == cp_downcase(b); }
 
 int equalp(Obj a, Obj b) {
   STACK_CHECK();
@@ -108,8 +101,9 @@ int equalp(Obj a, Obj b) {
     if (CHARP(a) && CHARP(b)) return char_eqi(CHAR_CODE(a), CHAR_CODE(b));
     if (CONSP(a) && CONSP(b)) { if (!equalp(CAR(a), CAR(b))) return 0; a = CDR(a); b = CDR(b); continue; }
     if (STRINGP(a) && STRINGP(b)) {
-      if (STR_LEN(a) != STR_LEN(b)) return 0;
-      for (size_t i = 0; i < STR_LEN(a); i++) if (!char_eqi(STR_DATA(a)[i], STR_DATA(b)[i])) return 0;
+      size_t n = str_len(a);
+      if (n != str_len(b)) return 0;
+      for (size_t i = 0; i < n; i++) if (!char_eqi(str_ref(a, i), str_ref(b, i))) return 0;
       return 1;
     }
     if (VECTORP(a) && VECTORP(b)) {
@@ -138,8 +132,8 @@ uint64_t sxhash(Obj o, int depth) {
   }
   if (!OBJP(o)) return (uint64_t)o;
   switch (OBJ_TYPE(o)) {
-  case T_STRING: return hash_bytes(STR_DATA(o), STR_LEN(o));
-  case T_SYMBOL: return hash_bytes(STR_DATA(SYM_NAME(o)), STR_LEN(SYM_NAME(o))) ^ 0x5bd1e995;
+  case T_STRING: case T_WSTRING: case T_STRBOX: return str_hash(o);
+  case T_SYMBOL: return str_hash(SYM_NAME(o)) ^ 0x5bd1e995;
   case T_FLONUM: { uint64_t b; memcpy(&b, &SLOT(o, 0), 8); return b * 0x9E3779B97F4A7C15ULL; }
   case T_VECTOR: return 0x1234 + OBJ_NWORDS(o);
   case T_BIGNUM: case T_RATIO: case T_COMPLEX: return num_hash(o);
@@ -148,18 +142,19 @@ uint64_t sxhash(Obj o, int depth) {
 }
 
 /* ---- package tables --------------------------------------------------- */
-static Obj table_lookup(Obj table, const char *name, size_t len) {
-  size_t idx = hash_bytes(name, len) % TABLE_SIZE;
+/* The symbol named NAME (a string) in TABLE, or UNBOUND. */
+static Obj table_lookup(Obj table, Obj name) {
+  size_t idx = str_hash(name) % TABLE_SIZE;
   for (Obj l = SLOT(table, idx); l != NIL; l = CDR(l)) {
-    Obj s = CAR(l), n = SYM_NAME(s);
-    if (STR_LEN(n) == len && memcmp(STR_DATA(n), name, len) == 0) return s;
+    Obj s = CAR(l);
+    if (str_equal(SYM_NAME(s), name)) return s;
   }
   return UNBOUND;
 }
 
 static void table_add(Obj table, Obj sym) {
   Obj n = SYM_NAME(sym);
-  size_t idx = hash_bytes(STR_DATA(n), STR_LEN(n)) % TABLE_SIZE;
+  size_t idx = str_hash(n) % TABLE_SIZE;
   SLOT(table, idx) = cons(sym, SLOT(table, idx)); WB(table, SLOT(table, idx));
 }
 
@@ -184,19 +179,20 @@ void use_package(Obj pkg, Obj used) {
   SLOT(used, PK_USEDBY) = cons(pkg, SLOT(used, PK_USEDBY)); WB(used, SLOT(used, PK_USEDBY));
 }
 
-static int pkg_name_is(Obj pkg, const char *name, size_t len) {
-  Obj n = SLOT(pkg, PK_NAME);
-  if (STR_LEN(n) == len && memcmp(STR_DATA(n), name, len) == 0) return 1;
-  for (Obj l = SLOT(pkg, PK_NICK); CONSP(l); l = CDR(l)) {
-    Obj m = CAR(l);
-    if (STR_LEN(m) == len && memcmp(STR_DATA(m), name, len) == 0) return 1;
-  }
+static int pkg_name_is(Obj pkg, Obj name) {
+  if (str_equal(SLOT(pkg, PK_NAME), name)) return 1;
+  for (Obj l = SLOT(pkg, PK_NICK); CONSP(l); l = CDR(l)) if (str_equal(CAR(l), name)) return 1;
+  return 0;
+}
+static int pkg_name_is_c(Obj pkg, const char *name, size_t len) {
+  if (str_equal_c(SLOT(pkg, PK_NAME), name, len)) return 1;
+  for (Obj l = SLOT(pkg, PK_NICK); CONSP(l); l = CDR(l)) if (str_equal_c(CAR(l), name, len)) return 1;
   return 0;
 }
 
 Obj find_package_c(const char *name) {
   size_t len = strlen(name);
-  for (Obj l = all_packages; CONSP(l); l = CDR(l)) if (pkg_name_is(CAR(l), name, len)) return CAR(l);
+  for (Obj l = all_packages; CONSP(l); l = CDR(l)) if (pkg_name_is_c(CAR(l), name, len)) return CAR(l);
   return NIL;
 }
 
@@ -206,19 +202,18 @@ Obj find_package(Obj d) {
   if (SYMBOLP(d)) s = SYM_NAME(d);
   if (!STRINGP(s)) return NIL;
   for (Obj l = all_packages; CONSP(l); l = CDR(l))
-    if (pkg_name_is(CAR(l), STR_DATA(s), STR_LEN(s))) return CAR(l);
+    if (pkg_name_is(CAR(l), s)) return CAR(l);
   return NIL;
 }
 
 Obj find_symbol_in(Obj namestr, Obj pkg, int *status) {
-  const char *n = STR_DATA(namestr); size_t len = STR_LEN(namestr);
-  Obj s = table_lookup(SLOT(pkg, PK_INTERNAL), n, len);
+  Obj s = table_lookup(SLOT(pkg, PK_INTERNAL), namestr);
   if (s != UNBOUND) {
-    *status = table_lookup(SLOT(pkg, PK_EXTERNAL), n, len) != UNBOUND ? 2 : 1;
+    *status = table_lookup(SLOT(pkg, PK_EXTERNAL), namestr) != UNBOUND ? 2 : 1;
     return s;
   }
   for (Obj u = SLOT(pkg, PK_USES); u != NIL; u = CDR(u)) {
-    s = table_lookup(SLOT(CAR(u), PK_EXTERNAL), n, len);
+    s = table_lookup(SLOT(CAR(u), PK_EXTERNAL), namestr);
     if (s != UNBOUND) { *status = 3; return s; }
   }
   *status = 0;
@@ -227,16 +222,16 @@ Obj find_symbol_in(Obj namestr, Obj pkg, int *status) {
 
 void export_symbol(Obj sym, Obj pkg) {
   Obj n = SYM_NAME(sym);
-  if (table_lookup(SLOT(pkg, PK_INTERNAL), STR_DATA(n), STR_LEN(n)) == UNBOUND)
+  if (table_lookup(SLOT(pkg, PK_INTERNAL), n) == UNBOUND)
     table_add(SLOT(pkg, PK_INTERNAL), sym);
-  if (table_lookup(SLOT(pkg, PK_EXTERNAL), STR_DATA(n), STR_LEN(n)) == UNBOUND)
+  if (table_lookup(SLOT(pkg, PK_EXTERNAL), n) == UNBOUND)
     table_add(SLOT(pkg, PK_EXTERNAL), sym);
 }
 
 Obj intern_obj(Obj namestr, Obj pkg, int *status) {
   Obj s = find_symbol_in(namestr, pkg, status);
   if (*status) return s;
-  Obj name = make_string(STR_DATA(namestr), STR_LEN(namestr));
+  Obj name = substring(namestr, 0, str_len(namestr));          /* a private copy, narrow when it can be */
   s = make_symbol_obj(name);
   SYM_PKG(s) = pkg; WB(s, pkg);
   table_add(SLOT(pkg, PK_INTERNAL), s);
@@ -244,7 +239,7 @@ Obj intern_obj(Obj namestr, Obj pkg, int *status) {
     table_add(SLOT(pkg, PK_EXTERNAL), s);
     SYM_VALUE(s) = s;
     SYM_FLAGS(s) = FIX(SF_CONSTANT | SF_SPECIAL);
-  } else if (pkg == PKG_CL && export_all_cl && STR_DATA(name)[0] != '%') {
+  } else if (pkg == PKG_CL && export_all_cl && !(str_len(name) > 0 && str_ref(name, 0) == '%')) {
     table_add(SLOT(pkg, PK_EXTERNAL), s);
   }
   return s;
@@ -275,7 +270,7 @@ Obj fn_symbol(Obj name) {
   if (CONSP(name) && CAR(name) == Q_setf && CONSP(CDR(name)) && SYMBOLP(CAR(CDR(name)))) {
     Obj base = CAR(CDR(name));
     char buf[512];
-    snprintf(buf, sizeof buf, "(SETF %s)", STR_DATA(SYM_NAME(base)));
+    snprintf(buf, sizeof buf, "(SETF %s)", STR_C(SYM_NAME(base)));
     Obj pkg = SYM_PKG(base) == NIL ? current_package() : SYM_PKG(base);
     return intern(buf, pkg);
   }
@@ -305,7 +300,7 @@ void init_symbols(void) {
   SYM_VALUE(TT) = TT;
   SYM_FLAGS(TT) = FIX(SF_CONSTANT | SF_SPECIAL);
 
-#define X(id, str) Q_##id = (str[0] == ':') ? intern_kw(str + 1) : intern_cl(str);
+#define X(id, str) Q_##id = (str[0] == ':') ? intern_kw(&(str)[1]) : intern_cl(str);
   SYMBOL_LIST(X)
 #undef X
 

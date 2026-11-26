@@ -280,3 +280,54 @@ PROCESS-KILL and PROCESS-INTERRUPT."
             (progn (unless (eq (lock-owner ,l) (current-process)) (process-lock ,l ,whostate) (setq ,took t))
                    ,@body)
          (when ,took (process-unlock ,l))))))
+
+;;; ---- finalization ---------------------------------------------------------------------------------------
+;;; FINALIZE registers a finalizer cell: a weak object holding OBJECT weakly and the function strongly.  When a
+;;; collection finds OBJECT otherwise unreachable it marks the cell fired, and at the next safe point the kernel
+;;; calls %RUN-FINALIZERS, which calls the functions.
+
+(defvar *finalizers* nil "The registered finalizers: a list of (cell . dont-save).")
+(defvar *running-finalizers* nil "True while finalizers are being called (they are not called again from inside one).")
+
+(defun finalize (object function &key dont-save)
+  "Arrange for FUNCTION to be called, with no arguments, after OBJECT has been garbage collected.  FUNCTION must not
+refer to OBJECT (or OBJECT is never collected).  It runs at a safe point after the collection, in whichever process
+is running; an error in it is reported and ignored.  With DONT-SAVE the finalizer is dropped by SAVE-WORLD."
+  (unless (functionp function) (error 'type-error :datum function :expected-type 'function))
+  (let ((cell (cons (%make-weak 5 object function) dont-save)))
+    (without-interrupts (setq *finalizers* (cons cell *finalizers*))))
+  object)
+
+(defun cancel-finalization (object)
+  "Remove every finalizer registered for OBJECT.  True if there was one."
+  (let ((found nil))
+    (without-interrupts
+      (setq *finalizers*
+            (remove-if (lambda (c) (when (and (eql (%weak-mode (car c)) 5) (eq (%weak-key (car c)) object))
+                                     (%weak-break (car c)) (setq found t)))
+                       *finalizers*)))
+    found))
+
+(defun %drop-unsaved-finalizers ()
+  (without-interrupts (setq *finalizers* (remove-if #'cdr *finalizers*))))
+
+(defun %run-finalizers ()
+  "Call the finalizers whose objects have been collected (the kernel calls this at a safe point)."
+  (unless *running-finalizers*
+    (let ((*running-finalizers* t))
+      (loop while (%finalizers-pending t)
+            do (let ((fired nil))
+                 (without-interrupts
+                   (setq *finalizers*
+                         (remove-if (lambda (c)
+                                      (case (%weak-mode (car c))
+                                        (6 (setq fired (cons (%weak-value (car c)) fired)) (%weak-break (car c)) t)
+                                        (7 t)))
+                                    *finalizers*)))
+                 (dolist (fn (nreverse fired))
+                   (handler-case (funcall fn)
+                     (error (e) (format *error-output* "~&;; Error in a finalizer: ~A~%" e)))))))))
+
+(defun run-pending-finalizers ()
+  "Call the finalizers of objects collected so far now, rather than at the next safe point."
+  (%run-finalizers))

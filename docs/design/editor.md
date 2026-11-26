@@ -72,7 +72,7 @@ other buffers. After every command in Lisp mode `ED-UPDATE-HINT` finds the inner
 reading only from the start of the top-level form, and `ARGLIST-HINT` prints its lambda list, recording the
 byte range of the parameter for the argument at point. The echo area shows the hint when there is no message.
 
-**Display.** `%LINE-CELLS` turns a line into screen cells and the byte offset of each: tabs expanded,
+**Display.** `%LINE-CELLS` turns a line into screen cells and the character index of each: tabs expanded,
 `^X` for control characters, a wide character followed by `+WIDE-CONT+`, combining marks merged into a
 cluster cell. **Syntax colouring** (`LISP-LINE-SYNTAX`) scans one line from a starting state (`NIL`,
 `:STRING` or `(:BLOCK . depth)`); `%SYNTAX-STATE-AT` caches the state at the start of each line and is

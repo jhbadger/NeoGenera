@@ -118,7 +118,7 @@
     ((and (vectorp obj) (not (stringp obj)))
      (let ((acc nil)) (dotimes (i (min 200 (length obj))) (let ((idx i)) (setq acc (cons (list (format nil "~D" idx) (aref obj idx) (lambda (v) (%aset obj idx v))) acc)))) (nreverse acc)))
     ((%hash-table-p obj)
-     (mapcar (lambda (e) (let ((cell e)) (list (prin1-to-string (car e)) (cdr e) (lambda (v) (rplacd cell v))))) (subseq (%ht-pairs obj) 0 (min 200 (hash-table-count obj)))))
+     (mapcar (lambda (e) (let ((cell e)) (list (prin1-to-string (car e)) (cdr e) (lambda (v) (setf (gethash (car cell) obj) v))))) (subseq (%ht-pairs obj) 0 (min 200 (hash-table-count obj)))))
     ((and (symbolp obj) obj)
      (append (list (list "name" (symbol-name obj) nil) (list "package" (symbol-package obj) nil))
              (when (boundp obj) (list (list "value" (symbol-value obj) (lambda (v) (set obj v)))))

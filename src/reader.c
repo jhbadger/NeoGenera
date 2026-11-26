@@ -109,7 +109,7 @@ static int parse_number(const char *tok, Obj *out) {
 static Obj make_symbol_from_token(const char *buf, size_t len, int *colons, int ncolons, int escaped) {
   (void)escaped;
   if (ncolons == 0) {
-    int st; Obj str = make_string(buf, len);
+    int st; Obj str = make_string_utf8(buf, len);
     return intern_obj(str, current_package(), &st);
   }
   int first = colons[0];
@@ -117,7 +117,7 @@ static Obj make_symbol_from_token(const char *buf, size_t len, int *colons, int 
   if (ncolons > 2 || (ncolons == 2 && !dbl)) reader_error("too many colons in token");
   const char *name = buf + first + (dbl ? 2 : 1);
   size_t nlen = len - (size_t)first - (dbl ? 2 : 1);
-  Obj nstr = make_string(name, nlen);
+  Obj nstr = make_string_utf8(name, nlen);
   Obj pkg;
   if (first == 0) pkg = PKG_KEYWORD;
   else {
@@ -131,23 +131,48 @@ static Obj make_symbol_from_token(const char *buf, size_t len, int *colons, int 
   if (dbl || pkg == PKG_KEYWORD) return intern_obj(nstr, pkg, &st);
   Obj sym = find_symbol_in(nstr, pkg, &st);
   if (st != 2 && !(st == 1 && pkg == PKG_CL)) {
-    if (st == 0 || st == 1) lisp_error("READ error: %s is not an external symbol of package %s", STR_DATA(nstr), STR_DATA(SLOT(pkg, PK_NAME)));
+    if (st == 0 || st == 1) lisp_error("READ error: %s is not an external symbol of package %s", STR_C(nstr), STR_C(SLOT(pkg, PK_NAME)));
   }
   return sym;
 }
 
-/* Apply the readtable case to the unescaped characters of a token: MASK marks the escaped ones. */
+/* the UTF-8 length of code point C */
+static size_t cp_len(int c) { return c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; }
+
+/* map the character at byte I of BUF (N bytes long, CP its code point) to code point TO, in place when the
+   UTF-8 lengths agree (a mapping that would change the length leaves the character as it is) */
+static void put_cp_at(char *buf, size_t i, size_t span, int cp, int to) {
+  if (to == cp || span != cp_len(cp) || cp_len(to) != span) return;
+  Buf b; char small[8]; b.buf = small; b.len = 0; b.cap = sizeof small;
+  buf_put_cp(&b, to);
+  memcpy(buf + i, b.buf, b.len);
+}
+
+/* Apply the readtable case to the unescaped characters of a token: MASK marks the escaped bytes. */
 static void apply_case(char *buf, const char *escmask, size_t len, int mode) {
   if (mode == 2) return;
+  int up = 0, low = 0;
   if (mode == 3) {                                  /* invert: only if all the unescaped letters have one case */
-    int up = 0, low = 0;
-    for (size_t i = 0; i < len; i++) if (!escmask[i]) { if (isupper((unsigned char)buf[i])) up = 1; else if (islower((unsigned char)buf[i])) low = 1; }
+    for (size_t i = 0; i < len; ) {
+      size_t at = i; int cp = utf8_decode((const unsigned char *)buf, len, &i);
+      if (escmask[at]) continue;
+      if (cp_downcase(cp) != cp) up = 1; else if (cp_upcase(cp) != cp) low = 1;
+    }
     if (up && low) return;
-    for (size_t i = 0; i < len; i++) if (!escmask[i]) buf[i] = (char)(up ? tolower((unsigned char)buf[i]) : toupper((unsigned char)buf[i]));
-    return;
   }
-  for (size_t i = 0; i < len; i++)
-    if (!escmask[i]) buf[i] = (char)(mode == 1 ? tolower((unsigned char)buf[i]) : toupper((unsigned char)buf[i]));
+  for (size_t i = 0; i < len; ) {
+    size_t at = i; int cp = utf8_decode((const unsigned char *)buf, len, &i);
+    if (escmask[at]) continue;
+    int down = mode == 1 || (mode == 3 && up);
+    put_cp_at(buf, at, i - at, cp, down ? cp_downcase(cp) : cp_upcase(cp));
+  }
+}
+
+/* add character C to a token (as UTF-8) and its escape flag for each byte */
+static void tok_put(Buf *b, Buf *esc, int c, int escaped) {
+  size_t before = b->len;
+  buf_put_cp(b, c);
+  for (size_t k = before; k < b->len; k++) buf_putc(esc, escaped);
 }
 
 /* read a token starting with 'first' (already consumed). */
@@ -160,7 +185,7 @@ static Obj read_atom(Obj s, int first, int *was_dot) {
   for (;;) {
     if (c == '\\') {
       int n = stream_getc(s); if (n < 0) reader_error("EOF after backslash");
-      buf_putc(&b, n); buf_putc(&esc, 1); escaped = 1;
+      tok_put(&b, &esc, n, 1); escaped = 1;
     } else if (c == '|') {
       escaped = 1;
       for (;;) {
@@ -168,11 +193,11 @@ static Obj read_atom(Obj s, int first, int *was_dot) {
         if (n < 0) reader_error("EOF inside |...|");
         if (n == '|') break;
         if (n == '\\') { n = stream_getc(s); if (n < 0) reader_error("EOF"); }
-        buf_putc(&b, n); buf_putc(&esc, 1);
+        tok_put(&b, &esc, n, 1);
       }
     } else {
       if (c == ':' ) { if (ncolons < 4) colons[ncolons] = (int)b.len; ncolons++; buf_putc(&b, ':'); buf_putc(&esc, 1); }
-      else { buf_putc(&b, c); buf_putc(&esc, 0); }
+      else tok_put(&b, &esc, c, 0);
     }
     c = stream_getc(s);
     if (is_delim(c)) { stream_ungetc(s, c); break; }
@@ -281,7 +306,7 @@ static int feature_test(Obj f) {
   if (CONSP(f)) {
     Obj h = CAR(f);
     if (SYMBOLP(h)) {
-      const char *n = STR_DATA(SYM_NAME(h));
+      const char *n = STR_C(SYM_NAME(h));
       if (!strcmp(n, "NOT")) return !feature_test(CAR(CDR(f)));
       if (!strcmp(n, "AND")) { for (Obj l = CDR(f); CONSP(l); l = CDR(l)) if (!feature_test(CAR(l))) return 0; return 1; }
       if (!strcmp(n, "OR")) { for (Obj l = CDR(f); CONSP(l); l = CDR(l)) if (feature_test(CAR(l))) return 1; return 0; }
@@ -324,33 +349,22 @@ static Obj read_list(Obj s, int close) {
   }
 }
 
-static int utf8_continue(Obj s, int c) {
-  int extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
-  int code = extra == 3 ? (c & 7) : extra == 2 ? (c & 15) : extra == 1 ? (c & 31) : c;
-  while (extra-- > 0) { int n = stream_getc(s); if (n < 0) break; code = (code << 6) | (n & 0x3F); }
-  return code;
-}
-
 static Obj read_char_literal(Obj s) {
   int c = stream_getc(s);
   if (c < 0) reader_error("EOF after #\\");
   Buf b; buf_init(&b);
-  buf_putc(&b, c);
+  buf_put_cp(&b, c);
+  int count = 1;
   for (;;) {
     int n = stream_getc(s);
     if (is_delim(n)) { stream_ungetc(s, n); break; }
-    buf_putc(&b, n);
+    buf_put_cp(&b, n); count++;
   }
   buf_putc(&b, 0); b.len--;
   Obj r;
-  if (b.len == 1) r = MK_CHAR((unsigned char)b.buf[0]);
+  if (count == 1) r = MK_CHAR(c);
   else {
-    unsigned char c0 = (unsigned char)b.buf[0];
-    if (c0 >= 0xC0) {                       /* UTF-8 multibyte char */
-      Obj ms = make_string(b.buf + 1, b.len - 1);
-      Obj ss = make_string_in_stream(ms);
-      r = MK_CHAR(utf8_continue(ss, c0));
-    } else {
+    {
       static const struct { const char *n; int c; } names[] = {
         {"SPACE", ' '}, {"NEWLINE", '\n'}, {"TAB", '\t'}, {"RETURN", '\r'}, {"LINEFEED", '\n'},
         {"PAGE", '\f'}, {"RUBOUT", 127}, {"BACKSPACE", 8}, {"NUL", 0}, {"NULL", 0}, {"ESCAPE", 27}, {"BELL", 7}
@@ -404,9 +418,9 @@ static Obj read_hash_builtin(Obj s, int c) {
     int first = stream_getc(s);
     if (is_delim(first)) reader_error("bad #: syntax");
     Buf b; buf_init(&b);
-    buf_putc(&b, toupper(first));
-    for (;;) { int n = stream_getc(s); if (is_delim(n)) { stream_ungetc(s, n); break; } buf_putc(&b, toupper(n)); }
-    Obj sym = make_symbol_obj(make_string(b.buf, b.len));
+    buf_put_cp(&b, first < 128 ? toupper(first) : first);
+    for (;;) { int n = stream_getc(s); if (is_delim(n)) { stream_ungetc(s, n); break; } buf_put_cp(&b, n < 128 ? toupper(n) : n); }
+    Obj sym = make_symbol_obj(make_string_utf8(b.buf, b.len));
     buf_free(&b);
     return sym;
   }
@@ -434,7 +448,7 @@ static Obj read_hash_builtin(Obj s, int c) {
   case 'x': case 'X': case 'b': case 'B': case 'o': case 'O': {
     int base = (c == 'x' || c == 'X') ? 16 : (c == 'b' || c == 'B') ? 2 : 8;
     Buf b; buf_init(&b);
-    for (;;) { int n = stream_getc(s); if (is_delim(n)) { stream_ungetc(s, n); break; } buf_putc(&b, n); }
+    for (;;) { int n = stream_getc(s); if (is_delim(n)) { stream_ungetc(s, n); break; } buf_put_cp(&b, n); }
     buf_putc(&b, 0);
     Obj v = int_parse(b.buf, b.len - 1, base);
     if (v == UNBOUND) reader_error("bad radix integer");
@@ -505,9 +519,9 @@ static Obj rd_builtin(Obj s, int c) {
       if (n < 0) reader_error("EOF inside string");
       if (n == '"') break;
       if (n == '\\') { n = stream_getc(s); if (n < 0) reader_error("EOF inside string"); }
-      buf_putc(&b, n);
+      buf_put_cp(&b, n);
     }
-    Obj str = make_string(b.buf, b.len);
+    Obj str = make_string_utf8(b.buf, b.len);
     buf_free(&b);
     return str;
   }

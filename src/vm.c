@@ -21,8 +21,8 @@ static void vm_enter(int n) {
   int base = vsp - n;
   if (n < nreq || (!rest && n > fixed))
     lisp_error("Wrong number of arguments to %s: got %d (takes %d to %s)",
-               STR_DATA(print_to_string(SLOT(code, C_NAME), 1, 0)), n, nreq,
-               rest ? "any number" : STR_DATA(print_to_string(FIX(fixed), 0, 0)));
+               STR_C(print_to_string(SLOT(code, C_NAME), 1, 0)), n, nreq,
+               rest ? "any number" : STR_C(print_to_string(FIX(fixed), 0, 0)));
   if (vfp >= ng_vfp_limit || vsp > ng_vsp_limit) ng_vm_overflow();
   if (n >= fixed) {
     if (rest) {
@@ -50,7 +50,7 @@ static Obj vm_execute(int stop_vfp) {
 
 #define RELOAD() do { \
     fr = &vframes[vfp - 1]; closure = fr->closure; code = SLOT(closure, 0); \
-    ip = (int32_t *)STR_DATA(SLOT(code, C_INSTRS)); consts = &SLOT(SLOT(code, C_CONSTS), 0); \
+    ip = (int32_t *)NSTR_DATA(SLOT(code, C_INSTRS)); consts = &SLOT(SLOT(code, C_CONSTS), 0); \
     base = fr->base; pc = fr->pc; } while (0)
 
   RELOAD();
@@ -63,21 +63,21 @@ static Obj vm_execute(int stop_vfp) {
     case OP_GREF: {
       Obj s = consts[ip[pc++]];
       Obj v = SYM_VALUE(s);
-      if (v == UNBOUND) lisp_error("The variable %s is unbound", STR_DATA(SYM_NAME(s)));
+      if (v == UNBOUND) lisp_error("The variable %s is unbound", STR_C(SYM_NAME(s)));
       PUSH(v);
       break;
     }
     case OP_GSET: {
       Obj s = consts[ip[pc++]];
-      if (UNFIX(SYM_FLAGS(s)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_DATA(SYM_NAME(s)));
+      if (UNFIX(SYM_FLAGS(s)) & SF_CONSTANT) lisp_error("Cannot assign to the constant %s", STR_C(SYM_NAME(s)));
       SYM_VALUE(s) = vstack[--vsp]; WB(s, SYM_VALUE(s));
       break;
     }
     case OP_GFUN: {
       Obj s = consts[ip[pc++]];
       Obj f = SYM_FUNC(s);
-      if (f == NIL) lisp_error("The function %s is undefined", STR_DATA(SYM_NAME(s)));
-      if (CONSP(f)) lisp_error("%s is a macro, not a function", STR_DATA(SYM_NAME(s)));
+      if (f == NIL) lisp_error("The function %s is undefined", STR_C(SYM_NAME(s)));
+      if (CONSP(f)) lisp_error("%s is a macro, not a function", STR_C(SYM_NAME(s)));
       PUSH(f);
       break;
     }

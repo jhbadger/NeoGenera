@@ -191,6 +191,7 @@ Write the changed definitions into it; LOAD-PATCHES loads it here and in every o
 Background processes cannot be saved, so none may be running; open files and the terminal are not saved."
   (let ((others (remove (current-process) (remove-if-not #'process-active-p (all-processes)))))
     (when others (error "Background processes are running (~{~A~^, ~}): stop them first" (mapcar #'process-name others))))
+  (%drop-unsaved-finalizers)
   (let ((file (%native-namestring path)))
     (setq *world-saved* (list (pathname file) (get-universal-time) description))
     (%request-save file)

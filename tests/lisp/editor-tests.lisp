@@ -106,22 +106,22 @@
         (is (member 98 out)) (is (not (member #x65E5 out))))))
   ;; Listener text is laid out by display width
   (is-equal 4 (utf8-length "日本"))
-  (is-equal 3 (utf8-prefix-end "日本" 0 3))
+  (is-equal 1 (utf8-prefix-end "日本" 0 3))
   (is-equal 0 (utf8-prefix-end "日本" 0 0))
-  (is-equal 3 (utf8-prefix-end "日本" 0 1)))                                ; at least one character
+  (is-equal 1 (utf8-prefix-end "日本" 0 1)))                                ; at least one character
 
 (deftest editor-unicode-text
   (multiple-value-bind (wm ed) (make-editor-wm)
     (ed-set ed "日本語abc")
     (ed-keys wm "C-f")
-    (is-equal '(0 . 3) (ed-point ed))
+    (is-equal '(0 . 1) (ed-point ed))
     (ed-keys wm "C-e")
     (is (screen-has wm "C10"))                                             ; column counts wide characters twice
     (is (screen-has wm "日本語abc"))
     ;; combining marks stay with their character
     (ed-set ed (utf8-from-codes '(101 #x301 120)))
     (ed-keys wm "C-f")
-    (is-equal 3 (point-col (ed-buffer ed)))
+    (is-equal 2 (point-col (ed-buffer ed)))
     (ed-keys wm "C-b")
     (is-equal 0 (point-col (ed-buffer ed)))
     ;; transposing, word case and word motion work on characters

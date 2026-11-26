@@ -38,6 +38,32 @@ All the spaces are mapped at a fixed virtual address (the first of `heap_hints` 
 lower one exists for 39-bit Android address spaces), so a heap image is a raw dump of the old generation after a
 major collection (see `bootstrap.md`). Space is reserved with `MAP_NORESERVE`; only touched pages cost memory.
 
+## Weak objects and finalization
+
+A `T_WEAK` object has three slots, `(mode key value)`, and the scavenger does not trace its key and value. It
+records each weak object it copies (in a minor collection, also each remembered old one) in `weak_recs`. Once the
+strong graph is copied, `process_weak` decides by mode:
+
+| mode | kept when | used for |
+|------|-----------|----------|
+| `WKM_POINTER` | the key is reachable | `make-weak-pointer` |
+| `WKM_KEY` | the key is reachable; then the value is kept too | `:weakness :key` (an ephemeron) |
+| `WKM_VALUE` | the value is reachable; then the key is kept too | `:weakness :value` |
+| `WKM_AND` | both are reachable | `:weakness :key-and-value` |
+| `WKM_OR` | either is reachable; then both are kept | `:weakness :key-or-value` |
+| `WKM_FINAL` | the key is reachable (the value, a function, is always traced) | `finalize` |
+
+"Reachable" means already forwarded, or outside the space being collected (an old object in a minor collection).
+Keeping a value can make another weak object's key reachable, so the kept objects are forwarded, the scavenger runs
+again, and the pass repeats until nothing changes. Then the remaining objects are broken: mode `WKM_BROKEN`, key and
+value NIL. A broken `WKM_FINAL` object becomes `WKM_FIRED`, keeps its function and sets `finalizers_pending` and
+`ng_attention`. At the next safe point `proc_attention` calls `%RUN-FINALIZERS`, which removes the fired cells from
+`*finalizers*` and calls their functions (an error in one is reported on `*error-output*`). The weak object itself
+is an ordinary object: it is kept only while something references it.
+
+A weak hash table's buckets hold weak objects instead of `(key . value)` conses; the Lisp side drops broken entries
+from a bucket when it next looks at it, and `hash-table-count` prunes the whole table.
+
 ## Safe points
 
 **Allocation never collects.** Collection happens only at *safe points*:

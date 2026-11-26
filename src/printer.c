@@ -77,7 +77,7 @@ static int needs_bars(const char *s, size_t n) {
 }
 
 static void print_symbol_name(Buf *b, Obj name, int escape) {
-  const char *s = STR_DATA(name); size_t n = STR_LEN(name);
+  size_t n; const char *s = str_c(name, &n);
   if (escape && needs_bars(s, n)) {
     buf_putc(b, '|');
     for (size_t i = 0; i < n; i++) { if (s[i] == '|' || s[i] == '\\') buf_putc(b, '\\'); buf_putc(b, s[i]); }
@@ -87,7 +87,7 @@ static void print_symbol_name(Buf *b, Obj name, int escape) {
 
 static void print_symbol(Buf *b, Obj sym, int escape, int readable) {
   Obj name = SYM_NAME(sym), pkg = SYM_PKG(sym);
-  if (!escape) { buf_put(b, STR_DATA(name), STR_LEN(name)); return; }
+  if (!escape) { buf_put_str(b, name); return; }
   if (pkg == NIL && sym != NIL) { buf_puts(b, "#:"); print_symbol_name(b, name, 1); return; }
   if (pkg == PKG_KEYWORD) { buf_putc(b, ':'); print_symbol_name(b, name, 1); return; }
   int st = 0;
@@ -105,23 +105,19 @@ static void print_symbol(Buf *b, Obj sym, int escape, int readable) {
 }
 
 static void print_string(Buf *b, Obj s, int escape) {
-  if (!escape) { buf_put(b, STR_DATA(s), STR_LEN(s)); return; }
+  if (!escape) { buf_put_str(b, s); return; }
   buf_putc(b, '"');
-  for (size_t i = 0; i < STR_LEN(s); i++) {
-    char c = STR_DATA(s)[i];
+  size_t n = str_len(s);
+  for (size_t i = 0; i < n; i++) {
+    int c = str_ref(s, i);
     if (c == '"' || c == '\\') buf_putc(b, '\\');
-    buf_putc(b, c);
+    buf_put_cp(b, c);
   }
   buf_putc(b, '"');
 }
 
 static void print_char(Buf *b, int c, int escape) {
-  if (!escape) {
-    Obj tmp = make_string_out_stream();
-    stream_putc(tmp, c);
-    buf_put(b, STR_DATA(SLOT(tmp, ST_BUF)), (size_t)UNFIX(SLOT(tmp, ST_LEN)));
-    return;
-  }
+  if (!escape) { buf_put_cp(b, c); return; }
   buf_puts(b, "#\\");
   switch (c) {
   case ' ': buf_puts(b, "Space"); return;
@@ -136,16 +132,14 @@ static void print_char(Buf *b, int c, int escape) {
   default: break;
   }
   if (c < 32) { char t[16]; snprintf(t, sizeof t, "U%X", c); buf_puts(b, t); return; }
-  Obj tmp = make_string_out_stream();
-  stream_putc(tmp, c);
-  buf_put(b, STR_DATA(SLOT(tmp, ST_BUF)), (size_t)UNFIX(SLOT(tmp, ST_LEN)));
+  buf_put_cp(b, c);
 }
 
 static void print_rec(Buf *b, Obj o, int escape, int readable, int depth);
 /* the elements of a multi-dimensional array from row-major index START, as nested lists by DIMS */
 static long print_md(Buf *b, Obj data, Obj dims, long start, int escape, int readable, int depth) {
   if (dims == NIL) {
-    Obj x = STRINGP(data) ? MK_CHAR((unsigned char)STR_DATA(data)[start]) : SLOT(data, start);
+    Obj x = STRINGP(data) ? MK_CHAR(str_ref(data, (size_t)start)) : SLOT(data, start);
     print_rec(b, x, escape, readable, depth + 1);
     return start + 1;
   }
@@ -192,7 +186,7 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   }
   switch (OBJ_TYPE(o)) {
   case T_SYMBOL: print_symbol(b, o, escape, readable); return;
-  case T_STRING: print_string(b, o, escape); return;
+  case T_STRING: case T_WSTRING: case T_STRBOX: print_string(b, o, escape); return;
   case T_FLONUM: format_double(b, flonum_value(o)); return;
   case T_BIGNUM: case T_RATIO: case T_COMPLEX: number_print(b, o, 10); return;
   case T_VECTOR: {
@@ -210,7 +204,7 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_ADVEC: {
     Obj data = SLOT(o, AV_DATA); long fill = (long)UNFIX(SLOT(o, AV_FILL));
     if (STRINGP(data)) {
-      Obj s = make_string(STR_DATA(data), (size_t)fill);
+      Obj s = substring(data, 0, (size_t)fill);
       print_string(b, s, escape);
     } else {
       buf_puts(b, "#(");
@@ -231,7 +225,7 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
       gc_inhibit++;
       Obj r = call2(hook, o, BOOL(escape));
       gc_inhibit--;
-      if (STRINGP(r)) { buf_put(b, STR_DATA(r), STR_LEN(r)); return; }
+      if (STRINGP(r)) { buf_put_str(b, r); return; }
     }
     Obj type = SLOT(o, 0);
     if (IS_TYPE(type, T_STRUCT)) { buf_puts(b, "#<INSTANCE>"); return; }
@@ -247,6 +241,14 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
     buf_putc(b, ')');
     return;
   }
+  case T_WEAK: {
+    int mode = (int)UNFIX(SLOT(o, WK_MODE));
+    if (mode == WKM_BROKEN || mode == WKM_FIRED) { buf_puts(b, "#<WEAK-POINTER broken>"); return; }
+    buf_puts(b, mode == WKM_FINAL ? "#<FINALIZER " : mode == WKM_POINTER ? "#<WEAK-POINTER " : "#<WEAK-ENTRY ");
+    print_rec(b, SLOT(o, WK_KEY), escape, readable, depth + 1);
+    buf_putc(b, '>');
+    return;
+  }
   default: buf_puts(b, "#<OBJECT>"); return;
   }
 }
@@ -256,7 +258,7 @@ void print_to_buf(Buf *b, Obj o, int escape, int readable) { print_rec(b, o, esc
 Obj print_to_string(Obj o, int escape, int readable) {
   Buf b; buf_init(&b);
   print_to_buf(&b, o, escape, readable);
-  Obj s = make_string(b.buf ? b.buf : "", b.len);
+  Obj s = make_string_utf8(b.buf ? b.buf : "", b.len);
   buf_free(&b);
   return s;
 }
