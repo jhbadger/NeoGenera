@@ -9,18 +9,28 @@
 #include "neogenera.h"
 #include <pthread.h>
 #include <signal.h>
+/* bionic has backtrace() only from API level 33; Termux targets an older one. */
+#if defined(__ANDROID__) && __ANDROID_API__ < 33
+#define NG_NO_BACKTRACE 1
+#else
 #include <execinfo.h>
+#endif
 #include <unistd.h>
 
 int g_argc;
 char **g_argv;
 
 static void crash_handler(int sig) {
+#ifdef NG_NO_BACKTRACE
+  const char msg[] = "\nFATAL: fatal signal in NeoGenera kernel\n";
+  if (write(2, msg, sizeof msg - 1) < 0) _exit(70);
+#else
   void *frames[48];
   int n = backtrace(frames, 48);
   const char msg[] = "\nFATAL: fatal signal in NeoGenera kernel; backtrace:\n";
   if (write(2, msg, sizeof msg - 1) < 0) _exit(70);
   backtrace_symbols_fd(frames, n, 2);
+#endif
   _exit(128 + sig);
 }
 
