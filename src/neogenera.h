@@ -285,7 +285,7 @@ extern int vsp, vstack_size;
 typedef struct { Obj sym; Obj old; } SpecBind;
 extern SpecBind *specpdl;
 extern int spsp, spec_size;
-typedef struct { Obj closure; int pc; int base; } VFrame;
+typedef struct { Obj closure; int pc; int base; int spsp; } VFrame;   /* SPSP: the binding depth at entry */
 extern VFrame *vframes;
 extern int vfp, vframe_size;
 void reset_stack_limits(void);                 /* close the error-handling reserves of the current stacks */
@@ -299,13 +299,14 @@ extern int mv_count;
 void  dynbind(Obj sym, Obj val);
 void  unbind_to(int height);
 
-enum { F_TOP, F_CATCH, F_BLOCK, F_TAGBODY, F_UNWIND };
+enum { F_TOP, F_CATCH, F_BLOCK, F_TAGBODY, F_UNWIND, F_VMENTRY };   /* F_VMENTRY: a nested VM run (debugger frame return) */
 typedef struct Frame {
   struct Frame *prev;
   int kind;
   Obj tag, value, cleanup, mvlist;
   int spsp, vsp, vfp, nroots, eval_depth, gci;
   jmp_buf jb;
+  sigjmp_buf sjb;                              /* F_VMENTRY only (sigsetjmp without the signal mask: no system call) */
 } Frame;
 extern Frame *frame_top;
 extern int eval_depth;

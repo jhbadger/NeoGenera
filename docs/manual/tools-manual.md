@@ -72,6 +72,14 @@ environment of the error. In the window Listener restarts and frames are present
 invoke it, and right-click a frame for *Edit definition* (see [The Window System](topic:window-system)).
 `(break)` enters the debugger with a *Return from BREAK* restart.
 
+A frame can also be returned from or run again. In the line-mode Listener select it with `:frame N`, then
+`:return FORM` makes it return FORM's values to its caller and `:retry` runs it again from the start, with its
+arguments as they are now. In the window Listener the commands are `:Return From Frame N FORM` and `:Retry Frame N`,
+and a frame's right-click menu has *Retry this frame*. Either way the frames above it are unwound: their
+`unwind-protect` cleanups run and their special bindings are undone. From Lisp, `debugger-return-from-frame` and
+`debugger-restart-frame` take a frame of the backtrace. Compiled code only: the stage-0 evaluator's frames (code
+being loaded from source) are not in the backtrace, and a tail call replaces its caller's frame.
+
 ## Systems and patches
 
 A program of several files is described with `defsystem`, usually in a file of its own:

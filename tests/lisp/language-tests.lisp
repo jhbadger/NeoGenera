@@ -342,3 +342,179 @@
       (identity 1)
       (dotimes (i 3) (list i))
       (is-equal '(:finalized) (car box)))))
+
+;;; ---- CLOS ---------------------------------------------------------------------------------------------
+
+(defclass cl-shared () ((count :allocation :class :initform 0 :accessor cl-count) (own :initarg :own :accessor cl-own)))
+(defclass cl-shared-sub (cl-shared) ())
+
+(deftest clos-class-allocation
+  (let ((a (make-instance 'cl-shared :own 1)) (b (make-instance 'cl-shared-sub :own 2)))
+    (setf (cl-count a) 5)
+    (is-equal 5 (cl-count b))                                   ; shared with subclasses
+    (is-equal '(1 2) (list (cl-own a) (cl-own b)))
+    (defclass cl-shared () ((count :allocation :class :initform 0 :accessor cl-count) (own :initarg :own :accessor cl-own)))
+    (is-equal 5 (cl-count (make-instance 'cl-shared)))          ; redefinition keeps the shared value
+    (is-equal :class (slot-definition-allocation (find 'count (class-slots (find-class 'cl-shared)) :key #'slot-definition-name)))))
+
+(defclass cl-point () ((x :initarg :x :accessor cl-x) (y :initarg :y :accessor cl-y)))
+(defmethod update-instance-for-redefined-class :after ((p cl-point) added discarded plist &rest initargs)
+  (declare (ignore initargs))
+  (when (and (member 'rho added) (member 'x discarded))
+    (setf (slot-value p 'rho) (+ (getf plist 'x) (getf plist 'y)))))
+
+(deftest clos-redefinition-updates-instances
+  (defclass cl-point () ((x :initarg :x :accessor cl-x) (y :initarg :y :accessor cl-y)))
+  (let ((p (make-instance 'cl-point :x 3 :y 4)) (q (make-instance 'cl-point :x 1)))
+    (defclass cl-point () ((x :initarg :x :accessor cl-x) (y :initarg :y :accessor cl-y) (z :initform 9 :accessor cl-z)))
+    (is-equal '(3 4 9) (list (cl-x p) (cl-y p) (cl-z p)))       ; new slot gets its initform
+    (is (not (slot-boundp q 'y)))
+    (defclass cl-point () ((rho :accessor cl-rho)))
+    (is-equal 7 (cl-rho p))                                     ; the method converted the old data
+    (is (not (slot-exists-p p 'x)))
+    (defclass cl-point () ((x :initarg :x :accessor cl-x) (y :initarg :y :accessor cl-y)))))
+
+(defclass cl-person () ((name :initarg :name :accessor cl-name)))
+(defclass cl-employee (cl-person) ((salary :initform 100 :initarg :salary :accessor cl-salary)))
+
+(deftest clos-change-class
+  (let ((p (make-instance 'cl-person :name "Ann")))
+    (change-class p 'cl-employee :salary 200)
+    (is (typep p 'cl-employee))
+    (is-equal "Ann" (cl-name p))
+    (is-equal 200 (cl-salary p))
+    (change-class p 'cl-person)
+    (is-equal 'cl-person (type-of p))
+    (is (not (slot-exists-p p 'salary))))
+  (let ((p (make-instance 'cl-person :name "Bo")))
+    (change-class p (find-class 'cl-employee))
+    (is-equal 100 (cl-salary p))
+    (reinitialize-instance p :salary 5)
+    (is-equal 5 (cl-salary p))
+    (is-equal "Bo" (cl-name p))))
+
+(defgeneric cl-total (x) (:method-combination +))
+(defmethod cl-total + ((x integer)) 1)
+(defmethod cl-total + ((x number)) 10)
+(defmethod cl-total + ((x t)) 100)
+(defgeneric cl-names (x) (:method-combination list :most-specific-last))
+(defmethod cl-names list ((x integer)) 'integer)
+(defmethod cl-names list ((x number)) 'number)
+(defmethod cl-names :around ((x integer)) (cons :around (call-next-method)))
+(defgeneric cl-check (x) (:method-combination and))
+(defmethod cl-check and ((x integer)) (> x 0))
+(defmethod cl-check and ((x number)) (error "not reached for negative integers"))
+
+(define-method-combination cl-firstly (&optional (order :most-specific-first))
+  ((around (:around)) (primary () :order order :required t))
+  (let ((form `(call-method ,(first primary) ,(rest primary))))
+    (if around `(call-method ,(first around) (,@(rest around) (make-method ,form))) form)))
+(defgeneric cl-fl (x) (:method-combination cl-firstly :most-specific-last))
+(defmethod cl-fl ((x integer)) (list :integer (if (next-method-p) (call-next-method) :none)))
+(defmethod cl-fl ((x number)) (list :number (if (next-method-p) (call-next-method) :none)))
+(defmethod cl-fl :around ((x integer)) (list :around (call-next-method)))
+
+(define-method-combination cl-concat :operator concatenate-strings :identity-with-one-argument nil)
+(defun concatenate-strings (&rest s) (apply #'concatenate 'string s))
+(defgeneric cl-greet (x) (:method-combination cl-concat))
+(defmethod cl-greet cl-concat ((x integer)) "int ")
+(defmethod cl-greet cl-concat ((x number)) "num")
+
+(deftest clos-method-combinations
+  (is-equal 111 (cl-total 3))
+  (is-equal 110 (cl-total 2.5))
+  (is-equal 100 (cl-total "x"))
+  (is-equal '(:around number integer) (cl-names 1))
+  (is-equal nil (cl-check -1))
+  (is-equal '(:around (:number (:integer :none))) (cl-fl 1))
+  (is-equal '(:number :none) (cl-fl 1.5))
+  (is-equal "int num" (cl-greet 1))
+  (is (handler-case (progn (defmethod cl-total ((x string)) 0) (cl-total "s") nil) (error () t)))
+  (remove-method #'cl-total (find-method #'cl-total nil (list (find-class 'string))))
+  (is (handler-case (progn (cl-fl "nope") nil) (error () t))))
+
+(defstruct cl-st a)
+(defclass cl-counted-class (standard-class) ((instances :initform 0 :accessor cl-instances) (label :initarg :label :accessor cl-label)))
+(defclass cl-widget () ((w :initform 1)) (:metaclass cl-counted-class) (:label "widget"))
+(defmethod make-instance :after ((c cl-counted-class) &rest initargs)
+  (declare (ignore initargs))
+  (setf (cl-instances c) (+ 1 (cl-instances c))))
+
+(deftest clos-metaclasses
+  (let ((c (find-class 'cl-widget)))
+    (is-equal 'cl-counted-class (class-name (class-of c)))
+    (is-equal "widget" (cl-label c))
+    (make-instance 'cl-widget) (make-instance 'cl-widget)
+    (is-equal 2 (cl-instances c))
+    (is (typep c 'standard-class))
+    (is (typep c 'class)))
+  (is-equal 'standard-class (class-name (class-of (find-class 'cl-person))))
+  (is-equal 'built-in-class (class-name (class-of (find-class 'integer))))
+  (is-equal 'built-in-class (class-name (class-of (find-class 'hash-table))))
+  (is-equal 'structure-class (class-name (class-of (find-class 'cl-st))))
+  (is (handler-case (progn (eval '(defclass cl-bad () () (:metaclass cl-person))) nil) (error () t)))
+  (ensure-class 'cl-made :direct-slots '((:name a :initargs (:a) :initform 3)))
+  (is-equal 3 (slot-value (make-instance 'cl-made) 'a))
+  (is-equal 4 (slot-value (make-instance 'cl-made :a 4) 'a))
+  (is (eq (find-class 'cl-made) (setf (find-class 'cl-made-alias) (find-class 'cl-made)))))
+
+;;; ---- restarts and frames ------------------------------------------------------------------------------
+
+(deftest condition-restarts
+  ;; restarts made around ERROR belong to its condition
+  (let ((outer nil))
+    (handler-bind ((error (lambda (c)
+                            (setq outer (mapcar #'restart-name (compute-restarts c)))
+                            (invoke-restart 'cr-use 7))))
+      (is-equal 7 (restart-case (error "boom") (cr-use (v) v))))
+    (is (member 'cr-use outer)))
+  (let ((c1 (make-condition 'simple-error :format-control "one")) (c2 (make-condition 'simple-error :format-control "two")))
+    (restart-case
+        (let ((r (find-restart 'cr-mine)))
+          (with-condition-restarts c1 (list r)
+            (is (find-restart 'cr-mine c1))
+            (is (null (find-restart 'cr-mine c2)))              ; associated with another condition
+            (is (find-restart 'cr-mine)))
+          (is (find-restart 'cr-mine c2)))                      ; the association ends with the form
+      (cr-mine () nil)))
+  ;; interactive restarts
+  (is-equal '(1 2) (restart-case (invoke-restart-interactively 'cr-two)
+                     (cr-two (a b) :interactive (lambda () (list 1 2)) (list a b))))
+  (is-equal :none (restart-case (invoke-restart-interactively 'cr-none) (cr-none () :none)))
+  (is-equal 5 (block cr-block
+                (restart-bind ((cr-b (lambda (x) (return-from cr-block x)) :interactive-function (lambda () (list 5))))
+                  (invoke-restart-interactively 'cr-b)))))
+
+(defvar *fr-calls* 0)
+(defvar *fr-special* :outer)
+(defun fr-inner (x) (incf *fr-calls*) (when (= *fr-calls* 1) (error "fr-inner failed")) (* x 10))   ; (not a tail call)
+(defun fr-middle (x) (let ((*fr-special* :inner)) (+ 1 (fr-inner x))))
+(defun fr-outer (x) (list :result (fr-middle x) *fr-special*))
+(defvar *fr-tries* 0)
+(defun fr-boxed (n) (let ((f (lambda () (setq n (+ n 1))))) (incf *fr-tries*) (funcall f) (when (< *fr-tries* 2) (error "again")) n))
+(dolist (f '(fr-inner fr-middle fr-outer fr-boxed)) (compile f))           ; (loaded code is interpreted: no VM frames)
+(defun fr-frame (name) (find name (%capture-backtrace) :key #'cadr))
+
+(deftest debugger-frame-return-and-retry
+  ;; returning a value from a frame: its caller continues; bindings made above it are undone; cleanups run
+  (let* ((cleaned nil)
+         (r (handler-bind ((error (lambda (c) (declare (ignore c)) (debugger-return-from-frame (fr-frame 'fr-inner) 41))))
+              (setq *fr-calls* 0)
+              (unwind-protect (fr-outer 5) (setq cleaned t)))))
+    (is-equal '(:result 42 :outer) r)
+    (is cleaned))
+  ;; several values
+  (is-equal '(1 2) (handler-bind ((error (lambda (c) (declare (ignore c)) (debugger-return-from-frame (fr-frame 'fr-inner) 1 2))))
+                     (setq *fr-calls* 0)
+                     (multiple-value-list (fr-inner 1))))
+  ;; retrying a frame runs it again
+  (is-equal '(:result 51 :outer)
+            (handler-bind ((error (lambda (c) (declare (ignore c)) (debugger-restart-frame (fr-frame 'fr-inner)))))
+              (setq *fr-calls* 0)
+              (fr-outer 5)))
+  (is-equal 2 *fr-calls*)
+  ;; a frame whose parameter is captured and changed is retried with the parameter's value
+  (setq *fr-tries* 0)
+  (is-equal 4 (handler-bind ((error (lambda (c) (declare (ignore c)) (debugger-restart-frame (fr-frame 'fr-boxed)))))
+                (fr-boxed 2)))
+  (is (handler-case (progn (debugger-return-from-frame (list nil 'nothing nil 999999) 1) nil) (error () t))))

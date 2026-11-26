@@ -38,6 +38,7 @@ static void vm_enter(int n) {
   vframes[vfp].closure = fn;
   vframes[vfp].pc = 0;
   vframes[vfp].base = base;
+  vframes[vfp].spsp = spsp;
   vfp++;
 }
 
@@ -191,13 +192,116 @@ static Obj vm_execute(int stop_vfp) {
   }
 }
 
+/* ---- returning from and restarting frames (the debugger) ----
+   Every nested VM run has an F_VMENTRY frame.  Frames within one run are flat (no C between them), so to return
+   from frame K, or to run it again, the stack is unwound -- UNWIND-PROTECT cleanups run, special bindings are
+   undone -- to the run that holds K, which then resumes: in K's caller with the given values, or at the start of
+   K with its arguments as they are now. */
+static SObj need_fix(Obj o) { if (!FIXP(o)) type_error("FIXNUM", o); return UNFIX(o); }
+static Obj frame_resume_values;
+static int frame_resume_kind, frame_resume_k;      /* 1: return, 2: restart */
+
+static int frame_nparams(int k) {
+  Obj code = SLOT(vframes[k].closure, 0);
+  return (int)UNFIX(SLOT(code, C_NREQ)) + (int)UNFIX(SLOT(code, C_NOPT)) + (SLOT(code, C_REST) != NIL ? 1 : 0);
+}
+
+static const int op_nargs[OP_COUNT] = {
+  [OP_CONST] = 1, [OP_LREF] = 1, [OP_LSET] = 1, [OP_FREF] = 1, [OP_GREF] = 1, [OP_GSET] = 1, [OP_GFUN] = 1,
+  [OP_JMP] = 1, [OP_JNIL] = 1, [OP_JNNIL] = 1, [OP_CALL] = 1, [OP_TAILCALL] = 1, [OP_CLOSURE] = 2,
+  [OP_BIND] = 1, [OP_UNBIND] = 1, [OP_SLIDE] = 1
+};
+
+/* parameters boxed in place (LREF i BOX LSET i) before PC hold boxes now: take their values out again */
+static void unbox_params(int k) {
+  Obj code = SLOT(vframes[k].closure, 0);
+  Obj instrs = SLOT(code, C_INSTRS);
+  const int32_t *ip = (const int32_t *)NSTR_DATA(instrs);
+  int n = (int)(NSTR_LEN(instrs) / sizeof(int32_t)), np = frame_nparams(k), stop = vframes[k].pc;
+  for (int pc = 0; pc < n && pc < stop; ) {
+    int op = ip[pc];
+    if (op < 0 || op >= OP_COUNT) return;
+    if (op == OP_LREF && pc + 4 < n && ip[pc + 2] == OP_BOX && ip[pc + 3] == OP_LSET && ip[pc + 4] == ip[pc + 1]
+        && ip[pc + 1] < np && pc + 4 < stop) {
+      Obj *slot = &vstack[vframes[k].base + ip[pc + 1]];
+      if (CONSP(*slot)) *slot = CAR(*slot);
+      pc += 5;
+      continue;
+    }
+    pc += 1 + op_nargs[op];
+  }
+}
+
+static void frame_resume(int kind, int k, Obj values) __attribute__((noreturn));
+static void frame_resume(int kind, int k, Obj values) {
+  if (k < 0 || k >= vfp) lisp_error("There is no frame %d", k);
+  Frame *e = NULL;
+  for (Frame *f = frame_top; f; f = f->prev) if (f->kind == F_VMENTRY && f->vfp <= k) { e = f; break; }
+  if (!e) lisp_error("Frame %d is not in a nested VM run, so it cannot be resumed", k);
+  frame_resume_values = values; frame_resume_kind = kind; frame_resume_k = k;
+  while (frame_top != e) {                         /* run the cleanups on the way */
+    Frame *f = frame_top;
+    frame_top = f->prev;
+    if (f->kind == F_UNWIND) {
+      unbind_to(f->spsp); vsp = f->vsp; vfp = f->vfp; nroots = f->nroots; eval_depth = f->eval_depth; gc_inhibit = f->gci;
+      PUSH(f->cleanup);
+      apply_stack(0);
+    }
+  }
+  siglongjmp(e->sjb, 1);
+}
+
+PRIM(p_frame_return) {
+  /* (%frame-return k values): make VM frame K return VALUES (a list) */
+  UNUSED_ARGS;
+  frame_resume(1, (int)need_fix(argv[0]), argv[1]);
+}
+PRIM(p_frame_restart) {
+  /* (%frame-restart k): run VM frame K again from its start, with its arguments as they are now */
+  UNUSED_ARGS;
+  frame_resume(2, (int)need_fix(argv[0]), NIL);
+}
+PRIM(p_frame_resumable) {
+  /* (%frame-resumable-p k): whether frame K can be returned from or restarted */
+  UNUSED_ARGS;
+  int k = (int)need_fix(argv[0]);
+  if (k < 0 || k >= vfp) return NIL;
+  for (Frame *f = frame_top; f; f = f->prev) if (f->kind == F_VMENTRY && f->vfp <= k) return TT;
+  return NIL;
+}
+
 Obj vm_apply_closure(int n) {
   int stop = vfp;
   if (++eval_depth > 60000) { eval_depth = 0; lisp_error("Control stack exhausted (nested VM)"); }
   vm_enter(n);
+  Frame f;
+  frame_push(&f, F_VMENTRY, NIL);
+  f.vfp = stop;
+  if (sigsetjmp(f.sjb, 0) != 0) {                  /* a frame of this run is being returned from or restarted */
+    reset_stack_limits();
+    frame_top = &f; nroots = f.nroots; eval_depth = f.eval_depth; gc_inhibit = f.gci;
+    int k = frame_resume_k;
+    unbind_to(vframes[k].spsp);
+    if (frame_resume_kind == 1) {
+      Obj vals = frame_resume_values; frame_resume_values = NIL;
+      vsp = vframes[k].base - 1; vfp = k;
+      Obj r = values_list(vals);
+      if (k == stop) { frame_pop(&f); eval_depth--; return r; }
+      PUSH(r);
+    } else {
+      unbox_params(k);
+      vfp = k + 1; vsp = vframes[k].base + frame_nparams(k); vframes[k].pc = 0;
+    }
+  }
   Obj r = vm_execute(stop);
+  frame_pop(&f);
   eval_depth--;
   return r;
 }
 
-void init_vm(void) {}
+void init_vm(void) {
+  add_root(&frame_resume_values); frame_resume_values = NIL;
+  defprim("%FRAME-RETURN", p_frame_return, 2, 2);
+  defprim("%FRAME-RESTART", p_frame_restart, 1, 1);
+  defprim("%FRAME-RESUMABLE-P", p_frame_resumable, 1, 1);
+}

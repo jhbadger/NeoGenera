@@ -505,7 +505,7 @@ world" (buffer-string b))
   (is (member 'xr-mid (apropos-list "XR-M")))
   (is (find :function (mapcar #'car (who-defines 'xr-top))))
   ;; methods are scanned too
-  (is (member 'initialize-instance (who-calls '%init-slots)))
+  (is (member 'make-instance (who-calls 'initialize-instance)))
   (is (some (lambda (m) (eq (car (method-specializers m)) (find-class 'listener-window))) (who-specializes 'listener-window))))
 
 (defun tr-fact (n) (if (<= n 1) 1 (* n (tr-fact (- n 1)))))

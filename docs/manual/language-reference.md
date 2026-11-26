@@ -53,8 +53,28 @@ macros, is a macro. Tail calls are proper except inside dynamic (special-variabl
 Classes are defined with [defclass](fn:defclass) and generic functions with [defgeneric](fn:defgeneric) and
 [defmethod](fn:defmethod). Dispatch is on all required arguments, supports `(eql x)` specializers, the
 standard method combination with `:before`, `:after` and `:around`, and [call-next-method](fn:call-next-method).
-Built-in objects have classes: `(class-of 1)` is `fixnum`. Redefining a class updates it in place; existing
-instances are **not** updated. There are no metaclasses and no `:allocation :class` slots.
+Built-in objects have classes: `(class-of 1)` is `fixnum`.
+
+Slots may be `:allocation :class`, shared by every instance of the class and its subclasses. Redefining a class
+updates its existing instances the next time they are used: slots that are still local keep their values, new
+ones get their initforms, and `update-instance-for-redefined-class` is called (with the added and discarded slot
+names and a property list of the discarded values), so methods on it can convert old data.
+`make-instances-obsolete` forces the update. `change-class` gives an instance a new class, keeping the slots of the
+same name, and calls `update-instance-for-different-class`. `reinitialize-instance` re-runs `shared-initialize` on
+an existing object, and `allocate-instance`, `make-instance`, `slot-missing` and `slot-unbound` are generic.
+
+Generic functions may use another method combination: `(defgeneric total (x) (:method-combination +))` adds up
+the results of all its `+` methods. The built-in ones are `+`, `and`, `append`, `list`, `max`, `min`, `nconc`,
+`or` and `progn`, and `define-method-combination` defines more, in the short form or the long form (method groups,
+`call-method` and `make-method`; `invalid-method-error` and `method-combination-error` report bad methods).
+
+A class's metaclass is `standard-class` (`built-in-class` for built-in classes, `structure-class` for structures),
+all subclasses of `class`. `(:metaclass m)` in `defclass` makes another subclass of `standard-class` the metaclass:
+`m`'s slots belong to the class object, initialized from the class's other options, and methods specialized on `m`
+apply to the class (`make-instance` and `allocate-instance` among them). `ensure-class` defines a class from data. The
+MOP readers include `class-default-initargs`, `class-direct-default-initargs`, `class-prototype`,
+`slot-definition-initform`, `slot-definition-initfunction`, `slot-definition-readers`, `slot-definition-writers` and
+`slot-definition-type`. A `method-combination` class exists for specializing, but combinations are not objects.
 
 ## Conditions
 
@@ -62,6 +82,10 @@ NeoGenera has the full handler and restart model: [handler-case](fn:handler-case
 [handler-bind](fn:handler-bind), [restart-case](fn:restart-case), [signal](fn:signal), [error](fn:error),
 [warn](fn:warn), [cerror](fn:cerror), [ignore-errors](fn:ignore-errors). Errors raised by the kernel are
 typed conditions such as `type-error`, `division-by-zero`, `undefined-function` and `unbound-variable`.
+`with-condition-restarts` associates restarts with a condition, so that `compute-restarts` and `find-restart`
+given another condition leave them out; `restart-case` does this itself when its form is a `signal`, `error`,
+`cerror` or `warn` call. `invoke-restart-interactively` calls a restart with the arguments its `:interactive`
+function (`:interactive-function` in `restart-bind`) returns.
 
 ## Streams
 

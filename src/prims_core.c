@@ -559,7 +559,8 @@ PRIM(p_struct_set_typed) {
 }
 
 PRIM(p_backtrace) {
-  /* (%backtrace max) -> list of (function name args) for active VM frames, innermost first */
+  /* (%backtrace max) -> list of (function name args index) for active VM frames, innermost first; INDEX is the
+     frame's number for %FRAME-RETURN and %FRAME-RESTART */
   int max = (argc > 0 && FIXP(argv[0])) ? (int)UNFIX(argv[0]) : 100;
   Obj head = NIL, tail = NIL;
   for (int i = vfp - 1; i >= 0 && max-- > 0; i--) {
@@ -568,7 +569,7 @@ PRIM(p_backtrace) {
     int base = vframes[i].base;
     Obj args = NIL;
     for (int k = n - 1; k >= 0; k--) args = cons(vstack[base + k], args);
-    Obj cell = cons(list3(fn, SLOT(code, C_NAME), args), NIL);
+    Obj cell = cons(cons(fn, list3(SLOT(code, C_NAME), args, FIX(i))), NIL);
     if (head == NIL) head = cell; else CDR(tail) = cell;
     tail = cell;
   }

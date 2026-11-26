@@ -400,8 +400,9 @@
    *load-verbose* *pp-body-ops* *restart-clusters* *signal-depth* *system-sources* *test-checks* *test-failures* *tests*
    gf-cache gf-dispatch-n gf-fn gf-has-eql gf-lambda-list gf-methods gf-name gf-nreq method-fn method-gf
    slotd-allocation slotd-initargs slotd-initfn slotd-name slotd-readers slotd-writers slot-definition slot-definition-p
+   gf-combination gf-documentation slotd-cell slotd-documentation slotd-type
    slot-definition-allocation slot-definition-initargs get-default-initargs-cache set-default-initargs-cache
-   restart-fn restart-p restart-report restart-test restart-lambda-list restart-report-string restart classp conditionp
+   restart-conditions restart-interactive restart-fn restart-p restart-report restart-test restart-lambda-list restart-report-string restart classp conditionp
    logical-pathname-device logical-pathname-directory logical-pathname-host logical-pathname-name logical-pathname-p
    logical-pathname-type logical-pathname-version (setf readtable-case) (setf logical-pathname-translations)
    loop-pairs loop-while-trim member-by merge-lists list-length-safe do-list-tails identity-fn assq assql memq memql

@@ -173,3 +173,27 @@
              (when (%current-dbg)
                (setq *frame-args* (caddr f) *debug-frame-index* n)
                (format t "~&  (the arguments are in *FRAME-ARGS*)~%"))))))
+
+;;; ---- returning from and retrying frames ---------------------------------------------------------------
+
+(defun %debug-frame (n)
+  (let ((d (%current-dbg))) (and d (integerp n) (>= n 0) (nth n (dbg-frames d)))))
+
+(define-command (return-from-frame :documentation "In the debugger, make frame N return the values of FORM")
+    ((n integer :prompt "Frame number") (form expression :prompt "Value form"))
+  (let ((f (%debug-frame n)))
+    (cond ((null (%current-dbg)) (format t "~&Not in the debugger~%"))
+          ((null f) (format t "~&No frame ~A~%" n))
+          (t (apply #'debugger-return-from-frame f (multiple-value-list (eval form)))))))
+
+(define-command (retry-frame :documentation "In the debugger, run frame N again with its arguments as they are now")
+    ((n integer :prompt "Frame number"))
+  (let ((f (%debug-frame n)))
+    (cond ((null (%current-dbg)) (format t "~&Not in the debugger~%"))
+          ((null f) (format t "~&No frame ~A~%" n))
+          (t (debugger-restart-frame f)))))
+
+(define-presentation-command (retry-this-frame frame :documentation "Retry this frame") (f)
+  (if (and (%current-dbg) (member f (dbg-frames (%current-dbg))))
+      (debugger-restart-frame f)
+      (format t "~&; That frame is no longer active~%")))

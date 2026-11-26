@@ -7,7 +7,8 @@
 ;;;; Commands: N (invoke restart N), :bt, :frame N, :restarts, :abort, :continue,
 ;;;; :edit N (jump to the frame function's definition, if an editor is loaded),
 ;;;; :help.  BREAK enters it on purpose.  The window Listener has its own debugger (lisp/ui/42-debugger.lisp)
-;;;; built on the same frames and restarts.  Not implemented: returning a value from a frame, local variables.
+;;;; built on the same frames and restarts.  :return FORM makes the selected frame return FORM's values, and :retry runs
+;;;; it again (with its arguments as they are now).  Not implemented: local variables.
 
 (in-package :cl)
 
@@ -63,12 +64,28 @@
         (format t "~&  (arguments are available as *FRAME-ARGS*)~%"))
       (format t "~&No such frame: ~S~%" n)))
 
+(defun %frame-index (frame) (cadddr frame))
+
+(defun debugger-return-from-frame (frame &rest values)
+  "Make FRAME (from the debugger's backtrace) return VALUES to its caller, unwinding the frames above it."
+  (unless (and (%frame-index frame) (%frame-resumable-p (%frame-index frame)))
+    (error "Frame ~A cannot be returned from" (%frame-name frame)))
+  (%frame-return (%frame-index frame) values))
+
+(defun debugger-restart-frame (frame)
+  "Run FRAME (from the debugger's backtrace) again from its start, with its arguments as they are now."
+  (unless (and (%frame-index frame) (%frame-resumable-p (%frame-index frame)))
+    (error "Frame ~A cannot be restarted" (%frame-name frame)))
+  (%frame-restart (%frame-index frame)))
+
 (defun %debugger-help ()
   (format t "~&Debugger commands:
   N              invoke restart number N
   :restarts      list restarts          :bt [N]    backtrace (N frames)
   :frame N       select frame N         :edit [N]  edit the function of frame N
   :abort         return to previous level   :continue  invoke CONTINUE
+  :return FORM   return FORM's values from the selected frame
+  :retry         run the selected frame again
   :help          this message           any Lisp form is evaluated~%"))
 
 (defun %debugger-command (form restarts)
@@ -91,6 +108,16 @@
         ((and (consp form) (member (car form) '(:bt :backtrace)))
          (print-backtrace *debug-frames* *standard-output* (cadr form)) t)
         ((and (consp form) (member (car form) '(:frame :f))) (%select-frame (cadr form)) t)
+        ((member form '(:retry :restart-frame))
+         (let ((f (nth *debug-frame-index* *debug-frames*)))
+           (if f (debugger-restart-frame f) (format t "~&No frame selected~%")))
+         t)
+        ((and (consp form) (eq (car form) :return))
+         (let ((f (nth *debug-frame-index* *debug-frames*)))
+           (if f
+               (apply #'debugger-return-from-frame f (multiple-value-list (eval (cadr form))))
+               (format t "~&No frame selected~%")))
+         t)
         ((and (consp form) (member (car form) '(:edit :e)))
          (let ((f (nth (or (cadr form) *debug-frame-index*) *debug-frames*)))
            (if (and *edit-hook* f (cadr f)) (funcall *edit-hook* (cadr f)) (format t "~&No editor available~%")))
@@ -108,6 +135,8 @@
         (when (member form '(:frame :f :bt :backtrace :b :edit :e))
           (let ((arg (parse-integer (read-line *standard-input* nil "") :junk-allowed t)))
             (when arg (setq form (list form arg)))))
+        (when (eq form :return)
+          (setq form (list :return (handler-case (read *standard-input* nil nil) (error () nil)))))
         (cond ((eq form :eof) (terpri) (abort))
               ((eq form :retry) nil)
               ((%debugger-command form restarts) nil)

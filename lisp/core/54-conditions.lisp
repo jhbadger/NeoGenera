@@ -56,7 +56,8 @@
   (:report (lambda (c s) (format s "The variable ~S is unbound" (cell-error-name c)))))
 (define-condition undefined-function (cell-error) ()
   (:report (lambda (c s) (format s "The function ~S is undefined" (cell-error-name c)))))
-(define-condition unbound-slot (cell-error) ((instance :initarg :instance :initform nil :reader unbound-slot-instance)))
+(define-condition unbound-slot (cell-error) ((instance :initarg :instance :initform nil :reader unbound-slot-instance))
+  (:report (lambda (c s) (format s "The slot ~S is unbound in the object ~S" (cell-error-name c) (unbound-slot-instance c)))))
 (define-condition program-error (error) ())
 (define-condition control-error (error) ())
 (define-condition package-error (error) ((package :initarg :package :initform nil :reader package-error-package)))
@@ -160,7 +161,9 @@
 ;;; ---- restarts -------------------------------------------------------------------------
 
 (defstruct (restart (:conc-name restart-) (:constructor %make-restart) (:copier nil))
-  name fn test report lambda-list)          ; LAMBDA-LIST: of a RESTART-CASE clause, else :UNKNOWN
+  name fn test report lambda-list            ; LAMBDA-LIST: of a RESTART-CASE clause, else :UNKNOWN
+  (interactive nil)                          ; a function of no arguments returning the argument list
+  (conditions nil))                          ; the conditions WITH-CONDITION-RESTARTS associated it with
 
 (defun restart-arguments (r)
   "How restart R takes arguments: :NONE, :OPTIONAL, :REQUIRED, or :UNKNOWN."
@@ -170,17 +173,38 @@
           ((intersection ll '(&optional &rest &key)) :optional)
           (t :none))))
 
+(defun %restart-applicable-p (r condition)
+  (and (or (null condition) (null (restart-conditions r)) (memq condition (restart-conditions r)))
+       (or (null (restart-test r)) (funcall (restart-test r) condition))))
+
 (defun compute-restarts (&optional condition)
+  "The active restarts, innermost first.  With CONDITION, a restart associated with other conditions (by
+WITH-CONDITION-RESTARTS) is left out."
   (let ((acc nil))
     (dolist (cluster *restart-clusters*)
       (dolist (r cluster)
-        (when (or (null (restart-test r)) (funcall (restart-test r) condition))
-          (setq acc (cons r acc)))))
+        (when (%restart-applicable-p r condition) (setq acc (cons r acc)))))
     (nreverse acc)))
+
+(defmacro with-condition-restarts (condition-form restarts-form &body body)
+  "Associate the restarts RESTARTS-FORM returns with the condition CONDITION-FORM returns while BODY runs."
+  (let ((c (gensym "C")) (rs (gensym "RS")))
+    `(let ((,c ,condition-form) (,rs ,restarts-form))
+       (dolist (r ,rs) (setf (restart-conditions r) (cons ,c (restart-conditions r))))
+       (unwind-protect (progn ,@body)
+         (dolist (r ,rs) (setf (restart-conditions r) (remove ,c (restart-conditions r) :count 1)))))))
+
+(defun invoke-restart-interactively (restart)
+  "Invoke RESTART with the arguments its interactive function returns (none if it has none)."
+  (let ((r (if (restart-p restart)
+               restart
+               (or (find-restart restart)
+                   (error 'control-error :format-control "No restart named ~S is active" :format-arguments (list restart))))))
+    (apply (restart-fn r) (if (restart-interactive r) (funcall (restart-interactive r)) nil))))
 
 (defun find-restart (name &optional condition)
   (if (restart-p name)
-      name
+      (and (%restart-applicable-p name condition) name)
       (dolist (r (compute-restarts condition) nil)
         (when (eq (restart-name r) name) (return r)))))
 
@@ -207,46 +231,65 @@
           (cons (list ,@(mapcar (lambda (b)
                                   `(%make-restart :name ',(car b) :fn ,(cadr b) :lambda-list :unknown
                                                   :report ,(getf (cddr b) :report-function)
+                                                  :interactive ,(getf (cddr b) :interactive-function)
                                                   :test ,(getf (cddr b) :test-function)))
                                 bindings))
                 *restart-clusters*)))
      ,@body))
 
 (defun %restart-case (thunk specs)
-  ;; SPECS: list of (name function report test lambda-list)
+  ;; SPECS: list of (name function report test lambda-list interactive); THUNK gets the restarts
   (let* ((tag (list nil)) (ok (list nil))
          (restarts (let ((i -1))
                      (mapcar (lambda (sp)
                                (setq i (+ i 1))
                                (let ((idx i))
                                  (%make-restart :name (car sp) :report (caddr sp) :test (cadddr sp) :lambda-list (car (cddddr sp))
+                                                :interactive (cadr (cddddr sp))
                                                 :fn (lambda (&rest args) (throw tag (cons idx args))))))
                              specs)))
          (r (catch tag
               (let ((*restart-clusters* (cons restarts *restart-clusters*)))
-                (let ((vals (multiple-value-list (funcall thunk))))
+                (let ((vals (multiple-value-list (funcall thunk restarts))))
                   (cons ok vals))))))
     (if (eq (car r) ok)
         (values-list (cdr r))
         (apply (cadr (nth (car r) specs)) (cdr r)))))
 
+(defun %restart-case-thunk (form)
+  "The thunk for RESTART-CASE's FORM: a SIGNAL, ERROR, CERROR or WARN form makes its condition first and associates
+the restarts with it, as the standard says."
+  (let ((rs (gensym "RS")) (c (gensym "C")))
+    (if (and (consp form) (member (car form) '(signal error cerror warn)))
+        (let* ((op (car form)) (args (cdr form))
+               (cerror-string (and (eq op 'cerror) (car args)))
+               (datum-args (if (eq op 'cerror) (cdr args) args))
+               (default (case op (signal ''simple-condition) (warn ''simple-warning) (t ''simple-error))))
+          `(lambda (,rs)
+             (let ((,c (%coerce-condition ,(car datum-args) (list ,@(cdr datum-args)) ,default)))
+               (with-condition-restarts ,c ,rs
+                 ,(if (eq op 'cerror) `(cerror ,cerror-string ,c) `(,op ,c))))))
+        `(lambda (,rs) (declare (ignore ,rs)) ,form))))
+
 (defmacro restart-case (form &rest clauses)
   `(%restart-case
-    (lambda () ,form)
+    ,(%restart-case-thunk form)
     (list ,@(mapcar
              (lambda (cl)
-               (let ((rest (cddr cl)) (report nil) (test nil))
+               (let ((rest (cddr cl)) (report nil) (test nil) (interactive nil))
                  (block nil
                    (tagbody top
                       (when (and (consp rest) (keywordp (car rest)) (cdr rest))
                         (cond ((eq (car rest) :report) (setq report (cadr rest)))
-                              ((eq (car rest) :test) (setq test (cadr rest))))
+                              ((eq (car rest) :test) (setq test (cadr rest)))
+                              ((eq (car rest) :interactive) (setq interactive (cadr rest))))
                         (setq rest (cddr rest))
                         (go top))))
                  `(list ',(car cl) (lambda ,(cadr cl) ,@rest)
                         ,(if (stringp report) report (if report `(function ,report) nil))
                         ,(if test `(function ,test) nil)
-                        ',(cadr cl))))
+                        ',(cadr cl)
+                        ,(if interactive `(function ,interactive) nil))))
              clauses))))
 
 (defmacro with-simple-restart ((name fmt &rest args) &body body)
