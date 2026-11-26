@@ -703,3 +703,131 @@ world" (buffer-string b))
     (is *edit-hook*)))
 
 (defun presentation-type-of-frame (f) (declare (ignore f)) 'frame)
+
+;;; ---- Zmacs definition commands ---------------------------------------------------------------------------------
+
+(deftest editor-sections
+  (let ((secs (text-sections (format nil "(in-package :cl-user)~%;; comment~%(defun zs-a (x) x)~%#|~%(defun zs-hidden ())~%|#~%(defmacro zs-m (y) y)~%  (defun zs-indented ())~%(defmethod zs-g ((x integer)) x)~%(defmethod zs-g ((x string)) x)~%(defvar *zs-v* 1)~%(defun (setf zs-a) (v x) v)~%(print 1)"))))
+    (is-equal '(:function :macro :method :method :variable :function) (mapcar #'sec-kind secs))
+    (is-equal "ZS-A" (symbol-name (sec-name (car secs))))
+    (is (eq (find-package "COMMON-LISP-USER") (sec-package (car secs))))  ; IN-PACKAGE is followed
+    (is-equal "(defun zs-a (x) x)" (sec-text (car secs)))
+    (is-equal '(:method 1) (list (car (sec-key (nth 3 secs))) (caddr (sec-key (nth 3 secs)))))  ; methods are numbered
+    (is (not (find "ZS-HIDDEN" secs :key (lambda (s) (symbol-name (sec-name s))) :test #'string=))))
+  ;; #. is not evaluated while sectionizing
+  (let ((*zs-flag* nil)) (declare (special *zs-flag*))
+    (text-sections "(defun #.(setq *zs-flag* t) ())")
+    (is (not *zs-flag*))))
+
+(deftest editor-changed-definitions
+  (let ((dir (make-temp-dir)))
+    (unwind-protect
+         (multiple-value-bind (wm ed) (make-editor-wm)
+           (let ((path (%string-concat dir "/chg.lisp")))
+             (write-file-lines path (list "(in-package :cl)" "(defun zc-one () 1)" "" "(defun zc-two () 2)" "" "(defun zc-three () 3)"))
+             (load path)
+             (ed-keys wm "C-x C-f C-u") (ed-type wm path) (ed-keys wm "RET")
+             (let ((b (ed-buffer ed)))
+               (is-equal nil (buffer-changed-sections b))                  ; nothing changed since read in
+               (ed-keys wm "M-x") (ed-type wm "compile-changed-definitions") (ed-keys wm "RET")
+               (is (screen-has wm "No definitions changed since last compiled"))
+               ;; change ZC-TWO and ZC-THREE
+               (buf-goto b 3 18) (ed-type wm "0")
+               (buf-goto b 5 20) (ed-type wm "0")
+               (is-equal '(zc-two zc-three) (mapcar #'sec-name (buffer-changed-sections b)))
+               ;; Edit Changed Definitions visits the first, C-x ` the next
+               (ed-keys wm "M-<")
+               (ed-keys wm "M-x") (ed-type wm "edit-changed-definitions") (ed-keys wm "RET")
+               (is-equal 3 (point-line b))
+               (is (screen-has wm "1 of 2"))
+               (ed-keys wm "C-x `")
+               (is-equal 5 (point-line b))
+               (ed-keys wm "C-x `")
+               (is (screen-has wm "No more possibilities"))
+               (ed-keys wm "M-g p")
+               (is-equal 3 (point-line b))
+               ;; the possibilities list is a buffer; RET goes to an entry
+               (ed-keys wm "C-x C-.")
+               (is-equal "*Possibilities*" (buffer-name (ed-buffer ed)))
+               (is (screen-has wm "function zc-three"))
+               (ed-keys wm "n RET")
+               (is (eq b (ed-buffer ed)))
+               (is-equal 5 (point-line b))
+               ;; Compile Changed Definitions compiles only those two
+               (ed-keys wm "M-x") (ed-type wm "compile-changed-definitions") (ed-keys wm "RET")
+               (is (screen-has wm "Compiled 2 definitions: zc-two, zc-three"))
+               (is-equal 20 (zc-two)) (is-equal 30 (zc-three))
+               (is-equal nil (buffer-changed-sections b))
+               ;; ... but they still differ from the saved file (C-u) until it is saved
+               (is-equal 2 (length (buffer-changed-sections b :saved)))
+               (ed-keys wm "C-x C-s")
+               (is-equal nil (buffer-changed-sections b :saved))
+               (is-equal 2 (length (buffer-changed-sections b :read)))
+               ;; C-M-x marks just its definition compiled
+               (buf-goto b 1 18) (ed-type wm "1")
+               (is-equal '(zc-one) (mapcar #'sec-name (buffer-changed-sections b)))
+               (ed-keys wm "C-M-x")
+               (is-equal nil (buffer-changed-sections b))
+               (is-equal 11 (zc-one))
+               ;; undoing an edit leaves the definition unchanged
+               (buf-goto b 1 17) (ed-type wm " ") (ed-keys wm "C-/")
+               (is-equal nil (buffer-changed-sections b)))))
+      (cleanup-dir dir))))
+
+(defun zx-callee (x) (+ x 1))
+(defun zx-caller-a (x)
+  (* 2 (zx-callee x)))
+(defun zx-caller-b (x) (list x (zx-callee x)))
+
+(deftest editor-edit-callers
+  (multiple-value-bind (wm ed) (make-editor-wm)
+    (is-equal '(zx-caller-a zx-caller-b) (callers-of 'zx-callee))
+    (ed-keys wm "M-x") (ed-type wm "lisp-mode") (ed-keys wm "RET")
+    (ed-type wm "zx-callee") (ed-keys wm "M-b")
+    (ed-keys wm "M-x") (ed-type wm "edit-callers") (ed-keys wm "RET")
+    (is (screen-has wm "Edit callers of (default zx-callee):"))
+    (ed-keys wm "RET")                                                     ; take the default
+    (is-equal "tools-tests.lisp" (buffer-name (ed-buffer ed)))
+    (is (%string-search "(* 2 (zx-callee x))" (buf-current-line (ed-buffer ed)) 0))
+    (is (%string-search "zx-callee" (buf-current-line (ed-buffer ed)) (point-col (ed-buffer ed))))  ; point is on the call
+    (is (screen-has wm "1 of 2 callers of zx-callee"))
+    (ed-keys wm "C-x `")
+    (is (%string-search "(defun zx-caller-b" (buf-current-line (ed-buffer ed)) 0))
+    (is (screen-has wm "2 of 2"))
+    ;; List Callers shows the list without moving
+    (ed-keys wm "M-x") (ed-type wm "list-callers") (ed-keys wm "RET")
+    (ed-keys wm "C-a C-k") (ed-type wm "zx-callee") (ed-keys wm "RET")
+    (is-equal "*Possibilities*" (buffer-name (ed-buffer ed)))
+    (is (screen-has wm "callers of zx-callee (2):"))
+    (ed-keys wm "q")
+    (ed-keys wm "M-x") (ed-type wm "edit-callers") (ed-keys wm "RET C-a C-k") (ed-type wm "zx-caller-b") (ed-keys wm "RET")
+    (is (screen-has wm "No callers of zx-caller-b"))))
+
+(deftest editor-arglist-documentation-macroexpand
+  (multiple-value-bind (wm ed) (make-editor-wm)
+    (ed-keys wm "M-x") (ed-type wm "lisp-mode") (ed-keys wm "RET")
+    (ed-type wm "(mapcar (lambda (x) (1+ x)) (zx-caller-b 1 2 3))")
+    (ed-keys wm "C-b C-b C-b")                                             ; inside (list ...)
+    (ed-keys wm "C-c C-a")
+    (is (screen-has wm "(zx-caller-b x)"))
+    (ed-keys wm "C-a M-f")                                                 ; on mapcar
+    (ed-keys wm "C-c C-a")
+    (is (screen-has wm "(mapcar fn list &rest more)"))
+    (ed-keys wm "C-c C-d")
+    (is (screen-has wm "mapcar: Apply a function to successive elements"))
+    (ed-keys wm "C-u C-c C-d")
+    (is-equal "*Documentation*" (buffer-name (ed-buffer ed)))
+    (is (screen-has wm "Function documentation:"))
+    (ed-keys wm "M-,")
+    (is-equal "work" (buffer-name (ed-buffer ed)))
+    ;; Macro Expand Expression: short expansions go to the echo area, long ones to a buffer
+    (ed-keys wm "M-> RET")
+    (ed-type wm "(when (car x) \"Hi\" #\\A)")
+    (ed-keys wm "C-a C-c RET")
+    (is (screen-has wm "(if (car x) (progn \"Hi\" #\\A) nil)"))
+    (ed-keys wm "M-> RET")
+    (ed-type wm "(defun zz-long-name (alpha beta gamma) (let ((delta (+ alpha beta gamma))) (when (> delta 10) (print delta) (* delta delta delta))))")
+    (ed-keys wm "C-a C-c RET")
+    (is-equal "*Macroexpansion*" (buffer-name (ed-buffer ed)))
+    (is (> (buf-nlines (ed-buffer ed)) 1))
+    (is (not (fboundp 'zz-long-name)))))                                  ; expanding does not evaluate

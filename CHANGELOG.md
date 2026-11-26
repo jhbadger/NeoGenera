@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* **Editor: Zmacs definition commands.** Edit, List and Compile Changed Definitions (since compiled, saved or read in); Edit and List Callers;
+  a possibilities list stepped with `` C-x ` `` / `M-g n` / `C-.`; Quick Arglist (`C-c C-a`), Documentation (`C-c C-d`) and Macro Expand
+  Expression (`C-c RET`), also bound to Zmacs's `c-sh-A`, `c-sh-D` and `c-sh-M`.
+
 ## 1.0.0
 
 First stable release. All ten roadmap phases are implemented.

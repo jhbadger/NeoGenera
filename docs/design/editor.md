@@ -54,6 +54,38 @@ after `(name` shows the lambda list of `name` in the echo area.
 * `OPEN-EDITOR`, `EDIT-DEFINITION`: open the editor from the Listener (`:edit file-or-function`),
   from the debugger (`:edit N`) and from presentations (frames, test failures, symbols).
 
+## Definitions (`30-definitions.lisp`)
+
+Zmacs-style commands that work on whole definitions.
+
+* **Sections.** `TEXT-SECTIONS` divides Lisp text into definitions: forms starting in column 0 whose
+  head is a definer known to `%DEFINITION-INFO` (`defun`, `defmacro`, `defmethod`, `defvar`, ...).
+  Only the head and the name are read, with `*READ-EVAL*` off, so nothing is evaluated; `in-package`
+  forms set the package for the names after them and `#| |#` blocks are skipped. A section's key is
+  `(kind name n)`, where `n` numbers definitions with the same kind and name (methods).
+* **Baselines.** Each Lisp buffer keeps the text of every section at three moments: `:read` (visit or
+  revert), `:saved` (save) and `:compiled` (`C-M-x`, `C-c C-r`, `C-c C-b`, Compile Changed). A section
+  has changed when its text differs from the baseline, so an edit that is undone is not a change.
+  A buffer that never had a baseline (a new buffer) counts every definition as changed.
+* **Changed definitions.** `M-x edit-changed-definitions` (all Lisp buffers) and
+  `edit-changed-definitions-of-buffer`, `list-changed-definitions[-of-buffer]`,
+  `compile-changed-definitions[-of-buffer]`. No argument: changed since last compiled; `C-u`: since
+  last saved; `C-u C-u`: since the file was read.
+* **Possibilities.** Commands that find several places leave a possibilities list; `C-.` (terminals
+  cannot send it, so also `` C-x ` `` and `M-g n`) visits the next, `M-g p` the previous, and
+  `C-x C-.` shows the list in a `*Possibilities*` buffer (`RET` visits, `n` `p` move, `q` quits).
+  Entries for changed definitions find their section again by key, so they survive later edits.
+* **Edit Callers.** `M-x edit-callers` / `list-callers` (default: the symbol at point) rebuild the
+  cross reference and list every definition whose code calls, references, sets or binds the name,
+  then visit each one with point on the use. Open-coded primitives are not seen (see Tools).
+* **At point.** Quick Arglist (`c-sh-A`, `C-c C-a`) shows the lambda list of the innermost enclosing
+  call that names a function. Documentation (`c-sh-D`, `C-c C-d`) shows the first line of the
+  docstring; with `C-u`, or `m-sh-D` / `C-c M-d`, everything in a `*Documentation*` buffer. Macro Expand
+  Expression (`c-sh-M`, `C-c RET`) expands the form after point (or around it) once; `m-sh-M` /
+  `C-c M-RET` expands it until its head is not a macro (subforms are not expanded). Short results go to
+  the echo area, long ones to a `*Macroexpansion*` buffer. The `c-sh-` and `m-sh-` keys are bound but
+  only reach the editor from terminals that report shifted control keys.
+
 ## Not implemented
 
 Query-replace, regexp search, multiple windows or frames within one editor, syntax colouring beyond

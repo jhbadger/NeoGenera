@@ -80,6 +80,7 @@
           (buffer-set-text b (join-lines (read-file-lines path)))
           nil)
       (setf (buffer-mode b) (file-mode-for path))
+      (buffer-reset-baselines b)
       (when (find (buffer-name b) (ed-buffers ed) :key #'buffer-name :test #'string=)
         (setf (buffer-name b) path))
       (setf (ed-buffers ed) (append (ed-buffers ed) (list b))))
@@ -100,6 +101,7 @@
     (let ((backup (and (not (buffer-backed-up b)) (backup-file (buffer-file b)))))
       (write-file-lines (buffer-file b) (coerce (buffer-lines b) 'list))
       (setf (buffer-modified b) nil (buffer-backed-up b) t)
+      (buffer-reset-baselines b '(:saved))
       (ed-message* ed "Wrote ~A~A" (buffer-file b) (if backup (format nil " (backup ~A)" (path-filename backup)) "")))))
 
 (defcmd find-file (ed arg)
@@ -114,7 +116,7 @@
   (ed-read-string ed "Write file: " (lambda (path) (setf (buffer-file (ed-buffer ed)) path (buffer-name (ed-buffer ed)) (path-filename path)) (ed-save-buffer ed))
                   :completer #'file-completions))
 (defcmd revert-buffer (ed arg)
-  (with-b (b ed) (when (buffer-file b) (buffer-set-text b (join-lines (read-file-lines (buffer-file b)))) (ed-message* ed "Reverted"))))
+  (with-b (b ed) (when (buffer-file b) (buffer-set-text b (join-lines (read-file-lines (buffer-file b)))) (buffer-reset-baselines b) (ed-message* ed "Reverted"))))
 (defcmd switch-to-buffer (ed arg)
   (ed-read-string ed "Switch to buffer: "
                   (lambda (name) (ed-switch-to-buffer ed (ed-get-buffer ed (if (string= name "") "*scratch*" name) t)))

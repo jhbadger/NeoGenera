@@ -12,6 +12,7 @@
 (defvar *lisp-mode-map* (make-keymap "lisp"))
 (defvar *text-mode-map* (make-keymap "text"))
 (defvar *dired-mode-map* (make-keymap "dired"))
+(defvar *possibilities-mode-map* (make-keymap "possibilities"))
 
 (defun %binding (map key) (cdr (assoc key (keymap-table map) :test #'equal)))
 (defun %set-binding (map key value)
@@ -73,6 +74,7 @@
    (mark-ring :initform nil :accessor ed-mark-ring)
    (insert-count :initform 0 :accessor ed-insert-count)
    (last-search :initform "" :accessor ed-last-search)
+   (possibilities :initform nil :accessor ed-possibilities)
    (view-h :initform 10 :accessor ed-view-h)))
 
 (defmethod initialize-instance :after ((w editor-window) &rest args)
@@ -101,9 +103,9 @@
 
 (defun ed-buffer-names (w) (mapcar #'buffer-name (ed-buffers w)))
 
-(defun mode-keymap (mode) (case mode (lisp-mode *lisp-mode-map*) (text-mode *text-mode-map*) (dired-mode *dired-mode-map*) (t nil)))
+(defun mode-keymap (mode) (case mode (lisp-mode *lisp-mode-map*) (text-mode *text-mode-map*) (dired-mode *dired-mode-map*) (possibilities-mode *possibilities-mode-map*) (t nil)))
 (defun mode-display-name (mode)
-  (case mode (lisp-mode "Lisp") (text-mode "Text") (dired-mode "Dired") (diff-mode "Diff") (t "Fundamental")))
+  (case mode (lisp-mode "Lisp") (text-mode "Text") (dired-mode "Dired") (diff-mode "Diff") (possibilities-mode "Possibilities") (t "Fundamental")))
 
 ;;; ---- display ----------------------------------------------------------------------------------------------
 
@@ -622,6 +624,7 @@
     (let* ((s (buffer-string b)) (st (%defun-start b)) (e (sexp-end s st)))
       (if e
           (progn (eval-string-in-editor ed (subseq s st e))
+                 (buffer-note-compiled b (lambda (sec) (= (sec-start sec) st)))
                  (let ((form (ignore-errors (%read-from-string s st))))
                    (multiple-value-bind (name kind) (%definition-info form)
                      (when (and name (buffer-file b)) (%note-definition name kind (buffer-file b) st)
@@ -630,8 +633,13 @@
 (defcmd compile-defun (ed arg) (run-editor-command ed 'eval-defun nil))
 (defcmd eval-region (ed arg)
   (with-b (b ed) (multiple-value-bind (l1 c1 l2 c2) (region-bounds b)
-                   (if l1 (eval-string-in-editor ed (%raw-text b l1 c1 l2 c2)) (ed-message* ed "No region")))))
-(defcmd eval-buffer (ed arg) (eval-string-in-editor ed (buffer-string (ed-buffer ed))))
+                   (if l1
+                       (let ((o1 (buf-offset b l1 c1)) (o2 (buf-offset b l2 c2)))
+                         (eval-string-in-editor ed (%raw-text b l1 c1 l2 c2))
+                         (buffer-note-compiled b (lambda (sec) (and (<= o1 (sec-start sec)) (<= (sec-end sec) o2)))))
+                       (ed-message* ed "No region")))))
+(defcmd eval-buffer (ed arg)
+  (with-b (b ed) (eval-string-in-editor ed (buffer-string b)) (buffer-reset-baselines b '(:compiled))))
 
 ;;; ---- default key bindings ------------------------------------------------------------------------------------------------------------
 

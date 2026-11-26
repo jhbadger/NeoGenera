@@ -75,9 +75,32 @@ Files ending in `.lisp` are edited in Lisp mode.
 | `C-x C-e` | evaluate the expression before point and show the value |
 | `C-M-x` or `C-c C-c` | evaluate the definition at point |
 | `M-.` | jump to the definition of the symbol at point; `M-,` returns |
+| `C-c C-a` | show the lambda list of the function being called around point (Zmacs `c-sh-A`) |
+| `C-c C-d` | show the first line of the documentation of the symbol near point; `C-u C-c C-d` shows all of it (`c-sh-D`, `m-sh-D`) |
+| `C-c RET` | macroexpand the expression after point once; `C-c M-RET` expands until the head is not a macro (`c-sh-M`, `m-sh-M`) |
 
 Typing a space after `(name` shows the lambda list of `name` in the echo area, and the parenthesis matching
 the one at point is highlighted. See [Developer Tools](topic:tools-manual) for how source locations are found.
+
+## Working with definitions
+
+The editor knows which top-level forms are definitions and remembers their text when the file was read,
+when it was last saved and when each definition was last compiled.
+
+| Command | Action |
+|---|---|
+| `M-x edit-changed-definitions` | visit each definition changed since it was last compiled, in every Lisp buffer |
+| `M-x compile-changed-definitions` | compile just those definitions |
+| `M-x list-changed-definitions` | list them in a buffer |
+| `M-x edit-callers` | visit each function that calls (or uses) a name, with point on the use |
+| `M-x list-callers` | list the callers in a buffer |
+
+Give `C-u` to the changed-definition commands for changes since the file was last saved, `C-u C-u` for
+changes since it was read. Each command also has an `-of-buffer` form for the current buffer only.
+
+These commands leave a list of places. `` C-x ` `` (or `M-g n`, or `C-.` where the terminal can send it)
+goes to the next place, `M-g p` to the previous one, and `C-x C-.` shows the whole list: `RET` visits the
+entry on the line, `q` leaves.
 
 ## Limits
 
