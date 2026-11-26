@@ -5,8 +5,9 @@
 ;;;; (what the terminal currently shows) and emits only the changes as terminal
 ;;;; escape sequences (damage tracking).  Colors are a palette index 0-255,
 ;;;; -1 (default) or an RGB value (+ #x1000000 r*65536 g*256 b); the output mode
-;;;; (:truecolor, :256, :mono) is chosen from the environment.  Limitation: every
-;;;; code point is assumed to be one column wide.
+;;;; (:truecolor, :256, :mono) is chosen from the environment.  A wide character (CHAR-DISPLAY-WIDTH 2)
+;;;; fills two cells, the second holding +WIDE-CONT+; combining marks are merged with the character before them
+;;;; into a cluster cell (a code from #x180000 naming an interned string).  Image cells start at #x200000.
 
 (in-package :cl)
 
@@ -125,14 +126,68 @@
          (*clip-bottom* (min *clip-bottom* ,bottom)) (*clip-right* (min *clip-right* ,right)))
      ,@body))
 
+(defconstant +wide-cont+ #x110000 "The cell after a wide character.")
+(defconstant +cluster-base+ #x180000)
+
+(defvar *screen-clusters* (make-array 16 :adjustable t :fill-pointer 0) "Cluster strings, by code - +CLUSTER-BASE+.")
+(defvar *screen-cluster-widths* (make-array 16 :adjustable t :fill-pointer 0))
+(defvar *screen-cluster-ids* (make-hash-table :test 'equal))
+
+(defun screen-cluster (string)
+  "The cell code for the grapheme STRING (a character followed by combining marks)."
+  (or (gethash string *screen-cluster-ids*)
+      (let ((code (+ +cluster-base+ (fill-pointer *screen-clusters*))))
+        (vector-push-extend string *screen-clusters*)
+        (vector-push-extend (max 1 (string-display-width string)) *screen-cluster-widths*)
+        (setf (gethash string *screen-cluster-ids*) code))))
+
+(defun %cluster-p (ch) (and (>= ch +cluster-base+) (< ch #x200000)))
+
+(defun cell-width (ch)
+  "Columns the cell code CH occupies: 2 for a wide character, 0 for +WIDE-CONT+, otherwise 1."
+  (cond ((< ch #x300) 1)
+        ((= ch +wide-cont+) 0)
+        ((%cluster-p ch) (aref *screen-cluster-widths* (- ch +cluster-base+)))
+        ((>= ch #x110000) 1)
+        (t (max 1 (char-display-width ch)))))
+
+(defun %set-cell-char (s i ch) (setf (aref (scr-chars s) i) ch))
+
 (defun screen-put (s r c ch fg bg attr)
   (when (and (>= r *clip-top*) (< r *clip-bottom*) (>= c *clip-left*) (< c *clip-right*)
              (>= r 0) (< r (scr-rows s)) (>= c 0) (< c (scr-cols s)))
-    (let ((i (+ (* r (scr-cols s)) c)))
-      (setf (aref (scr-chars s) i) ch)
+    (let* ((cols (scr-cols s)) (i (+ (* r cols) c)) (chars (scr-chars s)) (old (aref chars i)) (w 1))
+      (cond ((= ch +wide-cont+)                         ; only right after a wide character
+             (setq w 0)
+             (unless (and (> c 0) (= 2 (cell-width (aref chars (- i 1))))) (setq ch 32 w 1)))
+            ((and (>= ch #x300) (< ch #x110000) (= 0 (char-display-width ch)))   ; a lone combining mark
+             (setq ch (screen-cluster (utf8-from-codes (list 32 ch)))))
+            (t (setq w (cell-width ch))))
+      (when (and (= w 2) (or (>= (+ c 1) cols) (>= (+ c 1) *clip-right*))) (setq ch 32 w 1))
+      ;; never leave half of a wide character behind
+      (when (and (= old +wide-cont+) (/= ch +wide-cont+) (> c 0) (= 2 (cell-width (aref chars (- i 1)))))
+        (%set-cell-char s (- i 1) 32))
+      (when (and (= 2 (cell-width old)) (/= w 2) (< (+ c 1) cols) (= (aref chars (+ i 1)) +wide-cont+))
+        (%set-cell-char s (+ i 1) 32))
+      (setf (aref chars i) ch)
       (setf (aref (scr-fgs s) i) fg)
       (setf (aref (scr-bgs s) i) bg)
-      (setf (aref (scr-attrs s) i) attr))))
+      (setf (aref (scr-attrs s) i) attr)
+      (when (= w 2)
+        (let ((j (+ i 1)))
+          (when (and (= 2 (cell-width (aref chars j))) (< (+ c 2) cols) (= (aref chars (+ j 1)) +wide-cont+))
+            (%set-cell-char s (+ j 1) 32))
+          (setf (aref chars j) +wide-cont+ (aref (scr-fgs s) j) fg (aref (scr-bgs s) j) bg (aref (scr-attrs s) j) attr))))))
+
+(defun screen-combine (s r c code)
+  "Add the combining mark CODE to the character in the cell at row R, column C."
+  (when (and (>= r *clip-top*) (< r *clip-bottom*) (>= c *clip-left*) (< c *clip-right*)
+             (>= r 0) (< r (scr-rows s)) (>= c 0) (< c (scr-cols s)))
+    (let* ((i (+ (* r (scr-cols s)) c)) (chars (scr-chars s)))
+      (when (and (> c 0) (= (aref chars i) +wide-cont+)) (setq i (- i 1)))
+      (let ((base (aref chars i)))
+        (unless (>= base #x200000)
+          (setf (aref chars i) (screen-cluster (%string-concat (%cell-string base) (utf8-from-codes (list code))))))))))
 
 (defun screen-fill (s r c h w ch fg bg attr)
   (dotimes (i h) (dotimes (j w) (screen-put s (+ r i) (+ c j) ch fg bg attr))))
@@ -149,15 +204,20 @@
       (when (>= i n) (return))
       (let ((b (char-code (char string i))))
         (if (< b 128)
-            (progn (screen-put s r col (if (< b 32) 32 b) fg bg attr) (setq i (+ i 1)))
+            (progn (screen-put s r col (if (< b 32) 32 b) fg bg attr) (setq i (+ i 1)) (setq col (+ col 1)))
             (multiple-value-bind (code next) (%utf8-decode string i)
-              (screen-put s r col code fg bg attr)
-              (setq i next))))
-      (setq col (+ col 1)))
+              (setq i next)
+              (let ((w (char-display-width code)))
+                (cond ((and (= w 0) (> col c)) (screen-combine s r (- col 1) code))
+                      (t (screen-put s r col code fg bg attr) (setq col (+ col (max 1 w))))))))))
     col))
 
 (defun %cell-string (code)
-  (cond ((< code 128) (string (code-char code))) ((>= code #x110000) " ") (t (%utf8-encode code))))   ; image cells read as spaces
+  (cond ((< code 128) (string (code-char code)))
+        ((= code +wide-cont+) "")
+        ((%cluster-p code) (aref *screen-clusters* (- code +cluster-base+)))
+        ((>= code #x110000) " ")                                              ; image cells read as spaces
+        (t (%utf8-encode code))))
 
 (defun screen-row-string (s r &optional (trim t))
   (let ((parts nil) (cols (scr-cols s)))
@@ -175,7 +235,14 @@
   (dotimes (r (scr-rows s) nil)
     (let* ((row (screen-row-string s r nil)) (p (%string-search text row 0)))
       ;; P is a byte offset into the UTF-8 row; convert it to a screen column
-      (when p (return (cons r (let ((n 0)) (dotimes (i p) (unless (= (logand (char-code (char row i)) #xC0) #x80) (setq n (+ n 1)))) n)))))))
+      (when p
+        (return (cons r (let ((bytes 0) (col 0) (cols (scr-cols s)))
+                          (loop (when (or (>= bytes p) (>= col cols)) (return))
+                                (setq bytes (+ bytes (length (%cell-string (aref (scr-chars s) (+ (* r cols) col))))))
+                                (setq col (+ col 1)))
+                          ;; past the second half of a wide character
+                          (loop (when (or (>= col cols) (/= (aref (scr-chars s) (+ (* r cols) col)) +wide-cont+)) (return col))
+                                (setq col (+ col 1))))))))))
 
 (defun screen-cell (s r c)
   (let ((i (+ (* r (scr-cols s)) c)))
@@ -230,12 +297,16 @@
         (dotimes (c cols)
           (let ((i (+ base c)))
             (let ((ch (aref (scr-chars s) i)) (fg (aref (scr-fgs s) i)) (bg (aref (scr-bgs s) i)) (at (aref (scr-attrs s) i)))
-              (unless (and (eql ch (aref (scr-fchars s) i)) (eql fg (aref (scr-ffgs s) i))
-                           (eql bg (aref (scr-fbgs s) i)) (eql at (aref (scr-fattrs s) i)))
+              (unless (or (and (eql ch (aref (scr-fchars s) i)) (eql fg (aref (scr-ffgs s) i))
+                               (eql bg (aref (scr-fbgs s) i)) (eql at (aref (scr-fattrs s) i)))
+                          (and (= ch +wide-cont+)                 ; drawn with the wide character before it
+                               (progn (setf (aref (scr-fchars s) i) ch (aref (scr-ffgs s) i) fg (aref (scr-fbgs s) i) bg
+                                            (aref (scr-fattrs s) i) at)
+                                      t)))
                 (unless (and (= pos-r r) (= pos-c c))
                   (%emit-csi out) (%emit-num out (+ r 1)) (%emit-str out ";") (%emit-num out (+ c 1))
                   (vector-push-extend 72 out))
-                (if (>= ch #x110000)
+                (if (>= ch #x200000)
                     (if (eq *graphics* :kitty)
                         (setq cur-fg (%emit-image-cell out ch bg mode visible) cur-bg bg cur-attr 0)
                         (progn (%emit-sgr out -1 bg 0 mode) (setq cur-fg -1 cur-bg bg cur-attr 0) (vector-push-extend 32 out)))
@@ -243,8 +314,10 @@
                       (unless (and (eql fg cur-fg) (eql bg cur-bg) (eql at cur-attr))
                         (%emit-sgr out fg bg at mode)
                         (setq cur-fg fg cur-bg bg cur-attr at))
-                      (vector-push-extend ch out)))
-                (setq pos-r r pos-c (+ c 1))
+                      (if (%cluster-p ch)
+                          (dolist (code (utf8-codes (%cell-string ch))) (vector-push-extend code out))
+                          (vector-push-extend ch out))))
+                (setq pos-r r pos-c (+ c (if (>= ch #x200000) 1 (cell-width ch))))
                 (setf (aref (scr-fchars s) i) ch) (setf (aref (scr-ffgs s) i) fg)
                 (setf (aref (scr-fbgs s) i) bg) (setf (aref (scr-fattrs s) i) at)))))))
     (when (/= cur-attr -3) (%emit-csi out) (%emit-str out "0m"))

@@ -27,6 +27,8 @@ Escape).
 | `C-/` or `C-x u` | undo |
 | `M-_` | redo |
 | `C-u 5 x` | repeat a command with a prefix argument |
+| `M-u` `M-l` `M-c` | upper-case, lower-case or capitalize a word; `C-x C-u` and `C-x C-l` do the region |
+| `M-/` | complete the word before point from words in the buffers (nearest first; again for the next one) |
 
 ### The undo tree
 
@@ -41,8 +43,60 @@ shows the tree and `M-x undo-tree-select-branch` picks which branch redo follows
 ## Searching
 
 `C-s` searches forward and `C-r` backward incrementally. Type the text; `C-s` or `C-r` again find the next
-match; Return stops at the match; `C-g` returns to where you started. A failing search wraps when you repeat it.
-`M-x replace-string` replaces every occurrence after point.
+match; Return stops at the match (the mark ring remembers where you started); `C-g` returns to where you
+started. A failing search wraps when you repeat it. While searching, `C-w` adds the rest of the word at point
+and `M-r` switches between plain text and a regular expression. The other matches on the screen are
+underlined.
+
+A search ignores case unless what you type has an upper-case letter. This works for accented, Greek and
+Cyrillic letters too.
+
+`C-M-s` and `C-M-r` search for a regular expression. The syntax is the usual one:
+
+| Pattern | Matches |
+|---|---|
+| `.` | any character |
+| `[abc]` `[^a-z]` `[[:alpha:]]` | a character in (or not in) a set; classes `alpha digit alnum space upper lower punct word blank xdigit` |
+| `\d` `\w` `\s` (`\D` `\W` `\S`) | a digit, a word character, a space (or not) |
+| `^` `$` `\b` `\B` | start and end of the line, a word boundary (or not) |
+| `(...)` `(?:...)` | a group, numbered or not; a vertical bar between two patterns matches either |
+| `*` `+` `?` `{n}` `{n,}` `{n,m}` | repetition; add `?` for the shortest match (`*?`) |
+| `\1` ... `\9` | the text a group matched |
+
+A match lies within one line.
+
+## Replacing
+
+`M-%` replaces text after point, asking about each match: `y` or space replaces it, `n` or Delete skips it,
+`!` replaces all the rest, `.` replaces this one and stops, `q` or Return stops. Any other key stops and does
+what it normally does. When the search ignores case and the replacement is in lower case, a match in capitals
+gets a capitalized replacement, and a capitalized match a capitalized one: replacing `cat` with `dog` turns
+`Cat CAT` into `Dog DOG`.
+
+`M-x query-replace-regexp` does the same with a regular expression. In the replacement, `\&` is the whole match
+and `\1` to `\9` are the groups. `M-x replace-regexp` and `M-x replace-string` replace every match without
+asking. `M-x count-matches` counts the matches after point, and `M-x occur` lists the lines that match: step
+through them with `` C-x ` `` (see *Working with definitions*). Each replacement is one undo step.
+
+## Views
+
+An editor window can show several views, of one buffer or of different ones. Each view has its own point.
+
+| Keys | Action |
+|---|---|
+| `C-x 2` `C-x 3` | split the view: one above the other, or side by side |
+| `C-x o` | go to the next view (a click also selects a view) |
+| `C-x 0` `C-x 1` | close this view; close the others |
+| `C-M-v` | scroll the other view |
+| `C-x 4 b` `C-x 4 f` | switch buffer or find a file in the other view |
+
+## Keyboard macros
+
+`C-x (` (or F3) starts recording keys, and `C-x )` (or F4) stops; the mode line shows `Def` meanwhile.
+`C-x e` (or F4) plays the macro back, and each further `e` plays it again. A prefix argument repeats it:
+`C-u 5 C-x e` runs it five times, and `C-u 0 C-x e` runs it until a command fails (a search finds nothing, for
+example). A failing command always stops the macro. `M-x name-last-kbd-macro` makes the macro a command you
+can run with `M-x`.
 
 ## Files and buffers
 
@@ -62,11 +116,14 @@ commits the current file with a message.
 
 ## Lisp mode
 
-Files ending in `.lisp` are edited in Lisp mode.
+Files ending in `.lisp` are edited in Lisp mode. Comments, strings, character literals, keywords, `t` and `nil`,
+special forms and common macros, and the names after `defun`, `defmacro` and the other definers are coloured.
+Diff buffers (`C-x v =`) colour added and removed lines.
 
 | Keys | Action |
 |---|---|
-| `TAB`, `RET` | indent the line; Return indents the new line |
+| `TAB`, `RET` | indent the line; Return indents the new line. On a line that is already indented, `TAB` after a symbol completes it |
+| `M-TAB` (`ESC TAB`) | complete the symbol before point: a unique completion is inserted, otherwise the common part, and the echo area lists the choices. `pkg:sym` and `:keyword` complete too |
 | `C-M-f` `C-M-b` | forward and backward over an expression |
 | `C-M-u` `C-M-d` | up out of and down into a list |
 | `C-M-k` | kill the expression after point |
@@ -79,8 +136,21 @@ Files ending in `.lisp` are edited in Lisp mode.
 | `C-c C-d` | show the first line of the documentation of the symbol near point; `C-u C-c C-d` shows all of it (`c-sh-D`, `m-sh-D`) |
 | `C-c RET` | macroexpand the expression after point once; `C-c M-RET` expands until the head is not a macro (`c-sh-M`, `m-sh-M`) |
 
-Typing a space after `(name` shows the lambda list of `name` in the echo area, and the parenthesis matching
-the one at point is highlighted. See [Developer Tools](topic:tools-manual) for how source locations are found.
+While point is inside a call, the echo area shows the lambda list of the function, with the parameter for the
+argument at point highlighted (for `&key` arguments, the one named by the keyword before it). The parenthesis
+matching the one at point is highlighted. See [Developer Tools](topic:tools-manual) for how source locations are
+found.
+
+## Unicode
+
+Text is UTF-8. Point moves over whole characters, and an accent written as a separate combining mark moves
+with its letter. Chinese, Japanese and Korean characters and emoji take two columns, and combining marks none.
+Word motion treats punctuation such as dashes and quotation marks as separating words. Case commands and
+case-insensitive search know accented, Greek, Cyrillic and Armenian letters, one letter for one (so `ß`
+stays `ß`).
+
+`C-x =` shows the character at point: its code points, its size in bytes, its width and the position.
+`C-x 8 RET` inserts a character by its code point in hexadecimal, such as `3bb` or `U+1F600`.
 
 ## Working with definitions
 
@@ -104,5 +174,6 @@ entry on the line, `q` leaves.
 
 ## Limits
 
-The editor works on bytes: UTF-8 characters move as one character but nothing else is Unicode-aware. There is
-no query-replace, regexp search or syntax colouring beyond comment lines.
+Regular expressions match within a line. Several views share one editor window, which is a window of the window
+system. Character names (for `C-x 8 RET`) and case mappings that change the length of a word (`ß` to `SS`) are not
+known. How wide an emoji sequence joined with zero-width joiners looks depends on the terminal.

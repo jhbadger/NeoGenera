@@ -1,7 +1,7 @@
 ;;;; 00-buffer.lisp -- editor buffers: text, undo tree, kill ring, motion, rectangles.
 ;;;;
-;;;; A buffer is a vector of lines (byte strings; UTF-8 text is edited correctly by character
-;;;; motion but columns are byte offsets).  EVERY edit goes through BUF-INSERT / BUF-DELETE, which
+;;;; A buffer is a vector of lines (UTF-8 byte strings; columns are byte offsets, and character
+;;;; motion steps over whole characters, keeping combining marks with the character before them).  EVERY edit goes through BUF-INSERT / BUF-DELETE, which
 ;;;; record the change in the UNDO TREE: undoing and then editing starts a new branch, and the old
 ;;;; branch stays reachable (UNDO-TREE-SELECT).  Positions are (line . column).
 
@@ -59,8 +59,14 @@
 
 (defun buffer-string (b) (join-lines (coerce (buffer-lines b) 'list)))
 
+(defun %note-change (b line)
+  "Forget cached per-line information (the syntax state) after LINE, which has changed."
+  (let ((v (buf-local b 'syntax-states)))
+    (when (and v (> (fill-pointer v) (+ line 1))) (setf (fill-pointer v) (+ line 1)))))
+
 (defun buffer-set-text (b text)
   "Replace the contents without recording undo (used when loading a file)."
+  (%note-change b 0)
   (setf (buffer-lines b) (coerce (split-lines text) 'vector))
   (setf (point-line b) 0 (point-col b) 0 (buffer-mark b) nil (buffer-modified b) nil)
   b)
@@ -69,6 +75,7 @@
 
 (defun %raw-insert (b line col string)
   "Insert STRING at (LINE . COL); returns the end position."
+  (%note-change b line)
   (let* ((parts (split-lines string)) (lines (buffer-lines b)) (cur (aref lines line))
          (prefix (subseq cur 0 col)) (suffix (subseq cur col)))
     (if (null (cdr parts))
@@ -83,6 +90,7 @@
 
 (defun %raw-delete (b l1 c1 l2 c2)
   "Delete from (L1 . C1) to (L2 . C2); returns the deleted text."
+  (%note-change b l1)
   (let* ((lines (buffer-lines b)) (text (%raw-text b l1 c1 l2 c2)))
     (setf (aref lines l1) (%string-concat (subseq (aref lines l1) 0 c1) (subseq (aref lines l2) c2)))
     (when (> l2 l1)
@@ -219,46 +227,65 @@
 
 (defun cont-byte-p (line i) (and (< i (length line)) (= (logand (char-code (char line i)) #xC0) #x80)))
 
+(defun %zero-width-at-p (line i)
+  (and (< i (length line)) (>= (char-code (char line i)) #xC0)
+       (let ((code (utf8-char-at line i))) (and (>= code #x300) (= 0 (char-display-width code))))))
+
+(defun char-end (line i)
+  "Byte index after the character at I in LINE, with the combining marks that follow it."
+  (let ((c (+ i 1)) (n (length line)))
+    (loop (unless (cont-byte-p line c) (return)) (setq c (+ c 1)))
+    (loop (unless (and (< c n) (%zero-width-at-p line c)) (return)) (setq c (nth-value 1 (utf8-char-at line c))))
+    (min c n)))
+
+(defun char-start (line i)
+  "Byte index of the character (with its combining marks) that ends at I in LINE."
+  (let ((c i))
+    (loop
+      (when (<= c 0) (return 0))
+      (setq c (- c 1))
+      (loop (unless (and (> c 0) (cont-byte-p line c)) (return)) (setq c (- c 1)))
+      (unless (%zero-width-at-p line c) (return c)))))
+
+(defun code-at (line i) "The code point at byte I of LINE." (values (utf8-char-at line i)))
+(defun code-before (line i) "The code point of the character ending at byte I of LINE (ignoring combining marks)."
+  (let ((c (- i 1))) (loop (unless (and (> c 0) (cont-byte-p line c)) (return)) (setq c (- c 1))) (code-at line c)))
+
 (defun buf-forward-char (b &optional (n 1))
   (dotimes (i n)
     (let* ((line (buf-current-line b)) (c (point-col b)))
-      (cond ((< c (length line))
-             (setq c (+ c 1))
-             (loop (unless (cont-byte-p line c) (return)) (setq c (+ c 1)))
-             (setf (point-col b) c))
+      (cond ((< c (length line)) (setf (point-col b) (char-end line c)))
             ((< (point-line b) (- (buf-nlines b) 1)) (setf (point-line b) (+ 1 (point-line b)) (point-col b) 0)))))
   (setf (buffer-goal b) nil))
 
 (defun buf-backward-char (b &optional (n 1))
   (dotimes (i n)
     (let ((c (point-col b)))
-      (cond ((> c 0)
-             (let ((line (buf-current-line b)))
-               (setq c (- c 1))
-               (loop (unless (and (> c 0) (cont-byte-p line c)) (return)) (setq c (- c 1)))
-               (setf (point-col b) c)))
+      (cond ((> c 0) (setf (point-col b) (char-start (buf-current-line b) c)))
             ((> (point-line b) 0) (setf (point-line b) (- (point-line b) 1)) (setf (point-col b) (length (buf-current-line b)))))))
   (setf (buffer-goal b) nil))
 
+(defun %char-cols (line i d)
+  "Columns taken by the character at byte I of LINE when it starts at column D, and the byte after it."
+  (let ((c (char-code (char line i))))
+    (cond ((= c 9) (values (- (* 8 (+ 1 (floor d 8))) d) (+ i 1)))
+          ((< c 32) (values 2 (+ i 1)))                          ; shown as ^X
+          ((< c 128) (values 1 (+ i 1)))
+          (t (multiple-value-bind (code next) (%utf8-decode line i) (values (char-display-width code) next))))))
+
 (defun display-col (line col)
-  "Screen column of byte offset COL in LINE (UTF-8 characters count once, tabs advance to multiples of 8)."
-  (let ((d 0) (i 0))
-    (loop (when (>= i (min col (length line))) (return))
-          (let ((c (char-code (char line i))))
-            (cond ((= c 9) (setq d (* 8 (+ 1 (floor d 8)))))
-                  ((/= (logand c #xC0) #x80) (setq d (+ d 1)))))
-          (setq i (+ i 1)))
-    d))
+  "Screen column of byte offset COL in LINE: tabs advance to multiples of 8, wide characters take two columns,
+combining marks none, control characters two (^X)."
+  (let ((d 0) (i 0) (end (min col (length line))))
+    (loop (when (>= i end) (return d))
+          (multiple-value-bind (w next) (%char-cols line i d) (setq d (+ d w) i next)))))
 
 (defun byte-col-for-display (line target)
-  (let ((i 0) (d 0))
-    (loop (when (or (>= i (length line)) (>= d target)) (return))
-          (let ((c (char-code (char line i))))
-            (cond ((= c 9) (setq d (* 8 (+ 1 (floor d 8)))))
-                  ((/= (logand c #xC0) #x80) (setq d (+ d 1)))))
-          (setq i (+ i 1))
-          (loop (unless (cont-byte-p line i) (return)) (setq i (+ i 1))))
-    i))
+  "Byte offset in LINE of the character at (or just after) screen column TARGET."
+  (let ((i 0) (d 0) (n (length line)))
+    (loop (when (or (>= i n) (>= d target)) (return i))
+          (multiple-value-bind (w next) (%char-cols line i d) (setq d (+ d w) i next))
+          (loop (unless (and (< i n) (%zero-width-at-p line i)) (return)) (setq i (nth-value 1 (utf8-char-at line i)))))))
 
 (defun buf-move-vertically (b n)
   (let ((goal (or (buffer-goal b) (display-col (buf-current-line b) (point-col b)))))
@@ -266,27 +293,27 @@
       (setf (point-line b) nl (point-col b) (byte-col-for-display (buf-line b nl) goal))
       (setf (buffer-goal b) goal))))
 
-(defun word-char-p (code) (or (>= code 128) (and (< code 128) (or (alphanumericp (code-char code)) (= code 95)))))
+(defun word-char-p (code) (unicode-word-char-p code))
 
 (defun buf-forward-word (b)
   (let ((moved nil))
     (loop
       (let* ((line (buf-current-line b)) (c (point-col b)))
         (cond ((>= c (length line)) (if (< (point-line b) (- (buf-nlines b) 1)) (buf-forward-char b) (return)))
-              ((word-char-p (char-code (char line c))) (return))
+              ((word-char-p (code-at line c)) (return))
               (t (buf-forward-char b)))))
     (loop (let* ((line (buf-current-line b)) (c (point-col b)))
-            (if (and (< c (length line)) (word-char-p (char-code (char line c)))) (progn (buf-forward-char b) (setq moved t)) (return))))
+            (if (and (< c (length line)) (word-char-p (code-at line c))) (progn (buf-forward-char b) (setq moved t)) (return))))
     moved))
 
 (defun buf-backward-word (b)
   (loop
     (let* ((line (buf-current-line b)) (c (point-col b)))
       (cond ((<= c 0) (if (> (point-line b) 0) (buf-backward-char b) (return)))
-            ((word-char-p (char-code (char line (- c 1)))) (return))
+            ((word-char-p (code-before line c)) (return))
             (t (buf-backward-char b)))))
   (loop (let* ((line (buf-current-line b)) (c (point-col b)))
-          (if (and (> c 0) (word-char-p (char-code (char line (- c 1))))) (buf-backward-char b) (return)))))
+          (if (and (> c 0) (word-char-p (code-before line c))) (buf-backward-char b) (return)))))
 
 (defun buf-goto (b line col)
   (let ((l (max 0 (min line (- (buf-nlines b) 1)))))

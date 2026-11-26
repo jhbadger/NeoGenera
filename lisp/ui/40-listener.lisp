@@ -30,6 +30,7 @@
    (input-top :initform 0 :accessor lw-input-top)
    (last-error :initform nil :accessor lw-last-error)
    (debug :initform nil :accessor lw-debug)          ; debugger levels in this window, innermost first
+   (accepts :initform nil :accessor lw-accepts)      ; ACCEPTs waiting for input in this window, innermost first
    (read-only :initform nil :initarg :read-only :accessor lw-read-only)
    (lesson :initform nil :accessor lw-lesson)))
 
@@ -45,6 +46,7 @@
   (let ((spec (car (cadddr pending)))) (cadddr spec)))
 
 (defun %prompt-string (w)
+  (if (lw-accepts w) (return-from %prompt-string (%string-concat (as-prompt (car (lw-accepts w))) ": ")))
   (if (lw-pending w)
       (%string-concat (%pending-prompt (lw-pending w)) ": ")
       (%string-concat (let ((n (package-name (lw-pkg w))))
@@ -149,7 +151,7 @@
 (defmethod window-hover-doc ((w listener-window) lx ly)
   (let ((p (%pres-at w lx ly)))
     (setf (lw-hover w) p)
-    (and p (presentation-doc p))))
+    (and p (or (%accept-hover-doc p) (presentation-doc p)))))
 
 (defun %run-pcmd (w cmd obj)
   (%in-listener w (lambda () (funcall (pcmd-fn cmd) obj)) (format nil "~A" (pcmd-label cmd))))
@@ -158,7 +160,9 @@
   (declare (ignore mods))
   (when (eq kind :press)
     (let ((p (%pres-at w lx ly)))
-      (cond (p (cond ((= button 0) (let ((c (default-pcommand (pres-type p)))) (when c (%run-pcmd w c (pres-object p)))))
+      (cond (p (cond ((= button 0)
+                      (unless (%accept-click p)              ; a click answers the input wanted, if it can
+                        (let ((c (default-pcommand (pres-type p)))) (when c (%run-pcmd w c (pres-object p))))))
                      ((= button 1) (%insert-text w (%input-text-for (pres-object p))))
                      (t (let ((cmds (applicable-pcommands (pres-type p))) (wm (window-wm w)))
                           (wm-popup-menu wm (mapcar (lambda (c) (cons (pcmd-label c) c)) cmds)
@@ -226,6 +230,7 @@
 (defun %complete (w)
   (let* ((in (lw-input w)) (pos (lw-cursor-pos w)) (before (subseq in 0 pos)) (out (lw-stream w)))
     (cond
+      ((lw-accepts w) (%apply-completion w (accept-completions (as-type (car (lw-accepts w))) before) 0 pos out))
       ((and (> (length before) 0) (char= (char before 0) #\:) (not (%string-position-char before #\Space 0)))
        (let* ((word (string-upcase (subseq before 1))) (cands (complete-command-words (list word))))
          (%apply-completion w cands 1 (length before) out)))
@@ -287,7 +292,9 @@
       ((and ctrl (eql c 119)) (let ((p (%word-back in pos))) (setf (lw-kill w) (subseq in p pos)) (%delete-range w p pos)) t)
       ((and ctrl (eql c 121)) (%insert-text w (lw-kill w)) t)
       ((and ctrl (eql c 108)) (ob-clear (lw-obuf w)) t)
-      ((and ctrl (eql c 103)) (setf (lw-pending w) nil) (%delete-range w 0 (length in)) t)
+      ((and ctrl (eql c 103))
+       (when (and (lw-accepts w) (= (length in) 0)) (%abort-accept w))        ; C-g on an empty line gives up the ACCEPT
+       (setf (lw-pending w) nil) (%delete-range w 0 (length in)) t)
       ((or (eq c :up) (and meta (eql c 112))) (%history-step w 1) t)
       ((or (eq c :down) (and meta (eql c 110))) (%history-step w -1) t)
       ((eq c :tab) (%complete w) t)
@@ -422,17 +429,18 @@ reported in the pane); either way an abandoned THUNK returns.  Returns (values l
     (write-string text out)
     (terpri out)
     (let ((trimmed (string-trim " " text)))
-      (cond ((lw-pending w)
+      (cond ((lw-accepts w) (%accept-submit w text))
+            ((lw-pending w)
              (let ((pending (lw-pending w)) (result nil))
                (setf (lw-pending w) nil)
                (%in-listener w (lambda () (setq result (continue-command pending trimmed))))
-               (when (and (consp result) (eq (car result) :prompt)) (setf (lw-pending w) result))))
+               (when (and (consp result) (eq (car result) :prompt)) (setf (lw-pending w) result *pending-listener* w))))
             ((= (length trimmed) 0) nil)
             ((and (lw-debug w) (%restart-number-line trimmed)) (%debug-restart-line w trimmed))
             ((char= (char trimmed 0) #\:)
              (let ((result nil))
                (%in-listener w (lambda () (setq result (execute-command-line (subseq trimmed 1)))))
-               (when (and (consp result) (eq (car result) :prompt)) (setf (lw-pending w) result))))
+               (when (and (consp result) (eq (car result) :prompt)) (setf (lw-pending w) result *pending-listener* w))))
             (t (%eval-text w text))))))
 
 ;;; F9 L selects a Listener (only plain ones: report windows are Listener subclasses)

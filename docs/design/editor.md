@@ -7,8 +7,12 @@ An Emacs/Zmacs-style editor that runs inside a window (`EDITOR-WINDOW`) of the w
 ## Buffers (`00-buffer.lisp`)
 
 A buffer is a vector of byte strings; positions are `(line . column)` with byte columns. Character
-motion treats a UTF-8 sequence as one character and display columns expand tabs, but the editor does
-not otherwise understand Unicode (no case mapping of non-ASCII text, no width handling).
+motion (`CHAR-END`, `CHAR-START`) steps over a UTF-8 character and the combining marks after it.
+Display columns (`DISPLAY-COL`, `BYTE-COL-FOR-DISPLAY`) expand tabs and use `CHAR-DISPLAY-WIDTH`: wide
+characters take two columns, combining marks none, control characters two (`^X`). Word motion and case
+commands use the Unicode functions of `lisp/core/63-unicode.lisp` (`UNICODE-WORD-CHAR-P`, `UTF8-UPCASE`, ...).
+`%RAW-INSERT` and `%RAW-DELETE` call `%NOTE-CHANGE`, which drops cached per-line state (the syntax states)
+after the changed line.
 
 All edits go through `BUF-INSERT` and `BUF-DELETE`, which record the change in the **undo tree**:
 `BUF-UNDO` / `BUF-REDO` walk the tree, an edit made after an undo starts a new branch, and the older
@@ -19,6 +23,17 @@ Also here: the kill ring (consecutive kills append), the mark and region, rectan
 (`kill`/`yank`/`string`/`open`/`clear`), forward and backward incremental search primitives, and the
 Lisp structure functions `SEXP-END`, `SEXP-START-BEFORE`, `SEXP-CONTEXT`, `LIST-END` (strings,
 comments, `#\x`, `|sym|` and `#| |#` are understood) and `LISP-INDENT-FOR-LINE`.
+
+## Regular expressions (`05-regex.lisp`)
+
+`REGEX-COMPILE` parses a pattern (Perl/POSIX extended syntax: classes, `\d \w \s \b`, groups, `(?:)`,
+alternation, greedy and lazy repetition, back-references) into a tree; `REGEX-MATCH`, `REGEX-FIND` and
+`REGEX-FIND-BACKWARD` run a backtracking matcher written in continuation-passing style. A greedy repetition
+of a single-character node collects its positions in a loop and tries them longest first, so `.*` on a long
+line does not recurse deeply. Patterns and subjects are UTF-8, so `.` and classes take a whole character;
+`:CASE-FOLD` compares with `UNICODE-FOLD`. `REGEX-EXPAND` fills in `\&` and `\1`..`\9`;
+`REGEX-REPLACE-ALL` and `STRING-MATCH-P` are conveniences. (The motif functions of the bioinformatics module,
+`regex-search` and `regex-find-all`, are a separate matcher with longest-match semantics.)
 
 ## Indentation
 
@@ -32,9 +47,39 @@ align under their first element. It does not look at the user's own `declare`d i
 Keymaps are nested alists keyed by normalized keys; a mode keymap is consulted before the global one.
 Commands are defined with `DEFCMD` and are callable with `M-x` (with completion). Prefix arguments
 (`C-u`, `C-u 5`, `M-5`), a minibuffer with completion, and incremental search (`C-s`/`C-r`, failing
-search, wrap-around, `C-g` returns to the start) are built in. The display highlights the region,
-the current search match and the parenthesis matching the one at point; lines starting with `;` are
-dimmed in Lisp mode (there is no other syntax colouring).
+search, wrap-around, `C-g` returns to the start) are built in.
+
+**Views.** The window's layout is a tree whose leaves are `VIEW`s and whose nodes are `(:below a b)` or
+`(:right a b)`. The selected view's buffer point is the live point; the other views keep their own line and
+column, restored by `ED-SELECT-VIEW`. `ED-BUFFER`, `ED-TOP` and `ED-HSCROLL` are functions on the selected
+view, so commands do not know about views. `DRAW-LAYOUT` divides the window evenly, and each view draws its
+own mode line; the echo area is shared.
+
+**Searching.** Every search compiles a regex (`SEARCH-REGEX`; a literal search quotes its string), folding
+case when the string has no upper-case letter, and `BUF-FIND` looks for it line by line, forward or
+backward. Incremental search, query replace (`ED-QUERY`, a modal state like isearch, with Emacs's keys and
+case preservation), replace-regexp, count-matches and occur are built on it. The display underlines the
+other matches of the search in progress.
+
+**Keyboard macros.** `WINDOW-KEY` records each key while a macro is being defined (but not while one is
+running); `END-KBD-MACRO` drops the keys of its own command (`ED-COMMAND-KEYS`). `EXECUTE-KBD-MACRO` feeds
+the keys back through `WINDOW-KEY` and stops when a command fails: an error, an undefined key or a failing
+search sets `*ED-COMMAND-FAILED*`.
+
+**Completion and hints.** `M-TAB` and `TAB` complete symbols with `SYMBOL-COMPLETIONS` (package prefixes and
+keywords included); `M-/` (dabbrev) collects matching words from the buffer, nearest first, then from the
+other buffers. After every command in Lisp mode `ED-UPDATE-HINT` finds the innermost call around point,
+reading only from the start of the top-level form, and `ARGLIST-HINT` prints its lambda list, recording the
+byte range of the parameter for the argument at point. The echo area shows the hint when there is no message.
+
+**Display.** `%LINE-CELLS` turns a line into screen cells and the byte offset of each: tabs expanded,
+`^X` for control characters, a wide character followed by `+WIDE-CONT+`, combining marks merged into a
+cluster cell. **Syntax colouring** (`LISP-LINE-SYNTAX`) scans one line from a starting state (`NIL`,
+`:STRING` or `(:BLOCK . depth)`); `%SYNTAX-STATE-AT` caches the state at the start of each line and is
+recomputed from the first changed line. Classes are `:COMMENT :STRING :CONSTANT :KEYWORD :BUILTIN :DEFNAME`,
+drawn with the theme's `:SYN-...` colours when it has them and otherwise with its dim, value, link and
+prompt colours. Diff buffers colour added and removed lines. The display also highlights the region, the
+current match and the parenthesis matching the one at point.
 
 Default bindings include `C-f C-b C-n C-p C-a C-e M-f M-b M-< M-> C-v M-v`, `C-k M-d C-w M-w C-y M-y`,
 `C-SPC C-x C-x C-x h`, `C-/ C-_ C-x u` (undo) and `M-_` (redo), `C-x r k/y/t/o/c` (rectangles),
@@ -88,5 +133,5 @@ Zmacs-style commands that work on whole definitions.
 
 ## Not implemented
 
-Query-replace, regexp search, multiple windows or frames within one editor, syntax colouring beyond
-comment lines, auto-save, an interactive undo-tree browser, abbrevs, keyboard macros.
+Matches across lines, auto-save, an interactive undo-tree browser, abbrevs, saving keyboard macros to a
+file, Unicode character names and case mappings that change length.

@@ -219,6 +219,12 @@ def main():
     check("restart 0 returns to the Listener", s.wait_for("; Back to the Listener"))
     s.send("(list :after *dv*)\r")
     check("the binding is undone after the restart", s.wait_for("=> (:AFTER 1)"))
+    s.send("(list :n (accept 'integer :prompt \"Size\"))\r")
+    check("accept prompts in the Listener", s.wait_for("Size (an integer):"))
+    s.send("big\r")
+    check("accept reports text of the wrong type", s.wait_for("big is not an integer"))
+    s.send("12\r")
+    check("accept returns the typed value", s.wait_for("=> (:N 12)"))
 
     # mouse: hover a result, then click it
     pos = s.locate("=> 3")
@@ -240,6 +246,15 @@ def main():
     check("typing edits the buffer (modified flag shown)", s.wait_for("XYZ(defun mapcar") and s.term.has("**"))
     s.send("\x1f")                                          # C-_ : undo
     check("undo reverts the edit", s.wait_for("--") )
+    s.send("\x182")                                         # C-x 2: two views of the buffer
+    s.pump(0.5)
+    check("C-x 2 shows two views", s.term.text().count("(Lisp") >= 2)
+    s.send("\x181")                                         # C-x 1
+    s.pump(0.5)
+    check("C-x 1 leaves one", s.term.text().count("(Lisp") == 1)
+    s.send("\x1b%")                                         # ESC % is M-%: query replace
+    check("M-% prompts for the text to replace", s.wait_for("Query replace:"))
+    s.send("\x07")                                          # C-g
     s.send("\x18\x03")                                      # C-x C-c: close the editor window
     s.pump(0.6)
     check("closing the editor returns to the Listener", s.wait_for("CL-USER>") and not s.term.has("Editor:"))

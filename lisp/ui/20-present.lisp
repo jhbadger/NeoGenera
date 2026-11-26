@@ -42,16 +42,23 @@
 ;;; ---- UTF-8 helpers ------------------------------------------------------------------------------
 
 (defun utf8-length (str)
-  (let ((n 0)) (dotimes (i (length str)) (unless (= (logand (char-code (char str i)) #xC0) #x80) (setq n (+ n 1)))) n))
+  "The number of columns the UTF-8 string STR takes (wide characters count twice, combining marks not at all)."
+  (string-display-width str))
 
 (defun utf8-prefix-end (str start max-chars)
-  "Byte index just after at most MAX-CHARS characters of STR starting at byte START."
+  "Byte index just after the characters of STR, from byte START, that fit in MAX-CHARS columns (at least one
+character, with the combining marks that follow it)."
   (let ((i start) (n (length str)) (count 0))
     (loop
-      (when (or (>= i n) (>= count max-chars)) (return i))
-      (setq i (+ i 1))
-      (loop (when (or (>= i n) (/= (logand (char-code (char str i)) #xC0) #x80)) (return)) (setq i (+ i 1)))
-      (setq count (+ count 1)))))
+      (when (>= i n) (return i))
+      (multiple-value-bind (code next) (utf8-char-at str i)
+        (let ((w (if (< code 32) 1 (char-display-width code))))
+          (when (and (> count 0) (> (+ count w) max-chars)) (return i))
+          (when (and (= count 0) (>= count max-chars)) (return i))
+          (setq i next count (+ count w))
+          (loop (when (>= i n) (return))                       ; keep combining marks with their character
+                (multiple-value-bind (c2 n2) (utf8-char-at str i)
+                  (if (and (>= c2 #x300) (= 0 (char-display-width c2))) (setq i n2) (return)))))))))
 
 ;;; ---- layout: wrap logical lines into display rows ----------------------------------------------------
 

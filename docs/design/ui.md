@@ -35,8 +35,13 @@ A cell is (code point, fg, bg, attributes). Colours are a palette index, -1 (def
 show and emits only the differences (cursor moves, one SGR per style change); an unchanged screen
 costs a cursor sequence. Output mode is `:truecolor`, `:256` or `:mono` (attributes only), chosen
 from `COLORTERM`/`TERM`. Themes: `:classic` (black on white), `:green`, `:amber`, `:mono`; F8 cycles.
-**Limitation:** every code point is assumed to be one column wide (no East Asian wide or combining
-characters).
+**Wide and combining characters.** `SCREEN-PUT` gives a character of `CHAR-DISPLAY-WIDTH` 2 two cells, the
+second holding `+WIDE-CONT+`. Overwriting either half blanks the other, and a wide character that does not
+fit before the clip edge becomes a space. `SCREEN-FLUSH` never sends the second half; it advances its idea
+of the cursor by two. A combining mark (width 0) is merged with the character before it into a *cluster*
+cell, a code from `#x180000` that names an interned string (`SCREEN-CLUSTER`). Image cells start at
+`#x200000`. Pane layout (`UTF8-LENGTH`, `UTF8-PREFIX-END`) measures display columns, so Listener output
+wraps correctly.
 
 **Images** (`05-graphics.lisp`, `src/prims_gfx.c`). An image is an RGB byte string drawn by C primitives
 (coverage anti-aliased lines and discs, rectangles). In an output buffer an image row is a segment of
@@ -71,6 +76,22 @@ types inherit through the CLOS class precedence list. `DEFINE-PRESENTATION-COMMA
 registers an action; left click runs the default for the type, the middle button copies the object to
 the input line (as `(result n)` when it has no readable form), the right button pops up a menu of all
 applicable commands, most specific type first.
+
+**Typed input** (`45-accept.lisp`). `ACCEPT` reads an object of a presentation type. Types are CLOS classes
+and type names, `DEFINE-PRESENTATION-TYPE` types, and the compound forms `(member ...)`, `(integer lo hi)`,
+`(or ...)`, `(sequence type)`, `(null-or-type type)`, plus `boolean`, `expression` and `pathname`.
+`ACCEPT-FROM-STRING` parses text (with `*read-eval*` off), `PRESENTATION-TYPEP` checks objects,
+`DESCRIBE-PRESENTATION-TYPE` words the prompt and `ACCEPT-COMPLETIONS` completes. In the window Listener an
+`ACCEPT` pushes an `ACCEPT-STATE` on the Listener (which takes over its prompt and Return) and an *input
+context* on `*INPUT-CONTEXTS*`, then serves the window system in a nested loop (`%NESTED-SERVE`, shared with
+the debugger) until it is answered. A click on a presentation in any Listener-like window first asks
+`PRESENTATION-ACCEPTABLE-P` whether it answers the innermost context: its object is of the type, or a
+translator (`DEFINE-PRESENTATION-TRANSLATOR`, with an optional tester) turns it into one. A command waiting for
+an argument is a context too (`*PENDING-LISTENER*`). The debugger hides waiting `ACCEPT`s until it is left.
+`ACCEPTING-VALUES` runs its body with `*ACCEPTING-VALUES*` bound, so each `ACCEPT` becomes a field, keyed by
+prompt and occurrence, that returns its current value. An `AVV-WINDOW` edits the fields; after each change
+the body runs again, with its output discarded, so the set of fields can change. Done runs it once more for
+real and returns its values.
 
 ## Command processor and Listener
 

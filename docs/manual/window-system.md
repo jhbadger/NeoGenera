@@ -38,7 +38,54 @@ Frames of a backtrace, test failures, manual references and examples in the docu
 ## Commands
 
 A line that starts with a colon is a command. Abbreviate each word (`:sh pack` is `:show packages`). Missing
-arguments are prompted for. Tab completes command names, package names and symbols. `:help` lists them all.
+arguments are prompted for: type the answer, or click any object on the screen that fits (the mouse
+documentation line says *L: use this for ...* over the ones that do). Tab completes command names, package
+names and symbols. `:help` lists them all.
+
+## Asking for input
+
+Programs ask for typed input with `accept`:
+
+```lisp
+(accept 'integer :prompt "How many")
+(accept '(member :red :green :blue) :prompt "Colour" :default :red)
+```
+
+In the window Listener the prompt replaces the Listener's prompt: `How many (an integer):`. Type the answer
+and press Return, or click a presentation that fits: an integer printed earlier, for example. Text of the wrong
+type is reported, and you are asked again. Return on an empty line takes the default, Tab completes the names
+of members, packages and symbols, and C-g on an empty line gives up the evaluation. Outside the window system
+`accept` reads a line.
+
+The types are classes and type names such as `integer`, `string`, `symbol`, `keyword`, `character`,
+`package`, `number` and `function`, as well as presentation types like `frame`. There are also `boolean`
+(yes or no), `expression` (any form, not evaluated) and `pathname`, and the compound types `(integer 1 10)`,
+`(member a b c)`, `(or integer string)`, `(sequence integer)` (separated by commas) and `(null-or-type type)`.
+`define-command` arguments can have any of these types.
+
+A presentation that is not of the type can still answer if a **translator** turns it into one. A backtrace frame
+can answer for a symbol (its function's name), a condition for a string (its message), and a process for a
+string (its name). Define more with `define-presentation-translator`:
+
+```lisp
+(define-presentation-translator package-to-name (package string :documentation "its name") (p)
+  (package-name p))
+```
+
+`accepting-values` turns the `accept`s in its body into one dialog:
+
+```lisp
+(accepting-values (*standard-output* :label "Plot")
+  (list (accept 'integer :prompt "Points" :default 100)
+        (accept '(member :line :scatter) :prompt "Kind" :default :line)
+        (accept 'boolean :prompt "Grid" :default t)))
+```
+
+Up and Down (or Tab) choose a field, and Return changes it. For a choice or a yes/no field, Return steps
+through the values, and a click picks one; for other fields, type the new value and press Return. A click on a
+presentation anywhere fills the selected field. The body runs again after each change, so later fields can
+depend on earlier ones. End (or `[Done]`) returns the body's values, and Escape (or `[Abort]`) gives up. Outside
+the window system the `accept`s simply ask one after the other.
 
 ## The Listener window
 
@@ -82,7 +129,8 @@ history. Command history can contain anything you typed, so check who can read y
 ## Colours and terminals
 
 The output uses truecolor when the terminal supports it, 256 colours otherwise, and plain attributes in the
-`mono` theme. Only the cells that changed are redrawn. Every character is assumed to be one column wide.
+`mono` theme. Only the cells that changed are redrawn. Chinese, Japanese and Korean characters and emoji take
+two columns, and combining accents join the letter before them.
 
 ## Images and graphics
 

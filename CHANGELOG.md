@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+* **Typed input.** `accept` reads an object of a presentation type: the answer can be typed (checked, completed with Tab, with a
+  default), or given by clicking any matching presentation on the screen. The types include `integer` and other classes,
+  `boolean`, `expression`, `pathname`, `(member ...)`, `(integer lo hi)`, `(or ...)`, `(sequence type)` and `(null-or-type type)`.
+  `define-presentation-translator` lets presentations of one type answer for another; frames give their function's name,
+  conditions their message, processes their name. `accepting-values` shows a body's `accept`s as one dialog, run again after
+  each change. Command arguments can have any presentation type and can be answered by clicking (`:describe`, then click an
+  object). Outside the window system `accept` reads a line.
+
+* **Editor: search and replace.** Regular-expression search (`C-M-s`, `C-M-r`, or `M-r` while searching). Searches ignore case
+  unless the text has a capital. Other matches are underlined, and `C-w` in isearch adds the word at point. `M-%` query replace,
+  with `y n ! . q` and case kept in replacements; `query-replace-regexp`, `replace-regexp`, `count-matches` and `occur`. A
+  regular expression engine (`regex-compile`, `regex-find`, `regex-expand`, `regex-replace-all`, `string-match-p`): classes,
+  groups, alternation, lazy repetition and back-references, on UTF-8, optionally ignoring case.
+* **Editor: views.** `C-x 2` and `C-x 3` split the editor window into views, each with its own point; `C-x o`, `C-x 0`, `C-x 1`,
+  `C-M-v`, `C-x 4 b`, `C-x 4 f`; clicking selects a view.
+* **Editor: keyboard macros.** `C-x (` and `C-x )` (or F3 and F4) record, and `C-x e` plays back (then `e` again); `C-u N` repeats,
+  `C-u 0` repeats until a command fails. `name-last-kbd-macro`.
+* **Editor: completion and hints.** `M-TAB` completes symbols, including `pkg:sym` and keywords; `TAB` completes on a line that is
+  already indented; `M-/` expands words from the buffers. In Lisp mode the echo area shows the lambda list of the call around
+  point, with the current argument highlighted.
+* **Editor: syntax colouring** of comments, strings, characters, keywords, special forms and macros, and defined names in Lisp
+  mode, and of diffs.
+* **Unicode.** Wide (East Asian, emoji) characters take two columns and combining marks none, on the screen, in the editor and in
+  Listener output. Character motion keeps combining marks with their letter. Word motion knows Unicode punctuation. Case commands
+  and case-insensitive search handle accented, Greek, Cyrillic and Armenian letters. `C-x =` describes the character at point,
+  `C-x 8 RET` inserts one by code point, and `C-x C-u` / `C-x C-l` change the case of the region. New functions: `char-display-width`,
+  `string-display-width`, `unicode-upcase`, `unicode-downcase`, `unicode-fold`, `unicode-word-char-p`, `utf8-upcase`,
+  `utf8-downcase`, `utf8-capitalize`, `utf8-codes`, `utf8-from-codes`.
+* Fixed: `C-t` swapped bytes of a UTF-8 character; control characters were counted as one column in the editor.
+
 * **The debugger in the window Listener.** An error no longer unwinds. The Listener shows the error, the restarts and the
   backtrace, all clickable, and the prompt becomes `debug N>`. Type or click a restart (with a value if it takes one: `1 42`), or use
   `:abort`, `:continue`, `:restarts`, `:frame N` and `:bt`. Forms typed there run in the environment of the error, and errors nest.

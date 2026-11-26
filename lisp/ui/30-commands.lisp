@@ -73,7 +73,11 @@
           (string (if (char= (char text 0) #\")
                       (multiple-value-bind (obj pos) (%read-from-string text 0) (values obj (subseq text pos)))
                       (values (string-trim " " text) "")))
-          (t (let ((toks (%split-tokens text))) (values (car toks) (%rest-after-tokens text 1))))))))
+          (word (let ((toks (%split-tokens text))) (values (car toks) (%rest-after-tokens text 1))))
+          ;; any other presentation type: one word, parsed as ACCEPT would (a sequence takes the rest of the line)
+          (t (if (and (consp type) (eq (car type) 'sequence))
+                 (values (accept-from-string type text) "")
+                 (let ((toks (%split-tokens text))) (values (accept-from-string type (car toks)) (%rest-after-tokens text 1)))))))))
 
 (defun execute-command-line (line)
   "LINE is the text after the colon.  Returns (:done) or (:prompt command args spec rest) when an
@@ -107,6 +111,12 @@ argument is missing, or signals an error for unknown/ambiguous commands."
                      (%collect-args c (cons (funcall (caddr spec)) done) (cdr specs) rest)
                      (list :prompt c done specs rest)))
                 (t (%collect-args c (cons val done) (cdr specs) more)))))))
+
+(defun continue-command-with-value (pending value)
+  "Supply VALUE (an object, from a click) for the first missing argument of the PENDING command."
+  (destructuring-bind (c done specs rest) (cdr pending)
+    (declare (ignore rest))
+    (%collect-args c (cons value done) (cdr specs) "")))
 
 (defun continue-command (pending text)
   "PENDING is the (:prompt ...) list; TEXT is the user's answer for the first missing argument."

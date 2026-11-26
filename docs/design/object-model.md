@@ -58,4 +58,5 @@ as doubles only.
 
 Characters are immediates holding a code point up to U+10FFFF. Strings are byte vectors:
 UTF-8 text passes through reading, printing and file I/O unchanged, but `length`
-counts bytes. Proper Unicode strings are future work.
+counts bytes. Proper Unicode strings are future work; meanwhile `lisp/core/63-unicode.lisp` works on the
+code points of such strings (`utf8-codes`, `char-display-width`, `unicode-upcase`, `utf8-upcase`, ...).
