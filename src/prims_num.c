@@ -3,6 +3,20 @@
 #include <math.h>
 #include <complex.h>
 
+/* Android's bionic declares clog and cpow only from API level 26, and Termux builds for an older one.
+   These are the usual definitions (as in musl and FreeBSD, which bionic's libm is derived from). */
+#if defined(__ANDROID__) && __ANDROID_API__ < 26
+static double complex ng_clog(double complex z) {
+  double complex r;
+  __real__ r = log(cabs(z));
+  __imag__ r = carg(z);
+  return r;
+}
+static double complex ng_cpow(double complex b, double complex e) { return cexp(e * ng_clog(b)); }
+#define clog ng_clog
+#define cpow ng_cpow
+#endif
+
 #define CPXP(o) IS_TYPE(o, T_COMPLEX)
 static double complex to_cpx(Obj o) {
   if (CPXP(o)) return num_to_double(SLOT(o, 0)) + num_to_double(SLOT(o, 1)) * I;
