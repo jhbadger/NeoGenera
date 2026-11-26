@@ -31,6 +31,8 @@ The Tool Kit has these parts:
 
 ## Using the Tool Kit for the first time
 
+(In the documentation viewer, clicking any Pascal example in this manual copies it; `C-y` pastes it in the editor.)
+
 Open the editor on a new file whose name ends in `.pas` (`:edit quadratic.pas`, or `C-x C-f` in the editor). The mode
 line shows **(Pascal)**. Turn on Electric Pascal mode with `M-x electric pascal mode` if you want reserved words put in
 capitals as you type. Type the program:

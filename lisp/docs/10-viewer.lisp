@@ -14,7 +14,10 @@
 (defmethod report-refreshed ((w doc-window)) (setf (lw-scroll-back w) 1000000))
 
 (define-presentation-type 'doc-ref '(t))
-(define-presentation-type 'doc-example '(t))
+(define-presentation-type 'doc-example '(t))      ; a Lisp example: clicking runs it
+(define-presentation-type 'doc-code '(t))         ; code in another language (Pascal, shell, ...): clicking copies it
+
+(defun %lisp-example-p (lang) (or (null lang) (member lang '("lisp" "common-lisp" "cl" "commonlisp") :test #'string=)))
 
 (defvar *doc-bookmarks* nil)
 
@@ -76,7 +79,7 @@
               (with-style (out :dim) (format out "~A~%" (make-string (min 60 (max 3 (length (inline-text (cddr n))))) (if (= (cadr n) 1) #\= #\-)))))))
       (:p (terpri out) (render-inlines (cdr n) out) (terpri out))
       (:example (terpri out)
-       (with-output-as-presentation (out (cadr n) 'doc-example)
+       (with-output-as-presentation (out (cadr n) (if (%lisp-example-p (caddr n)) 'doc-example 'doc-code))
          (with-style (out :value)
            (dolist (l (split-lines (cadr n))) (format out "    ~A~%" l)))))
       (:ul (terpri out) (dolist (item (cdr n)) (write-string "  * " out) (render-inlines item out) (terpri out)))
@@ -206,6 +209,44 @@
   (doc-example-to-listener text t))
 (define-presentation-command (copy-example doc-example :documentation "Copy to Listener input") (text)
   (doc-example-to-listener text nil))
+
+;;; Copying a code block: the text as written in the manual (without the viewer's indentation) goes on the kill ring,
+;;; so C-y pastes it in the editor, and, in a terminal, on the system clipboard too (OSC 52).
+(defun %base64 (string)
+  (let ((chars "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/") (out (make-string-output-stream))
+        (n (length string)) (i 0))
+    (loop
+      (when (>= i n) (return))
+      (let* ((b0 (char-code (char string i)))
+             (b1 (if (< (+ i 1) n) (char-code (char string (+ i 1))) 0))
+             (b2 (if (< (+ i 2) n) (char-code (char string (+ i 2))) 0))
+             (w (+ (ash (logand b0 255) 16) (ash (logand b1 255) 8) (logand b2 255))))
+        (write-char (char chars (logand (ash w -18) 63)) out)
+        (write-char (char chars (logand (ash w -12) 63)) out)
+        (write-char (if (< (+ i 1) n) (char chars (logand (ash w -6) 63)) #\=) out)
+        (write-char (if (< (+ i 2) n) (char chars (logand w 63)) #\=) out))
+      (setq i (+ i 3)))
+    (get-output-stream-string out)))
+
+(defun %terminal-clipboard-copy (text)
+  "Ask the terminal to put TEXT on the system clipboard (OSC 52); terminals that do not support it ignore it."
+  (when (and *wm-live* (fboundp '%term-write-codes))
+    (let ((seq (%string-concat (string (code-char 27)) "]52;c;" (%base64 text) (string (code-char 7)))))
+      (ignore-errors (%term-write-codes (map 'vector #'char-code seq))))))
+
+(defun doc-copy-code (text)
+  "Copy the code block TEXT: onto the kill ring (C-y in the editor pastes it) and the terminal's clipboard."
+  (kill-new text)
+  (%terminal-clipboard-copy text)
+  (let ((wm (if (and (boundp '*current-listener*) (typep *current-listener* 'window)) (window-wm *current-listener*) *wm*))
+        (n (length (split-lines text))))
+    (when wm
+      (setf (wm-message wm) (format nil "Copied ~D line~:P: C-y pastes ~:*~[them~;it~:;them~] in the editor" n)
+            (wm-dirty wm) t)))
+  text)
+
+(define-presentation-command (copy-code doc-example :documentation "Copy (C-y pastes it in the editor)") (text) (doc-copy-code text))
+(define-presentation-command (copy-code doc-code :documentation "Copy (C-y pastes it in the editor)" :default t) (text) (doc-copy-code text))
 
 ;;; ---- commands --------------------------------------------------------------------------------------------
 

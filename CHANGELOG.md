@@ -13,6 +13,9 @@
   deletion by statement, routine, expression and token, syntax-error finding, templates with template items and their
   refinement, completion of reserved words, closing constructs, compiling the routine at point or the buffer, compiler
   warnings (`C-.`), compiling and executing the program at point, and the attribute list (dialect and package).
+* **Copying code from the documentation.** Every code block in the viewer has *Copy* (the kill ring, so `C-y` pastes it in
+  the editor, and the terminal's clipboard via OSC 52); a left click copies code in languages other than Lisp. Fenced code
+  blocks keep their language.
 * Editor modes are extensible: a mode's keymap, name, colouring, construct matching and self-insert hooks are properties of
   its symbol, and `*auto-mode-alist*` maps file types to modes. `defsystem` systems may contain non-Lisp files
   (`*system-file-handlers*`).

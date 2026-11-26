@@ -16,8 +16,11 @@ render the same nodes.
 | `:tutorial` | interactive lessons |
 
 In a documentation window click a link to follow it and press Backspace to go back; `b` bookmarks the page and
-`t` shows the contents. Every page ends with **Candidates**, the topics most related to it. Click an example
-and choose *Run in Listener* to try it. A name in code font that is a known function is a link as well.
+`t` shows the contents. Every page ends with **Candidates**, the topics most related to it. Click a Lisp example
+to run it in the Listener. Every code block's right-button menu has *Copy*, which puts the code (as written, without
+the viewer's indentation) on the editor's kill ring, so `C-y` pastes it into any buffer, and, in terminals that allow it,
+on the system clipboard too. A left click on code in another language (a fence such as ```` ```pascal ````) copies it.
+A name in code font that is a known function is a link as well.
 
 ## Writing docstrings
 
@@ -35,11 +38,12 @@ its text becomes part of the image:
 (import-markdown :editor-manual "docs/manual/editor-manual.md" :category :manual :keywords (editor emacs))
 ```
 
-Supported Markdown: headings, paragraphs, fenced code blocks (examples), bulleted and numbered lists, tables,
+Supported Markdown: headings, paragraphs, fenced code blocks (examples; a language after the opening fence,
+```` ```pascal ````, marks code that is not Lisp), bulleted and numbered lists, tables,
 `code`, *emphasis*, **strong** and links. Link targets are `topic:name` (another document), `fn:symbol`
 (a symbol's documentation), or a web address. Documents can also be written directly as s-expressions with
 [define-document](fn:define-document): nodes such as `(:h 2 "Title")`, `(:p "text" (:code "x"))`,
-`(:example "(+ 1 2)")`, `(:ul ...)` and `(:see-also :topic)`.
+`(:example "(+ 1 2)")` (or `(:example "x := 1" "pascal")`), `(:ul ...)` and `(:see-also :topic)`.
 
 ## Exporting
 

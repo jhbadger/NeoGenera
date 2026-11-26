@@ -249,7 +249,39 @@ It continues here.
   (is (%string-search "No documentation" (with-output-to-string (*standard-output*) (doc :no-such-topic-q)) 0))
   (is (find 'show-symbol-documentation (applicable-pcommands 'symbol) :key #'pcmd-name))
   (is-equal 'show-documentation (pcmd-name (default-pcommand 'doc-ref)))
-  (is-equal 'run-example (pcmd-name (default-pcommand 'doc-example))))
+  (is-equal 'run-example (pcmd-name (default-pcommand 'doc-example)))
+  (is-equal 'copy-code (pcmd-name (default-pcommand 'doc-code))))
+
+(deftest copying-code-blocks
+  ;; the fence's language is kept; Lisp examples stay runnable, others are copied by a click
+  (is-equal '((:example "x := 1" "pascal") (:example "(+ 1 2)") (:example "(car x)" "lisp"))
+            (markdown->nodes (format nil "```pascal~%x := 1~%```~%~%```~%(+ 1 2)~%```~%~%``` lisp~%(car x)~%```")))
+  (is-equal "TWFu" (%base64 "Man"))
+  (is-equal "TWE=" (%base64 "Ma"))
+  (multiple-value-bind (wm lw) (make-test-wm 40 120)
+    (declare (ignore lw))
+    (type-line wm ":doc pascal-manual")
+    (let* ((w (find-doc-window wm)) (pos (scroll-find wm w "PROGRAM quadratic;")))
+      (is pos)
+      (click-at wm pos 2)                                                   ; left click: copy
+      (is (%starts-with (current-kill 0) "{-*- Mode: PASCAL; Dialect: ISO; Package: PASCAL-USER -*- }"))
+      (is (%string-search (format nil "~%PROGRAM quadratic;~%VAR a,b,c") (current-kill 0) 0))   ; without the viewer's indentation
+      (is (%string-search "C-y pastes them in the editor" (wm-message wm) 0))
+      (wm-draw wm)
+      (is (screen-has wm "Copied 12 lines"))
+      ;; a Lisp example offers Copy in its menu
+      (let ((lpos (scroll-find wm w "(pascal-execute 'pascal-user::quadratic)")))
+        (is lpos)
+        (click-at wm lpos 2 2)
+        (is (screen-has wm "Copy (C-y pastes it in the editor)"))
+        (click-at wm (screen-has wm "Copy (C-y pastes it in the editor)") 2)
+        (is-equal "(pascal-execute 'pascal-user::quadratic)" (current-kill 0))))
+    (wm-close-window wm (find-doc-window wm)))
+  ;; C-y in the editor pastes it
+  (multiple-value-bind (wm ed) (make-editor-wm)
+    (kill-new (format nil "begin~%  writeln('hi')~%end."))
+    (ed-keys wm "C-y")
+    (is-equal (format nil "begin~%  writeln('hi')~%end.") (buffer-string (ed-buffer ed)))))
 
 ;;; ---- export -------------------------------------------------------------------------------------------------
 

@@ -485,7 +485,7 @@ one, or is NIL when the activity cannot be started from the key."
       (let ((b (and (= button 0) (wm-button-at wm x y))))
         (wm-pending-key wm (make-key (if (eq b (if (eq (wm-pending wm) :quit) :f10 :f9)) b :cancel) 0))))
     (return-from wm-mouse nil))
-  (setf (wm-message wm) nil)
+  (when (eq kind :press) (setf (wm-message wm) nil))   ; a message stays until the next click or key
   (cond ((wm-popups wm)
          (let ((p (car (wm-popups wm))))
            (if (window-contains-p p x y)

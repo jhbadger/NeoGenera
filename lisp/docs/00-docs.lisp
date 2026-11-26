@@ -3,7 +3,7 @@
 ;;;;
 ;;;; A DOCUMENT is a structure holding a list of NODES written as s-expressions:
 ;;;;
-;;;;   block nodes   (:h level inline...)  (:p inline...)  (:example "code")  (:ul item...)  (:ol item...)
+;;;;   block nodes   (:h level inline...)  (:p inline...)  (:example "code" [language])  (:ul item...)  (:ol item...)
 ;;;;                 (:table header-row row...)  (:see-also topic...)         item/cell = list of inlines
 ;;;;   inline nodes  "text"  (:code "x")  (:em inline...)  (:strong inline...)
 ;;;;                 (:ref topic "text")  (:fn symbol)  (:link "url" "text")
@@ -139,11 +139,12 @@
           (cond
             ((%md-fence-p line)
              (flush-para)
-             (let ((code nil))
+             (let ((code nil) (lang (string-downcase (string-trim '(#\Space #\Tab #\`) line))))
                (setq lines (cdr lines))
                (loop (when (or (null lines) (%md-fence-p (car lines))) (return))
                      (setq code (cons (car lines) code)) (setq lines (cdr lines)))
-               (setq nodes (cons (list :example (join-lines (reverse code))) nodes))))
+               ;; (:example code) or, after a fence naming a language, (:example code "pascal")
+               (setq nodes (cons (list* :example (join-lines (reverse code)) (if (string= lang "") nil (list lang))) nodes))))
             ((%md-blank-p line) (flush-para))
             ((%md-heading-level line)
              (flush-para)
