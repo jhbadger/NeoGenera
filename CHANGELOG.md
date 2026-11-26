@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+* **The Pascal Tool Kit**, after the Symbolics one: ISO Pascal and Pascal/VS compiled into Lisp (and then to bytecode), with
+  Lisp's integers (no overflow), sets as unbounded bit masks, detection of uninitialised variables, range, subscript and
+  pointer checks, and run-time errors that name the routine and line and enter the debugger. Units
+  (`unit_specification`, `unit_implementation`, `using_units`), `def-program` systems, `%include`, conformant arrays,
+  `lispobject` and the `lisp` routine directive for calling Lisp, and `ROUTINE<-PROGRAM` functions for calling Pascal.
+  `pascal-execute` (with `:input`, `:output`, `:init-to-zero`, `:save-environment`, ...) runs a program, reading its input
+  in the Listener; `:Execute Pascal`, `:Compile Pascal File`, `:Show Pascal Programs`. Manual: `:doc pascal-manual`.
+* **Pascal mode** in the editor (`.pas`, `.pascal`, `.p`): colouring, indentation, Electric Pascal mode, motion and
+  deletion by statement, routine, expression and token, syntax-error finding, templates with template items and their
+  refinement, completion of reserved words, closing constructs, compiling the routine at point or the buffer, compiler
+  warnings (`C-.`), compiling and executing the program at point, and the attribute list (dialect and package).
+* Editor modes are extensible: a mode's keymap, name, colouring, construct matching and self-insert hooks are properties of
+  its symbol, and `*auto-mode-alist*` maps file types to modes. `defsystem` systems may contain non-Lisp files
+  (`*system-file-handlers*`).
 * **Systems and patches.** `defsystem` describes a program's files and the systems it needs. `load-system` loads changed files
   only, and with `:compile` compiles them. Numbered patch files (`make-patch`, `load-patches`) update a loaded system, and their
   number is part of the version. Commands: `:load system`, `:compile system`, `:load patches`, `:make patch`, `:describe system`,

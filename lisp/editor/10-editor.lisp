@@ -164,9 +164,16 @@
 
 (defun ed-buffer-names (w) (mapcar #'buffer-name (ed-buffers w)))
 
-(defun mode-keymap (mode) (case mode (lisp-mode *lisp-mode-map*) (text-mode *text-mode-map*) (dired-mode *dired-mode-map*) (possibilities-mode *possibilities-mode-map*) (t nil)))
+;;; Other major modes (the Pascal Tool Kit's, for one) describe themselves on their symbol's property list:
+;;; MODE-KEYMAP, MODE-NAME, LINE-SYNTAX (a function like LISP-LINE-SYNTAX), MATCH-OFFSETS (offsets to highlight,
+;;; like %PAREN-MATCH-OFFSETS), BEFORE-SELF-INSERT (called with the editor and the character code; true means the
+;;; character was handled) and AFTER-SELF-INSERT.
+(defun mode-keymap (mode)
+  (case mode (lisp-mode *lisp-mode-map*) (text-mode *text-mode-map*) (dired-mode *dired-mode-map*) (possibilities-mode *possibilities-mode-map*)
+    (t (and mode (symbolp mode) (get mode 'mode-keymap)))))
 (defun mode-display-name (mode)
-  (case mode (lisp-mode "Lisp") (text-mode "Text") (dired-mode "Dired") (diff-mode "Diff") (possibilities-mode "Possibilities") (t "Fundamental")))
+  (case mode (lisp-mode "Lisp") (text-mode "Text") (dired-mode "Dired") (diff-mode "Diff") (possibilities-mode "Possibilities")
+    (t (or (and mode (symbolp mode) (get mode 'mode-name)) "Fundamental"))))
 
 ;;; ---- display ----------------------------------------------------------------------------------------------
 
@@ -286,13 +293,14 @@ character before them.  BYTES holds the byte offset in LINE of the character sho
                         (setq i j after-open nil)))))))))
     (values (nreverse spans) state)))
 
-(defun %syntax-state-at (b line)
-  "The Lisp syntax state at the start of LINE of buffer B (cached)."
+(defun %syntax-state-at (b line &optional (fn #'lisp-line-syntax))
+  "The syntax state (for the line syntax function FN, by default Lisp's) at the start of LINE of buffer B (cached)."
   (let ((v (buf-local b 'syntax-states)))
+    (unless (eq (buf-local b 'syntax-fn) fn) (setq v nil) (setf (buf-local b 'syntax-fn) fn))
     (unless v (setq v (make-array 64 :adjustable t :fill-pointer 1 :initial-element nil)) (setf (buf-local b 'syntax-states) v))
     (loop (when (> (fill-pointer v) line) (return))
           (let ((k (- (fill-pointer v) 1)))
-            (vector-push-extend (nth-value 1 (lisp-line-syntax (buf-line b k) (aref v k))) v)))
+            (vector-push-extend (nth-value 1 (funcall fn (buf-line b k) (aref v k))) v)))
     (aref v line)))
 
 (defun line-syntax-spans (b line)
@@ -307,7 +315,8 @@ character before them.  BYTES holds the byte offset in LINE of the character sho
                        ((char= (char text 0) #\-) (list (list 0 (length text) :removed)))
                        ((and (> (length text) 1) (string= (subseq text 0 2) "@@")) (list (list 0 (length text) :keyword)))
                        (t nil))))
-    (t nil)))
+    (t (let ((fn (and (buffer-mode b) (symbolp (buffer-mode b)) (get (buffer-mode b) 'line-syntax))))
+         (and fn (values (funcall fn (buf-line b line) (%syntax-state-at b line fn))))))))
 
 (defun %theme-color (key fallback)
   (let ((v (getf (theme-colors *theme*) key :none))) (if (eq v :none) (tc fallback) v)))
@@ -374,7 +383,10 @@ character before them.  BYTES holds the byte offset in LINE of the character sho
         (when (< pdcol hs) (setq hs pdcol))
         (when (>= pdcol (+ hs wd)) (setq hs (+ (- pdcol wd) 1)))
         (setf (view-hscroll v) hs)
-        (let* ((parens (and lispy selected (not (ed-minibuf w)) (ignore-errors (%paren-match-offsets b))))
+        (let* ((parens (and selected (not (ed-minibuf w))
+                            (ignore-errors (if lispy (%paren-match-offsets b)
+                                               (let ((fn (and (symbolp (buffer-mode b)) (get (buffer-mode b) 'match-offsets))))
+                                                 (and fn (funcall fn b)))))))
                (ppos (mapcar (lambda (o) (buf-pos-of-offset b o)) parens))
                (is (and selected (ed-isearch w))) (q (and selected (ed-query w)))
                (match (cond (q (qr-match q)) (is (is-match is))))
@@ -837,9 +849,11 @@ BACKWARD, the last ending there or earlier.  Returns (line start end groups), or
 
 (defcmd self-insert-command (ed arg)
   (with-b (b ed)
-    (let ((c *typed-char*))
-      (dotimes (i (%n arg)) (buf-insert b (utf8-string c)))
-      (when (and (= c 32) (member 'auto-fill (buffer-minor-modes b))) (auto-fill-maybe ed)))))
+    (let* ((c *typed-char*) (mode (buffer-mode b)) (before (and mode (symbolp mode) (get mode 'before-self-insert))))
+      (unless (and before (funcall before ed c))
+        (dotimes (i (%n arg)) (buf-insert b (utf8-string c)))
+        (when (and (= c 32) (member 'auto-fill (buffer-minor-modes b))) (auto-fill-maybe ed))
+        (let ((after (and mode (symbolp mode) (get mode 'after-self-insert)))) (when after (funcall after ed c)))))))
 
 (defun auto-fill-maybe (ed)
   (with-b (b ed)

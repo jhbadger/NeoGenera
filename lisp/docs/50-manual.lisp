@@ -21,6 +21,8 @@
                  :keywords (math statistics matrix linear-algebra random distribution regression plot data-frame symbolic))
 (import-markdown :bio-manual "docs/manual/bio-manual.md" :category :manual
                  :keywords (bioinformatics sequence dna protein fasta alignment blast phylogeny genome))
+(import-markdown :pascal-manual "docs/manual/pascal-manual.md" :category :manual
+                 :keywords (pascal compiler units dialect iso vs templates electric pascal-mode tool-kit))
 
 ;;; Coverage is measured over what exists now; symbols defined later (user code, tests) are not counted.
 (snapshot-core-symbols)

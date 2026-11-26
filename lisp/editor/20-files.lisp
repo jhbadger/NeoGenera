@@ -38,9 +38,13 @@
 (defun path-directory (path) (let ((p (position #\/ path :from-end t))) (if p (subseq path 0 (+ p 1)) "./")))
 (defun path-filename (path) (let ((p (position #\/ path :from-end t))) (if p (subseq path (+ p 1)) path)))
 
+(defvar *auto-mode-alist* nil
+  "A list of (suffix . mode): files whose names end with SUFFIX are edited in MODE (checked before the built-in types).")
+
 (defun file-mode-for (path)
   (let ((n (path-filename path)))
-    (cond ((or (%ends-with n ".lisp") (%ends-with n ".lsp") (%ends-with n ".cl") (%ends-with n ".asd")) 'lisp-mode)
+    (cond ((cdr (find-if (lambda (e) (%ends-with (string-downcase n) (car e))) *auto-mode-alist*)))
+          ((or (%ends-with n ".lisp") (%ends-with n ".lsp") (%ends-with n ".cl") (%ends-with n ".asd")) 'lisp-mode)
           ((or (%ends-with n ".txt") (%ends-with n ".md")) 'text-mode)
           (t 'fundamental-mode))))
 

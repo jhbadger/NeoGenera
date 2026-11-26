@@ -57,6 +57,22 @@ directory of the file being loaded), loaded in order after the systems in DEPEND
 
 (defun %fasl-for (source) (make-pathname :type "nfasl" :defaults source))
 
+(defvar *system-file-handlers* nil
+  "Handlers for system files that are not Lisp source: a list of (predicate load-function compile-function).
+PREDICATE is called with a file name; LOAD-FUNCTION loads the source; COMPILE-FUNCTION is called with the source and
+the compiled file to write.  The Pascal Tool Kit adds one for .pas files.")
+
+(defun %system-file-handler (file)
+  (find-if (lambda (h) (funcall (car h) (namestring file))) *system-file-handlers*))
+
+(defun %system-compile-file (file fasl)
+  (let ((h (%system-file-handler file)))
+    (if h (funcall (caddr h) (namestring file) (namestring fasl)) (compile-file (namestring file) :output-file (namestring fasl)))))
+
+(defun %system-load-file (file)
+  (let ((h (and (not (%ends-with (namestring file) ".nfasl")) (%system-file-handler file))))
+    (if h (funcall (cadr h) (namestring file)) (load (namestring file)))))
+
 (defun %loaded-date (sys file) (cdr (assoc (namestring file) (system-loaded sys) :test #'string=)))
 
 (defun load-system (name &key compile reload (verbose t) (patches t))
@@ -77,10 +93,10 @@ Then its new patches are loaded (unless PATCHES is false).  Returns the system's
                            (let ((fasl (%fasl-for file)))
                              (when (or reload (not (probe-file fasl)) (< (or (file-write-date fasl) 0) date))
                                (when verbose (format t "~&; Compiling ~A~%" (namestring file)))
-                               (compile-file (namestring file) :output-file (namestring fasl)))
+                               (%system-compile-file file fasl))
                              (setq what fasl)))
                          (when verbose (format t "~&; Loading ~A~%" (namestring what)))
-                         (load (namestring what)))
+                         (%system-load-file what))
                        (setf (system-loaded s) (cons (cons (namestring file) date)
                                                      (remove (namestring file) (system-loaded s) :key #'car :test #'string=))))))
                  (when patches (load-patches (system-name s) :verbose verbose)))))

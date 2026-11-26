@@ -141,6 +141,17 @@ argument at point highlighted (for `&key` arguments, the one named by the keywor
 matching the one at point is highlighted. See [Developer Tools](topic:tools-manual) for how source locations are
 found.
 
+## Pascal mode
+
+Files ending in `.pas`, `.pascal` or `.p` are edited in Pascal mode, a syntax-directed mode for the Pascal Tool Kit:
+it moves over and deletes statements, routines, expressions and tokens, finds syntax errors, inserts templates of
+constructs, completes reserved words, puts them in capitals in Electric Pascal mode, indents, and compiles the routine
+at point with `C-c C-c`. See [The Pascal Tool Kit](topic:pascal-manual).
+
+Other language modes can be added the same way: a mode is a symbol whose property list gives its `mode-keymap`,
+`mode-name`, `line-syntax` function (for colouring), `match-offsets` function and `before-self-insert` and
+`after-self-insert` hooks, and `*auto-mode-alist*` maps file name suffixes to modes.
+
 ## Unicode
 
 Text is UTF-8. Point moves over whole characters, and an accent written as a separate combining mark moves

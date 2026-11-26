@@ -78,3 +78,5 @@ the selected function. See [Developer Tools](topic:tools-manual).
 * [The Documentation System](topic:documentation-system) for writing and exporting documentation.
 * [Mathematics and Statistics](topic:math-manual) for linear algebra, distributions, tests, models, data frames and plots.
 * [Bioinformatics](topic:bio-manual) for sequences, file formats, alignment, search, phylogenetics and the clickable viewers.
+* [The Pascal Tool Kit](topic:pascal-manual) for compiling and running Pascal programs in the Lisp world, and Pascal mode
+  in the editor.

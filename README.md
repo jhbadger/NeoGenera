@@ -18,6 +18,9 @@ mathematics, statistics and bioinformatics. Version **1.0.0**. A scripted tour r
   export, and an interactive tutorial (`:tutorial`).
 * **Quantitative work.** Linear algebra, probability distributions, hypothesis tests, linear and generalized linear models, data frames, text and SVG plots,
   seedable random numbers and a symbolic algebra layer, validated against R and NIST reference values.
+* **The Pascal Tool Kit.** As on Genera, Pascal (ISO and Pascal/VS) compiles into Lisp: bignum integers, checked
+  uninitialised variables and subscripts, units, calls between Pascal and Lisp, and a syntax-directed Pascal mode in the
+  editor with templates, completion and incremental compilation. See `:doc pascal-manual` and `examples/11-pascal.lisp`.
 * **Bioinformatics.** Sequences, FASTA/FASTQ/GenBank/GFF3/GTF/BED/VCF/SAM/BAM, pairwise alignment, suffix arrays, seeded search, motifs, phylogenetics, genomic
   intervals and a safe layer for BLAST, minimap2 and samtools, with clickable sequence, alignment and tree viewers.
 * **Hardened.** Every parser is fuzzed under ASan/UBSan; memory and stack exhaustion are recoverable errors; heap images are checksummed and saved atomically;

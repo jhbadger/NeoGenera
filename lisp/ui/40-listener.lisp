@@ -46,7 +46,9 @@
   (let ((spec (car (cadddr pending)))) (cadddr spec)))
 
 (defun %prompt-string (w)
-  (if (lw-accepts w) (return-from %prompt-string (%string-concat (as-prompt (car (lw-accepts w))) ": ")))
+  (if (lw-accepts w)
+      (return-from %prompt-string
+        (let ((p (as-prompt (car (lw-accepts w))))) (if (string= p "") "" (%string-concat p ": ")))))   ; "": a plain line of input
   (if (lw-pending w)
       (%string-concat (%pending-prompt (lw-pending w)) ": ")
       (%string-concat (let ((n (package-name (lw-pkg w))))

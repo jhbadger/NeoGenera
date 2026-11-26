@@ -10,6 +10,7 @@
 (load "tests/lisp/system-tests.lisp")
 (load "tests/lisp/tools-tests.lisp")
 (load "tests/lisp/editor-tests.lisp")
+(load "tests/lisp/pascal-tests.lisp")
 (load "tests/lisp/process-tests.lisp")
 (load "tests/lisp/graphics-tests.lisp")
 (load "tests/lisp/docs-tests.lisp")
