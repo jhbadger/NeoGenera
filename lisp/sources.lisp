@@ -50,6 +50,7 @@
     "lisp/ui/65-settings.lisp"
     "lisp/ui/70-peek.lisp"
     "lisp/ui/75-files.lisp"
+    "lisp/ui/80-demos.lisp"
     "lisp/pascal/00-lexer.lisp"
     "lisp/pascal/10-parser.lisp"
     "lisp/pascal/20-runtime.lisp"

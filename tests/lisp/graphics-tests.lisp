@@ -108,3 +108,81 @@
   ;; without a terminal the probe has nothing to ask
   (let ((*graphics-preference* :on)) (is (null (detect-graphics))))
   (is (stringp (graphics-status))))
+
+;;; ---- palette images and the demos --------------------------------------------------------------------------
+
+(deftest palette-images
+  (let* ((w 40) (h 40) (ix (make-string (* w h))) (img (make-image w h)) (pal (make-array 256 :initial-element 0)))
+    (%idx-fill ix w h 255)
+    (%idx-disc ix w h 20 20 15 10 20 0)                          ; a shaded sphere in indices 10..29
+    (flet ((at (x y) (char-code (char ix (+ (* y w) x)))))
+      (is-equal 255 (at 0 0))                                    ; outside
+      (is (<= 10 (at 20 20) 29))
+      (is (> (at 14 14) (at 26 26)))                             ; lit from the upper left
+      (%idx-disc ix w h 20 20 15 100 5 1)                        ; rings 100..104, centre out
+      (is-equal 100 (at 20 20))
+      (is-equal 104 (at 20 6)))
+    (setf (aref pal 255) #x112233 (aref pal 100) #xFF0000)
+    (%idx-map ix (image-pixels img) w h pal)
+    (is-equal (rgb #x11 #x22 #x33) (image-pixel img 0 0))
+    (is-equal (rgb 255 0 0) (image-pixel img 20 20))
+    (is (null (ignore-errors (%idx-disc ix w h 20 20 5 250 10 0))))     ; past index 255
+    (is (null (ignore-errors (%idx-map ix (image-pixels img) w h (make-array 3)))))))
+
+(defun find-demo-window (wm) (find-if (lambda (w) (typep w 'demo-window)) (wm-windows wm)))
+
+(deftest demos
+  (multiple-value-bind (wm lw) (make-test-wm 30 100)
+    (let ((*graphics* nil))
+      ;; :demo alone pops up the menu; Return opens the first demo
+      (type-line wm ":demo")
+      (wm-draw wm)
+      (is (screen-has wm "Demos"))
+      (is (screen-has wm "Colour Circles"))
+      (is (screen-has wm "Munching Squares"))
+      (wm-feed wm (string (code-char 13)))
+      (let ((d (find-demo-window wm)))
+        (is (typep d 'circles-demo))
+        (wm-draw wm)
+        (is (screen-has wm "Space pause"))
+        (is (demo-image d))
+        ;; colour-map cycling: the frames differ, the shapes (indices) do not
+        (let ((before (copy-seq (image-pixels (demo-image d)))) (ix (copy-seq (circles-indices d))))
+          (dotimes (i 5) (wm-animate wm (+ 1000000 (* i 1000))))
+          (is (string/= before (image-pixels (demo-image d))))
+          (is (string= ix (circles-indices d))))
+        (is (> (demo-frames d) 0))
+        ;; half blocks on the screen
+        (wm-draw wm)
+        (is (block find (dotimes (r 30) (dotimes (c 100) (when (= 9600 (car (screen-cell (wm-screen wm) r c))) (return-from find t))))))
+        ;; keys: S rings, space pauses (no more frames), + speeds up, Q closes
+        (wm-feed wm "s")
+        (is-equal 1 (circles-style d))
+        (wm-feed wm " ")
+        (is (demo-paused d))
+        (is (null (window-frame-interval d)))
+        (is (null (wm-animate wm)))
+        (wm-feed wm " ")
+        (is (window-frame-interval d))
+        (wm-feed wm "+")
+        (is-equal 1 (demo-speed d))
+        (wm-feed wm "q")
+        (is (null (find-demo-window wm)))
+        (is (null (wm-animate wm))))
+      ;; every demo runs a few frames by name, in half blocks and with terminal graphics
+      (dolist (e *demos*)
+        (dolist (g '(nil :kitty))
+          (let ((*graphics* g))
+            (wm-raise wm lw)
+            (type-line wm (format nil ":demo ~A" (string-downcase (symbol-name (car e)))))
+            (let ((d (find-demo-window wm)))
+              (is (typep d (caddr e)))
+              (wm-draw wm)
+              (dotimes (i 3) (window-animate d))
+              (wm-draw wm)
+              (is (null (wm-message wm)))
+              (wm-close-window wm d)))))
+      (graphics-reset)
+      (wm-raise wm lw)
+      (type-line wm ":demo nosuch")
+      (is (screen-has wm "No demo named nosuch")))))

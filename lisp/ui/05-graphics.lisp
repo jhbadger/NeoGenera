@@ -179,6 +179,24 @@ are taken, the least recently used one that is not on the screen (VISIBLE, a has
               (setf (aref *term-image-ids* id) p (placement-term-id p) id))
             id)))))
 
+(defun image-changed (image)
+  "Show IMAGE again after drawing on it directly (as an animation does each frame).  The cells showing it stay
+the same: in half blocks their colours are recomputed when next drawn, and with the kitty protocol the terminal
+is sent the new pixels for each place it already shows the image."
+  (setf (image-cell-colors image) nil)
+  (dolist (k (image-keys image))
+    (let ((p (gethash (cdr k) *placements*)))
+      (when (and p (placement-term-id p))
+        (%term-image-send (placement-term-id p) (image-pixels image) (image-width image) (image-height image)
+                          (placement-cols p) (placement-rows p)))))
+  image)
+
+(defun forget-image (image)
+  "Free the terminal's copies of IMAGE and its placements (when it will not be shown again)."
+  (dolist (k (image-keys image))
+    (let ((p (gethash (cdr k) *placements*))) (when p (%forget-placement p))))
+  nil)
+
 (defun graphics-reset ()
   "Forget which images the terminal has (when the window system starts or ends)."
   (dotimes (i 256) (let ((p (aref *term-image-ids* i))) (when p (setf (placement-term-id p) nil))))
@@ -235,6 +253,34 @@ are taken, the least recently used one that is not on the screen (VISIBLE, a has
                           (k (* 2 (+ (* row (placement-cols p)) icol))))
                      (screen-put screen r col 9600 (+ #x1000000 (aref v k)) (+ #x1000000 (aref v (+ k 1))) 0)))))
         (setq i next col (+ col 1))))))
+
+(defun draw-image-cells (screen r c image cols rows)
+  "Show IMAGE on the COLS x ROWS cells at R, C of SCREEN (inside the current clip): placeholder cells with terminal
+graphics, half blocks otherwise.  Faster than a SCREEN-PUT per cell, for windows that redraw an image often."
+  (let* ((key (image-placement-key image cols rows)) (kitty (eq *graphics* :kitty))
+         (v (if kitty nil (%image-cell-colors image cols rows)))
+         (scols (scr-cols screen)) (chars (scr-chars screen)) (fgs (scr-fgs screen)) (bgs (scr-bgs screen)) (attrs (scr-attrs screen))
+         (c0 (max c *clip-left* 0)) (c1 (min (+ c cols) *clip-right* scols)))
+    (dotimes (i rows)
+      (let ((y (+ r i)))
+        (when (and (>= y *clip-top*) (< y *clip-bottom*) (>= y 0) (< y (scr-rows screen)) (< c0 c1))
+          ;; the edge cells go through SCREEN-PUT, which mends wide characters cut in half
+          (let ((base (* y scols)))
+            (loop for x from c0 below c1
+                  do (let ((j (- x c)))
+                       (if (or (= x c0) (= x (- c1 1)))
+                           (if kitty
+                               (screen-put screen y x (image-cell-code key i j) -1 (rgb 0 0 0) 0)
+                               (let ((k (* 2 (+ (* i cols) j))))
+                                 (screen-put screen y x 9600 (+ #x1000000 (aref v k)) (+ #x1000000 (aref v (+ k 1))) 0)))
+                           (let ((p (+ base x)))
+                             (setf (aref attrs p) 0)
+                             (if kitty
+                                 (setf (aref chars p) (image-cell-code key i j) (aref fgs p) -1 (aref bgs p) (rgb 0 0 0))
+                                 (let ((k (* 2 (+ (* i cols) j))))
+                                   (setf (aref chars p) 9600 (aref fgs p) (+ #x1000000 (aref v k))
+                                         (aref bgs p) (+ #x1000000 (aref v (+ k 1))))))))))))))
+    key))
 
 (defun image-cells-for (image &optional cols rows)
   "Cell size to show IMAGE at: the given COLS and/or ROWS, else its pixel size in cells (at most 120 x 50)."

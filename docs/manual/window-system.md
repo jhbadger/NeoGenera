@@ -189,3 +189,28 @@ image to the Listener, or call `(draw-image img)`, to see it. In the line-mode L
 shows it at the cursor.
 
 See also the [Editor Manual](topic:editor-manual) and the [Developer Tools](topic:tools-manual).
+
+## Demos
+
+`:demo` pops up a menu of graphics demos, in the spirit of the Lisp Machine's display hacks; choose one and it runs in its
+own window. `:demo circles` (or any demo's name, abbreviated) starts one directly.
+
+| Demo | What it shows |
+|---|---|
+| Colour Circles | shaded circles, drawn once; only the colour map changes, so the colours flow from circle to circle. `S` turns the spheres into rings that ripple outwards |
+| Munching Squares | the PDP-1 hack: for each x, flip the square at y = x xor t |
+| Lissajous | Lissajous figures turning as their phase drifts, changing ratio now and then |
+| Bouncing Lines | a line whose ends bounce off the walls, leaving a fading trail |
+| Life | Conway's Game of Life on a torus; `R` starts a new random world, and a world that has settled starts again |
+
+In every demo, Space (or a click) pauses and resumes, `N` starts again, `+` and `-` change the speed, and `Q` closes the
+window. The demos use terminal graphics in kitty and Ghostty and half blocks elsewhere.
+
+Colour Circles is colour-map animation, as colour framebuffers did it: the picture is a grid of palette indices, and each
+frame only computes a new palette of 256 colours and maps the indices through it. The primitives are `%idx-fill`,
+`%idx-disc` (a disc of indices, shaded as a sphere or numbered in rings) and `%idx-map`.
+
+A new demo is a subclass of `demo-window` with methods on `demo-setup` (start on a fresh image, `demo-image`) and
+`demo-step` (draw the next frame), and optionally `demo-key`, `demo-keys-help` and `demo-base-interval`; `define-demo` adds it
+to the menu. Any window can be animated the same way: `window-frame-interval` returns how many milliseconds apart its
+frames are, and `window-animate` draws one. After drawing on an image that is already shown, call `image-changed`.

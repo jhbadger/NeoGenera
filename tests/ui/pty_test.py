@@ -195,6 +195,34 @@ def graphics_session():
     check("a plain terminal is not probed", b"\x1b_Gi=31" not in s.term.raw)
     check("plain session exits cleanly", clean_exit(quit_session(s)))
 
+def demo_session():
+    """The :Demo menu and an animated demo, with kitty graphics and with half blocks."""
+    s = Session(30, 100, env_extra={"TERM": "xterm-kitty"}, kitty=True)
+    s.wait_for("CL-USER>")
+    s.send(":demo\r")
+    check("the demo menu pops up", s.wait_for("Colour Circles") and s.wait_for("Munching Squares"))
+    s.send("\r")
+    check("choosing a demo opens it", s.wait_for("Space pause"))
+    s.pump(0.3)
+    before = len([a for a in s.term.apcs if a.startswith("Ga=T,U=1")])
+    s.pump(1.0)
+    frames = len([a for a in s.term.apcs if a.startswith("Ga=T,U=1")]) - before
+    check("the demo animates by itself (%d frames in a second)" % frames, frames >= 8)
+    s.send(" "); s.pump(0.3); paused_at = len([a for a in s.term.apcs if a.startswith("Ga=T,U=1")])
+    s.pump(0.8)
+    check("space pauses it", len([a for a in s.term.apcs if a.startswith("Ga=T,U=1")]) == paused_at and s.term.has("Space resume"))
+    s.send("q")
+    check("q closes the demo", s.wait_for("CL-USER>") and not s.term.has("Space"))
+    check("demo session exits cleanly", clean_exit(quit_session(s)))
+
+    s = Session(30, 100)
+    s.wait_for("CL-USER>")
+    s.send(":demo circles\r")
+    check("a demo opens by name", s.wait_for("Space pause"))
+    s.pump(0.3); n = len(s.term.raw); s.pump(1.0)
+    check("half-block frames keep coming", len(s.term.raw) - n > 20000 and "▀" in s.term.text())
+    check("F10 quits while a demo runs", clean_exit(quit_session(s)))
+
 def main():
     home = tempfile.mkdtemp(prefix="ng-pty-")
     s = Session(30, 100, home)
@@ -319,6 +347,7 @@ def main():
     try: settings_persistence(home)
     finally: shutil.rmtree(home, ignore_errors=True)
     graphics_session()
+    demo_session()
     print("\n%d failure(s)" % len(failures))
     if failures:
         print("--- final screen ---"); print(final_screen)

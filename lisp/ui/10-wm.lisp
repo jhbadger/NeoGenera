@@ -52,6 +52,13 @@
 (defmethod window-tick ((w window)) nil)
 (defmethod window-resized ((w window)) nil)
 (defmethod window-package ((w window)) *package*)
+;;; Animation: a window whose WINDOW-FRAME-INTERVAL is a number of milliseconds has WINDOW-ANIMATE called that
+;;; often (the event loop waits less while it is open); WINDOW-TICK still comes every 250 ms.  WINDOW-ANIMATE
+;;; returns true when the screen must be redrawn (false when, say, the terminal redraws an image by itself).
+(defgeneric window-frame-interval (window))
+(defgeneric window-animate (window))
+(defmethod window-frame-interval ((w window)) nil)
+(defmethod window-animate ((w window)) nil)
 (defgeneric window-quit-warning (window))
 (defmethod window-quit-warning ((w window)) nil)      ; a string such as "2 modified buffers" makes F10 mention it
 
@@ -149,6 +156,8 @@
    (message :initform nil :accessor wm-message)
    (layout :initform :overlap :accessor wm-layout)
    (last-clock :initform "" :accessor wm-last-clock)
+   (last-tick :initform 0 :accessor wm-last-tick)          ; real time of the last tick, while animating
+   (frame-times :initform nil :accessor wm-frame-times)    ; (window . real time of its next frame)
    (pending :initform nil :accessor wm-pending)))      ; :quit or :select while that prompt is up
 
 (defun make-wm (rows cols) (setq *wm* (make-instance 'wm :screen (make-screen rows cols))))
@@ -540,18 +549,46 @@ nested event loop (the window debugger) takes its input from the same script.")
   (wm-draw wm)
   wm)
 
+(defun %ms-now () (floor (get-internal-real-time) (floor internal-time-units-per-second 1000)))
+
+(defun wm-animating-windows (wm)
+  (remove-if-not #'window-frame-interval (wm-windows wm)))
+
+(defun wm-animate (wm &optional (now (%ms-now)))
+  "Run the frames that are due in animated windows; returns the milliseconds until the next one is, or NIL when
+no window is animated."
+  (let ((wins (wm-animating-windows wm)) (next nil) (times nil))
+    (dolist (w wins)
+      (let* ((due (or (cdr (assoc w (wm-frame-times wm))) now)))
+        (when (<= due now)
+          (when (handler-case (window-animate w)
+                  (error (e) (setf (wm-message wm) (format nil "Error in ~A: ~A" (window-title w) e)) t))
+            (setf (wm-dirty wm) t))
+          (setq due (max (+ due (window-frame-interval w)) (+ now 1))))
+        (setq times (cons (cons w due) times))
+        (setq next (if next (min next (- due now)) (- due now)))))
+    (setf (wm-frame-times wm) times)
+    next))
+
 (defun wm-serve (wm)
-  "One turn of the event loop on the terminal: redraw if needed, then wait up to 250 ms for input and handle it."
+  "One turn of the event loop on the terminal: redraw if needed, then wait for input (up to 250 ms, or until an
+animated window's next frame) and handle it."
   (when (wm-dirty wm) (wm-draw wm) (screen-flush (wm-screen wm)))
   (unless (wm-quit wm)
-    (let ((ev (%term-read-event 250)))
-      (if ev
-          (let ((n 0))
-            (loop (wm-handle-event wm ev)
-                  (setq n (+ n 1))
-                  (setq ev (and (< n 60) (not (wm-quit wm)) (%term-read-event 0)))
-                  (unless ev (return))))
-          (wm-handle-event wm (list :tick))))))
+    (let* ((wait (wm-animate wm)) (ev (%term-read-event (if wait (max 1 (min 250 wait)) 250))))
+      (cond (ev
+             (let ((n 0))
+               (loop (wm-handle-event wm ev)
+                     (setq n (+ n 1))
+                     (setq ev (and (< n 60) (not (wm-quit wm)) (%term-read-event 0)))
+                     (unless ev (return)))))
+            ((null wait) (wm-handle-event wm (list :tick))))
+      ;; while windows are animated the wait is shorter than a tick, so ticks go by the clock
+      (when wait
+        (let ((now (%ms-now)))
+          (when (>= (- now (wm-last-tick wm)) 250)
+            (setf (wm-last-tick wm) now)
+            (wm-handle-event wm (list :tick))))))))
 
 (defun wm-feed (wm bytes)
   "Feed terminal input BYTES (a string of escape sequences / text) through the real parser."

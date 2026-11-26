@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **Demos.** `:demo` pops up a menu of animated graphics demos, each in its own window: Colour Circles (shaded circles
+  animated by colour-map cycling, or rippling rings), Munching Squares, Lissajous, Bouncing Lines and Life. Space pauses,
+  `N` restarts, `+`/`-` change the speed. Windows can now be animated (`window-frame-interval`, `window-animate`), and
+  palette images (`%idx-disc`, `%idx-map`) and `image-changed` redraw an image in place. `define-demo` adds more.
 * **The Pascal Tool Kit**, after the Symbolics one: ISO Pascal and Pascal/VS compiled into Lisp (and then to bytecode), with
   Lisp's integers (no overflow), sets as unbounded bit masks, detection of uninitialised variables, range, subscript and
   pointer checks, and run-time errors that name the routine and line and enter the debugger. Units
