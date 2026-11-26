@@ -216,7 +216,25 @@ def main():
     check("tab completes defun", s.wait_for("(defun"))
     s.send("\x15")                                           # C-u clears the line
 
-    # leave with F10 and verify the terminal is restored
+    # processes: a background process in an endless loop must not freeze the window system
+    s.send('(defvar *ctr* 0)\r')
+    s.wait_for("=> *CTR*")
+    s.send('(process-run-function "Counter" (lambda () (loop (setq *ctr* (+ *ctr* 1)))))\r')
+    check("a background process starts", s.wait_for("#<PROCESS Counter"))
+    s.pump(0.5)
+    s.send("(list :big (> *ctr* 1000))\r")
+    check("the Listener stays responsive while it runs, and it runs", s.wait_for("=> (:BIG T)"))
+    check("the who-line counts the processes", s.wait_for("Processes: 2"))
+    s.send(":peek\r")
+    check("Peek shows the process", s.wait_for("Peek: Processes") and s.wait_for("Counter"))
+    s.send("q")                                              # close Peek
+    s.pump(0.5)
+    s.send('(process-kill (find-process "Counter"))\r')
+    check("the process can be killed", s.wait_for("=> T"))
+    s.send('(process-run-function "Sleeper" (lambda () (process-sleep 1000)))\r')
+    check("a second process starts", s.wait_for("#<PROCESS Sleeper"))
+
+    # leave with F10 (with the Sleeper still alive) and verify the terminal is restored
     s.send("\x1b[21~")
     deadline = time.time() + 6; exited = None
     while time.time() < deadline:

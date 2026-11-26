@@ -12,6 +12,8 @@
                  :keywords (editor emacs undo search dired git lisp-mode))
 (import-markdown :tools-manual "docs/manual/tools-manual.md" :category :manual
                  :keywords (inspector debugger profiler trace step cross-reference tools))
+(import-markdown :processes "docs/manual/processes.md" :category :manual
+                 :keywords (process processes peek lock thread scheduling multiprocessing))
 (import-markdown :documentation-system "docs/manual/documentation-system.md" :category :manual
                  :keywords (documentation docstring markdown export html pdf search tutorial))
 

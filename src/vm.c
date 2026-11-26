@@ -83,7 +83,16 @@ static Obj vm_execute(int stop_vfp) {
     }
     case OP_POP: vsp--; break;
     case OP_DUP: { Obj v = vstack[vsp - 1]; PUSH(v); break; }
-    case OP_JMP: { int t = ip[pc]; if (t < pc && prof_pending) { fr->pc = pc; prof_record(); } pc = t; break; }
+    case OP_JMP: {
+      int t = ip[pc];
+      if (t < pc && (prof_pending || ng_attention)) {
+        fr->pc = pc;
+        if (prof_pending) prof_record();
+        if (ng_attention && !gc_inhibit) { proc_attention(); RELOAD(); }
+      }
+      pc = t;
+      break;
+    }
     case OP_JNIL: { int t = ip[pc++]; if (vstack[--vsp] == NIL) pc = t; break; }
     case OP_JNNIL: { int t = ip[pc++]; if (vstack[--vsp] != NIL) pc = t; break; }
     case OP_CALL: {
@@ -91,6 +100,7 @@ static Obj vm_execute(int stop_vfp) {
       fr->pc = pc;
       if (prof_pending) prof_record();
       if (gc_pending && !gc_inhibit) { gc(); RELOAD(); }
+      if (ng_attention && !gc_inhibit) { proc_attention(); RELOAD(); }
       Obj fn = vstack[vsp - n - 1];
       if (IS_TYPE(fn, T_CLOSURE)) { vm_enter(n); RELOAD(); break; }
       r = apply_stack(n);
@@ -103,6 +113,7 @@ static Obj vm_execute(int stop_vfp) {
       fr->pc = pc;
       if (prof_pending) prof_record();
       if (gc_pending && !gc_inhibit) { gc(); RELOAD(); }
+      if (ng_attention && !gc_inhibit) { proc_attention(); RELOAD(); }
       Obj fn = vstack[vsp - n - 1];
       if (IS_TYPE(fn, T_CLOSURE)) {
         int dst = base - 1;

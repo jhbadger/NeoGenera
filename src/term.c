@@ -227,7 +227,9 @@ PRIM(p_term_read_event) {
     else if (deadline < 0) wait = 100;
     else { wait = deadline - now_ms(); if (wait < 0) wait = 0; if (wait > 100) wait = 100; }
     struct pollfd pf = { 0, POLLIN, 0 };
+    int tok = proc_blocking_begin();                 /* other processes run while the terminal is idle */
     int pr = poll(&pf, 1, (int)wait);
+    proc_blocking_end(tok);
     if (pr > 0) {
       if (ilen >= sizeof ibuf) ilen = 0;
       ssize_t n = read(0, ibuf + ilen, sizeof ibuf - ilen);

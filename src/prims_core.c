@@ -1,6 +1,7 @@
 /* prims_core.c -- list, symbol, package and control primitives. */
 #include "neogenera.h"
 #include <time.h>
+#include <errno.h>
 #include <unistd.h>
 
 PrimEntry prim_table[MAX_PRIMS];
@@ -609,6 +610,11 @@ PRIM(p_utf8_decode) {
 PRIM(p_gc) { UNUSED_ARGS; gc(); return FIX((SObj)heap_bytes_used()); }
 PRIM(p_gc_stress) { UNUSED_ARGS; gc_stress = argv[0] != NIL; gc_pending = gc_stress; return argv[0]; }
 PRIM(p_gc_count) { UNUSED_ARGS; return FIX((SObj)gc_count); }
+PRIM(p_heap_info) {
+  /* (%heap-info) -> (object-bytes cons-bytes semispace-bytes collections) */
+  UNUSED_ARGS; size_t o, c, sm; heap_info(&o, &c, &sm);
+  return cons(FIX((SObj)o), cons(FIX((SObj)c), cons(FIX((SObj)sm), cons(FIX((SObj)gc_count), NIL))));
+}
 PRIM(p_heap_used) { UNUSED_ARGS; return FIX((SObj)heap_bytes_used()); }
 PRIM(p_exit) {
   int code = (argc > 0 && FIXP(argv[0])) ? (int)UNFIX(argv[0]) : 0;
@@ -621,7 +627,17 @@ PRIM(p_real_time) {
   return FIX((SObj)ts.tv_sec * 1000000 + ts.tv_nsec / 1000);
 }
 PRIM(p_universal_time) { UNUSED_ARGS; return FIX((SObj)time(NULL) + 2208988800LL); }
-PRIM(p_sleep) { UNUSED_ARGS; double d = num_to_double(argv[0]); if (d > 0) usleep((useconds_t)(d * 1e6)); return NIL; }
+PRIM(p_sleep) {
+  UNUSED_ARGS;
+  double d = num_to_double(argv[0]);
+  if (d > 0) {
+    int tok = proc_blocking_begin();                 /* other processes run while this one sleeps */
+    struct timespec ts = { (time_t)d, (long)((d - (double)(time_t)d) * 1e9) };
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {}
+    proc_blocking_end(tok);
+  }
+  return NIL;
+}
 PRIM(p_getenv) { UNUSED_ARGS; char *e = getenv(STR_DATA(need_str(argv[0]))); return e ? make_cstring(e) : NIL; }
 PRIM(p_command_line) {
   UNUSED_ARGS;
@@ -696,7 +712,7 @@ void init_prims_core(void) {
   defprim("%BACKTRACE", p_backtrace, 0, 1); defprim("%LAST-READ-START", p_last_read_start, 0, 0);
   defprim("%STREAM-POSITION", p_stream_position, 1, 1); defprim("%UTF8-ENCODE", p_utf8_encode, 1, 1);
   defprim_mv("%UTF8-DECODE", p_utf8_decode, 2, 2);
-  defprim("GC", p_gc, 0, 0); defprim("%GC-STRESS", p_gc_stress, 1, 1); defprim("%GC-COUNT", p_gc_count, 0, 0);
+  defprim("GC", p_gc, 0, 0); defprim("%GC-STRESS", p_gc_stress, 1, 1); defprim("%GC-COUNT", p_gc_count, 0, 0); defprim("%HEAP-INFO", p_heap_info, 0, 0);
   defprim("%HEAP-USED", p_heap_used, 0, 0);
   defprim("EXIT", p_exit, 0, 1); defprim("QUIT", p_exit, 0, 1);
   defprim("GET-INTERNAL-REAL-TIME", p_real_time, 0, 0); defprim("GET-UNIVERSAL-TIME", p_universal_time, 0, 0);

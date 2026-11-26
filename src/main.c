@@ -34,7 +34,8 @@ static void init_all(void) {
   init_vm();
   init_prims_core();
   init_prims_data(); init_prims_num(); init_prims_term(); init_prims_sys();
-  init_prims_io(); init_prims_bio();
+  init_prims_io(); init_prims_bio(); init_prims_proc();
+  init_proc();
 }
 
 static void *real_main(void *p) {
@@ -73,6 +74,7 @@ static void *real_main(void *p) {
     } else { fprintf(stderr, "unknown argument: %s\n", argv[i]); a->rc = 2; return NULL; }
   }
   g_argc = argc; g_argv = argv;
+  if (isatty(0)) setvbuf(stdin, NULL, _IONBF, 0);   /* so %STDIN-WAIT can poll the descriptor: no hidden buffered input */
 
   init_all();
   if (use_image) {

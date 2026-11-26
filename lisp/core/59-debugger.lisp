@@ -101,6 +101,7 @@
     (loop
       (format t "~&debug ~D> " level)
       (finish-output)
+      (%stdin-wait *standard-input*)
       (let ((form (handler-case (read *standard-input* nil :eof)
                     (error (e) (format t "~&Read error: ~A~%" e) :retry))))
         (when (member form '(:frame :f :bt :backtrace :b :edit :e))

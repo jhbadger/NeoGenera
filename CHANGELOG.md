@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* **Processes and Peek.** Preemptive Lisp processes on threads that share one interpreter lock: `process-run-function`, `process-wait`
+  (and `-with-timeout`), `process-sleep`, `process-join`, `process-interrupt`, `process-kill`, `process-arrest`, locks with `with-lock-held`,
+  `without-interrupts`. Special bindings are per process; background output is kept per process; errors are recorded and announced.
+  `sleep`, terminal input, `run-program` and the line Listener's prompt let other processes run. `:peek` opens Peek (processes, memory,
+  windows, refreshed every second, with clickable processes); `:show-processes`, `:kill-process`; the who-line counts processes.
+
 * **Editor: Zmacs definition commands.** Edit, List and Compile Changed Definitions (since compiled, saved or read in); Edit and List Callers;
   a possibilities list stepped with `` C-x ` `` / `M-g n` / `C-.`; Quick Arglist (`C-c C-a`), Documentation (`C-c C-d`) and Macro Expand
   Expression (`C-c RET`), also bound to Zmacs's `c-sh-A`, `c-sh-D` and `c-sh-M`.

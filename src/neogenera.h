@@ -122,17 +122,19 @@ extern int    gc_pending, gc_stress, gc_verbose;
 extern size_t gc_count;
 extern int    heap_fixed;
 size_t heap_bytes_used(void);
+void  heap_info(size_t *obj_used, size_t *cons_used, size_t *semispace);
 int   save_image(const char *path);
 int   load_image(const char *path);
 
 /* root stack for C locals */
 #define MAX_ROOTS (1 << 20)       /* well above what the evaluator depth limit (60000 levels) can use */
-extern Obj *root_stack[MAX_ROOTS];
-extern int  nroots;
+extern Obj **root_stack;          /* the running process's root stack (MAX_ROOTS entries for the initial process) */
+extern int  nroots, root_stack_size;
 extern int  ng_root_limit;        /* MAX_ROOTS minus a reserve for error handling; the reserve opens after an overflow */
 void ng_root_overflow(void) __attribute__((noreturn));
 extern int ng_vfp_limit, ng_vsp_limit;       /* VM frame and value-stack limits; a reserve above them opens after an overflow */
 void ng_vm_overflow(void) __attribute__((noreturn));
+void gc_forward_roots(Obj (*fwd)(Obj));        /* proc.c: roots held by processes that are not running */
 #define PROTECT(v)   do { if (nroots >= ng_root_limit) ng_root_overflow(); root_stack[nroots++] = &(v); } while (0)
 #define UNPROTECT(n) (nroots -= (n))
 
@@ -217,20 +219,23 @@ void ng_stack_overflow(void) __attribute__((noreturn));
 #define VSTACK_SIZE (8 * 1024 * 1024)
 #define SPEC_SIZE   (1024 * 1024)
 #define VFRAME_SIZE (1024 * 1024)
-extern Obj vstack[VSTACK_SIZE];
-extern int vsp;
+/* The interpreter stacks belong to the running process: these globals point at its arrays (the initial process
+   uses static arrays of the sizes above; other processes get smaller ones).  See proc.c. */
+extern Obj *vstack;
+extern int vsp, vstack_size;
 typedef struct { Obj sym; Obj old; } SpecBind;
-extern SpecBind specpdl[SPEC_SIZE];
-extern int spsp;
+extern SpecBind *specpdl;
+extern int spsp, spec_size;
 typedef struct { Obj closure; int pc; int base; } VFrame;
-extern VFrame vframes[VFRAME_SIZE];
-extern int vfp;
+extern VFrame *vframes;
+extern int vfp, vframe_size;
+void reset_stack_limits(void);                 /* close the error-handling reserves of the current stacks */
 
 #define MAX_MV 256
 extern Obj mv_vals[MAX_MV];
 extern int mv_count;
 
-#define PUSH(x) do { if (vsp >= VSTACK_SIZE - 8) lisp_error("value stack exhausted"); vstack[vsp++] = (x); } while (0)
+#define PUSH(x) do { if (vsp >= vstack_size - 8) lisp_error("value stack exhausted"); vstack[vsp++] = (x); } while (0)
 
 void  dynbind(Obj sym, Obj val);
 void  unbind_to(int height);
@@ -351,6 +356,17 @@ void  print_to_buf(Buf *b, Obj o, int escape, int readable);
 Obj   print_to_string(Obj o, int escape, int readable);
 void  print_obj(Obj stream, Obj o, int escape);
 void  format_double(Buf *b, double d);
+
+/* ---- processes (proc.c) ------------------------------------------------ */
+/* Lisp processes are threads that take turns holding one interpreter lock.  A process gives up the lock only
+   at a VM safe point (CALL, TAILCALL, backward JMP: when NG_ATTENTION is set) or around a blocking system call
+   (PROC_BLOCKING_BEGIN/END), so the GC's rules are unchanged: every live Obj is in rooted memory there. */
+extern volatile int ng_attention;
+void  init_proc(void);
+void  proc_attention(void);                    /* called by the VM at a safe point when ng_attention is set */
+int   proc_blocking_begin(void);               /* release the lock for a blocking call (no unprotected Objs!) */
+void  proc_blocking_end(int token);
+void  init_prims_proc(void);
 
 /* ---- repl ------------------------------------------------------------- */
 int   run_toplevel(const char *name);

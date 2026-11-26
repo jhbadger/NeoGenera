@@ -56,13 +56,14 @@ PRIM(p_run_program) {
   av[0] = (char *)prog; int i = 1;
   for (Obj l = argv[1]; CONSP(l); l = CDR(l)) av[i++] = (char *)STR_DATA(need_str(CAR(l)));
   av[i] = NULL;
-  const char *input = (argc > 2 && STRINGP(argv[2])) ? STR_DATA(argv[2]) : NULL;
-  size_t ilen = input ? STR_LEN(argv[2]) : 0;
+  size_t ilen = (argc > 2 && STRINGP(argv[2])) ? STR_LEN(argv[2]) : 0;
+  char *input = NULL;                                /* a C copy: other processes may move the string while we wait */
+  if (ilen) { input = malloc(ilen); if (!input) { free(av); lisp_error("RUN-PROGRAM: out of memory"); } memcpy(input, STR_DATA(argv[2]), ilen); }
   int out[2], in[2];
-  if (pipe(out) != 0 || pipe(in) != 0) { free(av); lisp_error("RUN-PROGRAM: pipe failed"); }
+  if (pipe(out) != 0 || pipe(in) != 0) { free(av); free(input); lisp_error("RUN-PROGRAM: pipe failed"); }
   fflush(stdout); fflush(stderr);
   pid_t pid = fork();
-  if (pid < 0) { free(av); lisp_error("RUN-PROGRAM: fork failed"); }
+  if (pid < 0) { free(av); free(input); lisp_error("RUN-PROGRAM: fork failed"); }
   if (pid == 0) {
     dup2(in[0], 0); dup2(out[1], 1); dup2(out[1], 2);
     close(in[0]); close(in[1]); close(out[0]); close(out[1]);
@@ -71,6 +72,7 @@ PRIM(p_run_program) {
   }
   free(av);
   close(in[0]); close(out[1]);
+  int tok = proc_blocking_begin();                   /* no Lisp objects are used until proc_blocking_end */
   /* Feed stdin and drain stdout at the same time (poll), so a child that writes a lot before reading
      everything cannot deadlock us, and ignore SIGPIPE if the child closes its stdin early. */
   struct sigaction ign, oldpipe; memset(&ign, 0, sizeof ign); ign.sa_handler = SIG_IGN; sigemptyset(&ign.sa_mask);
@@ -101,6 +103,8 @@ PRIM(p_run_program) {
   if (out_open) close(out[0]);
   sigaction(SIGPIPE, &oldpipe, NULL);
   int status = 0; waitpid(pid, &status, 0);
+  proc_blocking_end(tok);
+  free(input);
   Obj s = make_string(b.buf ? b.buf : "", b.len);
   buf_free(&b);
   mv_vals[0] = s; mv_vals[1] = FIX(WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0));

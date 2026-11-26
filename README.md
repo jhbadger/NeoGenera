@@ -13,6 +13,7 @@ mathematics, statistics and bioinformatics. Version **1.0.0**. A scripted tour r
   [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the differences from ANSI Common Lisp.
 * **A Genera-style environment.** A text window system with mouse-sensitive output (presentations: click any printed object for commands that apply to it),
   an Emacs-style editor with an undo tree, Inspector, cross-reference, trace, stepper, profiler, class and package browsers, and an interactive debugger.
+  Several Lisp **processes** run at once (preemptive, with locks and `process-wait`), and **Peek** shows them live.
 * **Documentation inside the system.** Manuals, docstrings and cross-references in one viewer (`:doc`, `:search-doc`), runnable examples, HTML and PDF
   export, and an interactive tutorial (`:tutorial`).
 * **Quantitative work.** Linear algebra, probability distributions, hypothesis tests, linear and generalized linear models, data frames, text and SVG plots,

@@ -62,8 +62,9 @@ size_t gc_count;
 static Obj *global_roots[4096];
 static int  nglobal_roots;
 
-Obj *root_stack[MAX_ROOTS];
-int  nroots;
+static Obj *initial_root_stack[MAX_ROOTS];
+Obj **root_stack = initial_root_stack;
+int  nroots, root_stack_size = MAX_ROOTS;
 
 void add_root(Obj *p) {
   if (nglobal_roots >= 4096) { fprintf(stderr, "too many global roots\n"); abort(); }
@@ -212,6 +213,10 @@ Obj make_symbol_obj(Obj name) {
   return s;
 }
 
+void heap_info(size_t *obj_used, size_t *cons_used, size_t *semispace) {
+  *obj_used = (size_t)((char *)o_hp - o_base); *cons_used = (size_t)((char *)c_hp - c_base); *semispace = semi;
+}
+
 size_t heap_bytes_used(void) {
   return (size_t)((char *)o_hp - o_base) + (size_t)((char *)c_hp - c_base);
 }
@@ -286,6 +291,7 @@ void gc(void) {
     f->tag = forward(f->tag); f->value = forward(f->value); f->cleanup = forward(f->cleanup);
     f->mvlist = forward(f->mvlist);
   }
+  gc_forward_roots(forward);
   scavenge(o_to_base, c_to_base);
 
   size_t live_o = (size_t)((char *)o_to_hp - (char *)o_to_base);

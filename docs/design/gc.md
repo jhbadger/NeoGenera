@@ -43,7 +43,9 @@ of the call; an unusually allocation-heavy `print-object` method therefore grows
 * multiple-value registers `mv_vals[0 .. mv_count)`,
 * the `Frame` chain (catch/block/tagbody/unwind-protect records on the C stack),
 * **the C-local root stack**: `PROTECT(var)` pushes the *address* of a C local, and the
-  collector updates the variable in place.
+  collector updates the variable in place,
+* the saved stacks, bindings, root stacks, frames and multiple values of every Lisp process that
+  is not running (`gc_forward_roots` in `proc.c`; see `processes.md`).
 
 Rules for evaluator-level C code:
 

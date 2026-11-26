@@ -8,28 +8,38 @@
  */
 #include "neogenera.h"
 
-Obj vstack[VSTACK_SIZE];
-int vsp;
-SpecBind specpdl[SPEC_SIZE];
-int spsp;
-VFrame vframes[VFRAME_SIZE];
-int vfp;
+static Obj initial_vstack[VSTACK_SIZE];
+Obj *vstack = initial_vstack;
+int vsp, vstack_size = VSTACK_SIZE;
+static SpecBind initial_specpdl[SPEC_SIZE];
+SpecBind *specpdl = initial_specpdl;
+int spsp, spec_size = SPEC_SIZE;
+static VFrame initial_vframes[VFRAME_SIZE];
+VFrame *vframes = initial_vframes;
+int vfp, vframe_size = VFRAME_SIZE;
 Obj mv_vals[MAX_MV];
 int mv_count = 1;
 Frame *frame_top;
 int eval_depth;
 char *ng_stack_limit = NULL;
+/* Each stack keeps a reserve above its soft limit for the error handling of an overflow (an eighth of a small
+   stack, at most the fixed amounts the initial process uses). */
+static int reserve(int size, int most) { int r = size / 8; return r < most ? r : most; }
 int ng_vfp_limit = VFRAME_SIZE - 8192, ng_vsp_limit = VSTACK_SIZE - 32768;
-void ng_vm_overflow(void) { ng_vfp_limit = VFRAME_SIZE - 2; ng_vsp_limit = VSTACK_SIZE - 4096; lisp_error("Control stack exhausted (VM)"); }
+void ng_vm_overflow(void) { ng_vfp_limit = vframe_size - 2; ng_vsp_limit = vstack_size - reserve(vstack_size, 4096) / 2; lisp_error("Control stack exhausted (VM)"); }
 int ng_root_limit = MAX_ROOTS - 8192;
-void ng_root_overflow(void) { eval_depth = 0; ng_root_limit = MAX_ROOTS - 16; lisp_error("Control stack exhausted (root stack)"); }
+void ng_root_overflow(void) { eval_depth = 0; ng_root_limit = root_stack_size - 16; lisp_error("Control stack exhausted (root stack)"); }
+void reset_stack_limits(void) {
+  ng_root_limit = root_stack_size - reserve(root_stack_size, 8192);
+  ng_vfp_limit = vframe_size - reserve(vframe_size, 8192); ng_vsp_limit = vstack_size - reserve(vstack_size, 32768);
+}
 void ng_stack_overflow(void) { eval_depth = 0; lisp_error("Control stack exhausted (C stack)"); }
 
 #define MAX_EVAL_DEPTH 60000
 
 /* ---- dynamic binding -------------------------------------------------- */
 void dynbind(Obj sym, Obj val) {
-  if (spsp >= SPEC_SIZE) lisp_error("special binding stack exhausted");
+  if (spsp >= spec_size) lisp_error("special binding stack exhausted");
   specpdl[spsp].sym = sym;
   specpdl[spsp].old = SYM_VALUE(sym);
   spsp++;
@@ -57,8 +67,7 @@ Frame *find_frame(int kind, Obj tag) {
 }
 
 static void restore_state(Frame *f) {
-  ng_root_limit = MAX_ROOTS - 8192;          /* closes the error-handling reserves again */
-  ng_vfp_limit = VFRAME_SIZE - 8192; ng_vsp_limit = VSTACK_SIZE - 32768;
+  reset_stack_limits();                      /* closes the error-handling reserves again */
   unbind_to(f->spsp); vsp = f->vsp; vfp = f->vfp; nroots = f->nroots; eval_depth = f->eval_depth; gc_inhibit = f->gci;
 }
 
@@ -811,6 +820,7 @@ Obj eval(Obj form, Obj vars, Obj funs) {
   PROTECT(form); PROTECT(vars); PROTECT(funs);
   STACK_CHECK(); if (++eval_depth > MAX_EVAL_DEPTH) { eval_depth = 0; lisp_error("Control stack exhausted (evaluator depth)"); }
   if (gc_pending && !gc_inhibit) gc();
+  if (ng_attention && !gc_inhibit) proc_attention();      /* also a process-switch point */
   Obj head = CAR(form), f = NIL, r;
   if (SYMBOLP(head)) {
     int sf = SYM_SFID(head);

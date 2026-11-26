@@ -55,3 +55,7 @@ standard definitions of these functions are not redefined.
 `CALL` and `TAILCALL` poll `gc_pending`. After a collection or after any call that may have
 run Lisp code, the interpreter loop reloads its cached `ip` / `consts` pointers from the
 current frame (`RELOAD`), because the code object may have moved.
+
+`CALL`, `TAILCALL` and backward `JMP`s also poll `ng_attention`, the request to switch processes
+(preemption, an interrupt or an arrest; see `processes.md`). Another process may collect while
+this one is switched out, so the loop reloads afterwards as it does after a collection.

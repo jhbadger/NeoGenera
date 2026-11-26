@@ -73,6 +73,7 @@
       (when (not *listener-running*) (return))
       (format t "~&~A> " (%package-prompt))
       (finish-output)
+      (%stdin-wait *standard-input*)              ; let other processes run while waiting for input
       (let ((form (handler-case (read *standard-input* nil '%eof)
                     (error (e) (format t "~&Read error: ~A~%" e) '%retry))))
         (cond ((eq form '%eof) (terpri) (return))
