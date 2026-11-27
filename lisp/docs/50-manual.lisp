@@ -27,6 +27,8 @@
                  :keywords (pascal compiler units dialect iso vs templates electric pascal-mode tool-kit))
 (import-markdown :fortran-manual "docs/manual/fortran-manual.md" :category :manual
                  :keywords (fortran f77 ftn compiler format fixed-format electric fortran-mode tool-kit symbolics))
+(import-markdown :prolog-manual "docs/manual/prolog-manual.md" :category :manual
+                 :keywords (prolog logic unification backtracking dcg grammar clauses horn tracer prolog-mode tool-kit lisp-interface))
 
 (import-markdown :bytecode-manual "docs/manual/bytecode-manual.md" :category :manual
                  :keywords (bytecode assembler assembly defasm vm instructions verifier asm-mode disassemble stack-machine))

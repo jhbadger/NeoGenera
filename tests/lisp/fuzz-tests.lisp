@@ -180,6 +180,93 @@ break" "ünï") *fuzz-rng*)) (4 (rand-choice '(foo bar |Hello World| :key nil t)
         (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 30)) (reading fmt s))
           (is (> (+ ok errors) 1499)))))))
 
+;;; ---- the Prolog Tool Kit ------------------------------------------------------------------------------------------------------
+
+(defun fuzz-pl-atom ()
+  (pl-atom (rand-choice '("a" "foo" "bar" "Bar" "hello world" "[]" "{}" "+" "-" "*" "=" ":-" "," ";" "|" "!" "\\+" "it's" "" "_x" "\\" "." "is" "mod" "dynamic" "0" "1a" "a.b" "-->" "->")
+                        *fuzz-rng*)))
+
+(defun fuzz-pl-term (depth vars)
+  "A random Prolog term; VARS is a cell holding the variables made so far."
+  (let ((k (rand-int (if (<= depth 0) 6 10) *fuzz-rng*)))
+    (case k
+      (0 (fuzz-pl-atom))
+      (1 (rand-choice (list 0 1 -1 42 -7 1000 (expt 2 70) (- (expt 2 70))) *fuzz-rng*))
+      (2 (rand-choice (list 0.5d0 -1.5d0 3.14d0 1d20 1d-7 100.0d0) *fuzz-rng*))
+      (3 (rand-choice (list "str" "" "a b" "q\"uote" "line
+break") *fuzz-rng*))
+      (4 (if (and (car vars) (< (rand-uniform *fuzz-rng*) 0.5))
+             (rand-choice (car vars) *fuzz-rng*)
+             (let ((v (pl-new-var))) (push v (car vars)) v)))
+      (5 *pl-nil*)
+      (6 (lisp-to-pl-list (loop repeat (rand-int 4 *fuzz-rng*) collect (fuzz-pl-term (- depth 1) vars))
+                          (if (< (rand-uniform *fuzz-rng*) 0.2) (fuzz-pl-term (- depth 1) vars) *pl-nil*)))
+      (7 (%make-pls (fuzz-pl-atom) (coerce (loop repeat (+ 1 (rand-int 3 *fuzz-rng*)) collect (fuzz-pl-term (- depth 1) vars)) 'simple-vector)))
+      (8 (%make-pls (pl-atom (rand-choice '("+" "-" "*" "/" "=" ":-" "," ";" "->" "is" "mod" "^" "**" "<" "=.." ":" "@<") *fuzz-rng*))
+                    (vector (fuzz-pl-term (- depth 1) vars) (fuzz-pl-term (- depth 1) vars))))
+      (t (%make-pls (pl-atom (rand-choice '("-" "+" "\\+" "\\" "dynamic" ":-" "?-") *fuzz-rng*)) (vector (fuzz-pl-term (- depth 1) vars)))))))
+
+(deftest fuzz-prolog
+  ;; the Prolog Tool Kit: reader, clause reader, consulting, writer round trips, format, text built-ins and the solver
+  (pl-reset)
+  (let ((seed "foo(X, [a,b|T], 'q a', \"s\", 0'c, 1.5e3) :- \\+ bar(X), ( X > 1 -> baz ; qux(Y) ), Y is X mod 3 + 2 ** 3, !.")
+        (*pl-quiet* t))
+    (multiple-value-bind (ok errors) (fuzz-each (s 2500 (fuzz-mutate seed)) (pl-read-term-from-string s 0))
+      (is (> (+ ok errors) 2499)) (is (> ok 100)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 2500 (fuzz-string 60)) (pl-read-term-from-string s 0))
+      (is (> (+ ok errors) 2499)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 60)) (pl-read-clause-text (make-string-input-stream s)))
+      (is (> (+ ok errors) 1499)))
+    ;; consulting random text never escapes, whatever the clauses and directives are
+    (let ((safe (list "a(1). b(X) :- a(X). c :- b(_)." "d(X, Y) :- X = Y, !. e --> [a], d(_, _)." ":- dynamic f/1. f(1). f(2).")))
+      (multiple-value-bind (ok errors) (fuzz-each (s 600 (fuzz-mutate (rand-choice safe *fuzz-rng*)))
+                                                  (pl-consult-string (substitute #\Space #\? (substitute #\Space #\! s)) :source "fuzz-source"))
+        (is (> (+ ok errors) 599))))
+    ;; writing a term quoted and reading it back gives a variant of the term
+    (let ((bad 0) (total 0))
+      (dotimes (i 1500)
+        (let* ((vars (list nil)) (term (fuzz-pl-term 4 vars)))
+          (handler-case
+              (let ((text (pl-term-to-string term :quoted t)))
+                (setq total (+ total 1))
+                (unless (pl-variant-p term (pl-parse-string text))
+                  (setq bad (+ bad 1))
+                  (when (< bad 4) (format t "~&prolog round trip: ~A~%" text))))
+            (error (e) (setq total (+ total 1) bad (+ bad 1)) (when (< bad 4) (format t "~&prolog round trip error: ~A~%" e))))))
+      (is (> total 1400))
+      (is-equal 0 bad))
+    ;; format with random control strings and arguments
+    (multiple-value-bind (ok errors) (fuzz-each (s 2500 (fuzz-mutate "~w ~q ~a ~d ~2f ~e ~t~20| ~s ~c~n~*c ~`x~t~10+ ~p ~i ~r"))
+                                                (pl-format-to-string s (list 1 "ab" 2.5d0 (pl-atom "x") (lisp-to-pl-list (list 97 98)) 3 4)))
+      (is (> (+ ok errors) 2499)))
+    ;; text built-ins on random arguments raise ordinary errors
+    (dolist (goal '("atom_codes(~A, ~A)" "atom_length(~A, ~A)" "sub_atom(~A, ~A, ~A, _, _)" "atom_concat(~A, ~A, _)" "atomic_list_concat(~A, ~A, _)"
+                    "split_string(~A, ~A, \"\", _)" "number_codes(~A, ~A)" "atom_number(~A, ~A)" "char_code(~A, ~A)" "term_to_atom(~A, ~A)"
+                    "arg(~A, ~A, _)" "functor(~A, ~A, ~A)" "~A =.. ~A" "msort(~A, _)" "sort(0, @>=, ~A, _)" "length(~A, ~A)" "succ(~A, ~A)"
+                    "X is ~A + ~A" "string_concat(~A, ~A, _)" "nb_setval(~A, ~A)" "copy_term(~A, ~A)" "compare(_, ~A, ~A)" "between(~A, ~A, _)"))
+      (multiple-value-bind (ok errors)
+          ;; the arguments share no variables: a cyclic term (X =.. [a|X]) is a legitimate way to loop in a Prolog
+          ;; without an occurs check, and printing or converting one recurses until the Lisp stack is gone
+          (fuzz-each (g 250 (format nil goal (pl-term-to-string (fuzz-pl-term 2 (list nil)) :quoted t) (pl-term-to-string (fuzz-pl-term 2 (list nil)) :quoted t)
+                                    (pl-term-to-string (fuzz-pl-term 1 (list nil)) :quoted t)))
+                     (pl-query g :limit 3))
+        (is (> (+ ok errors) 249))))
+    ;; random terms through the solver's own primitives: unification, copying, comparison, assert/retract
+    (dotimes (i 600)
+      (let* ((vars (list nil)) (a (fuzz-pl-term 3 vars)) (b (fuzz-pl-term 3 vars)))
+        (let ((c (pl-copy-term a)))
+          (is (pl-variant-p a c))
+          (is-equal 0 (if (pl-ground-p a) (pl-compare a c) 0)))
+        (is-equal (- (pl-compare a b)) (pl-compare b a))
+        (when (%pl-can-unify a b) (is (let ((c1 (pl-copy-term a)) (c2 (pl-copy-term b))) (declare (ignore c2)) (pl-variant-p c1 a))))))
+    ;; the solver on mutated terminating goals
+    (let ((goals '("X is 1 + 2 * 3" "atom_length(hello, N)" "findall(X, member(X, [1,2,3]), L)" "append(X, Y, [1,2])" "length(L, 2)"
+                   "sub_atom(abc, B, 1, A, S)" "msort([c,a,b], L)" "format(atom(A), '~w', [x])" "setof(X, member(X, [b,a]), L)"
+                   "catch(atom_length(X, _), error(E, _), true)" "forall(member(X, [1,2]), X > 0)" "between(1, 3, X), X > 1")))
+      (multiple-value-bind (ok errors) (fuzz-each (g 1500 (fuzz-mutate (rand-choice goals *fuzz-rng*))) (pl-query g :limit 3))
+        (is (> (+ ok errors) 1499)) (is (> ok 30))))
+    (pl-reset)))
+
 ;;; ---- the bytecode assembler ----------------------------------------------------------------------------------------------
 
 (defun fuzz-asm-atom ()

@@ -24,6 +24,10 @@ mathematics, statistics and bioinformatics. Version **1.0.0**. A scripted tour r
 * **The FORTRAN Tool Kit.** ANSI FORTRAN 77 with the Symbolics extensions compiles into Lisp: arbitrary-size integers, detection of
   uninitialised values, stronger type checks, `DO WHILE`/`ENDDO`/`INCLUDE`, bit operations and binary patterns, packages, full
   formatted and list-directed I/O, and a fixed-format FORTRAN mode in the editor. See `:doc fortran-manual` and `examples/12-fortran.lisp`.
+* **The Prolog Tool Kit.** Edinburgh/ISO Prolog integrated with Lisp: unbounded integers, the usual built-ins, `findall`/`bagof`/`setof`,
+  exceptions, definite clause grammars, a library of lists, association lists and lambdas, a tracer, the `:Prolog` top level, the `PROLOG`
+  package to query Prolog from Lisp and `lisp/2` to call Lisp from Prolog, and a PROLOG mode in the editor with incremental compilation.
+  See `:doc prolog-manual` and `examples/16-prolog.lisp`.
 * **The Bytecode Assembler.** Write a function as raw instructions for the bytecode machine with `defasm`: labels, a full instruction set,
   and a verifier that checks stack depth, slots, jumps, dynamic bindings and the types the unchecked instructions assume before the
   routine exists. `asm-listing` turns any compiled function back into assembly source that assembles to the same code, and ASM mode in

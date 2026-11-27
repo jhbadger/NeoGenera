@@ -156,6 +156,14 @@ indented statement line, `C-M-j` opens a continuation card, Electric FORTRAN mod
 cards, `C-M-a`/`C-M-e`/`C-M-f`/`C-M-b`/`C-M-h` move over and mark routines and statements, and `C-c C-c` compiles the
 routine at point. See [The FORTRAN Tool Kit](topic:fortran-manual).
 
+## PROLOG mode
+
+Files ending in `.pl`, `.pro` or `.prolog` are edited in PROLOG mode: it colours comments, quoted text, variables, clause heads and
+built-ins, `TAB` and `C-j` lay out clause bodies (four columns, the `(   If -> Then ; Else )` block layout, arguments aligned after
+an open parenthesis), `C-M-a`/`C-M-e`/`C-M-f`/`C-M-b`/`C-M-h` move over and mark clauses, `C-c C-c` compiles the region or the
+predicate at point, `C-c C-q` runs a query, and `M-.` edits the definition of the predicate at point. See
+[The Prolog Tool Kit](topic:prolog-manual).
+
 ## ASM mode
 
 Files ending in `.ngasm` are edited in ASM mode, an assembler-style mode for `defasm` bytecode routines: `TAB` puts labels,

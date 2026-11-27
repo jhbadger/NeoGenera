@@ -82,5 +82,7 @@ the selected function. See [Developer Tools](topic:tools-manual).
   in the editor.
 * [The FORTRAN Tool Kit](topic:fortran-manual) for compiling and running ANSI FORTRAN 77 with the Symbolics extensions, and
   FORTRAN mode in the editor.
+* [The Prolog Tool Kit](topic:prolog-manual) for Prolog integrated with Lisp: the `:Prolog` top level, consulting, definite clause
+  grammars, the tracer, calling Prolog from Lisp and Lisp from Prolog, and PROLOG mode in the editor.
 * [The Bytecode Assembler](topic:bytecode-manual) for writing functions as raw virtual-machine instructions (`defasm`), the
   verifier that checks them, listing compiled code as assembly, and ASM mode in the editor.

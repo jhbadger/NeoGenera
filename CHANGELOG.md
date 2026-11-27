@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+* **The Prolog Tool Kit**: Prolog integrated into the Lisp system, as Pascal and FORTRAN are. An Edinburgh/ISO Prolog whose terms are Lisp
+  objects (integers of any size, doubles, strings, atoms as symbols of the package `PL-ATOMS`) and whose solver is an iterative machine
+  in Lisp: the continuation and the choicepoint stack are heap data, so recursion depth is limited by memory and not by the Lisp stack;
+  bindings are trailed only for variables older than the youngest choicepoint; clauses compile to templates with first-argument
+  indexing and are unified against directly; the logical update view governs `assert` and `retract`. Cut, `->`, `*->`, `\+`, `call/N`,
+  `catch/throw` with the ISO error terms, `findall/bagof/setof/aggregate_all`, atoms and strings, `format/1,2,3` (column stops with `~t ~|
+  ~+`), streams and the Edinburgh `see/tell`, operators and flags, `listing` and `portray_clause`, DCGs (`phrase/2,3`), a library in
+  Prolog (`lisp/prolog/library.pl`: lists, apply, pairs, ordered sets, AVL association lists, yall lambdas, `must_be/2`), and a tracer
+  with Call/Exit/Redo/Fail ports and spy points. The top level `:Prolog` answers queries (`;` for more), and `:Consult Prolog`, `:Prolog
+  Query`, `:Show Prolog Predicates`, `:Show Prolog Warnings`, `:Trace Prolog` and `:Reset Prolog` are Listener commands. Consulting
+  records singleton, directive and syntax warnings in a database that the editor visits with `C-c C-w`; reconsulting a source replaces
+  its predicates; `term_expansion/2` is honoured; systems accept `.pl` files and `prolog:compile-file` writes compiled code. The
+  `PROLOG` package calls Prolog from Lisp (`prolog:query`, `prove`, `do-query`, `assert`, `define-predicate`, `define-solutions`,
+  `from-lisp`/`to-lisp`) and `lisp/1`, `lisp/2`, `lisp_call/3` call Lisp from Prolog. **PROLOG mode** (`.pl`, `.pro`, `.prolog`): colouring
+  with multi-line comments and quotes, clause motion and marking, layout on `TAB`/`C-j`, incremental compilation of the region or
+  predicate (`C-c C-c`), queries (`C-c C-q`, `C-c C-e`), listing, `M-.`, List Definitions and the changed-definition commands. Not
+  provided: modules, tabling, coroutining, attributed variables, dicts, threads (see the manual). New manual: `:doc prolog-manual`;
+  design notes in `docs/design/prolog.md`; example `examples/16-prolog.lisp` with `examples/prolog/*.pl` (family, N queens, expert
+  system, expression grammar, DNA translation with the bioinformatics functions, the zebra puzzle). Files: `lisp/prolog/*-pl-*.lisp`
+  and `library.pl` (no C changes). Tests: `tests/lisp/prolog-tests.lisp`, `fuzz-prolog` (including a write/read round-trip property).
+
 * **The Bytecode Assembler.** `defasm` defines a function in raw VM instructions: labels, every instruction of the machine, constants as
   data, `(:var name)` for named stack slots, `(:lambda ...)` operands for closures with `(:free ...)` names, and `(:unsafe)` to waive the
   type proofs. `asm-assemble` is the function behind it. A verifier (abstract interpretation over stack depth and a small type lattice)
