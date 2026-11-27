@@ -76,6 +76,10 @@ MOP readers include `class-default-initargs`, `class-direct-default-initargs`, `
 `slot-definition-initform`, `slot-definition-initfunction`, `slot-definition-readers`, `slot-definition-writers` and
 `slot-definition-type`. A `method-combination` class exists for specializing, but combinations are not objects.
 
+The older Symbolics object system is available as well: [defflavor](fn:defflavor), `(defmethod (flavor message) ...)`
+and [send](fn:send) are described in the Flavors manual. Flavors are CLOS classes, and a method whose name is a symbol
+or `(setf name)` is a CLOS method as before.
+
 ## Conditions
 
 NeoGenera has the full handler and restart model: [handler-case](fn:handler-case),

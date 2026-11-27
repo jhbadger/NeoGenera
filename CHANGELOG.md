@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+* **Flavors.** The Symbolics/Lisp Machine object system, layered on CLOS: `defflavor` (instance variables with default
+  forms, component flavors and the usual options: gettable/settable/inittable variables, `:init-keywords`,
+  `:default-init-plist`, `:required-*`, `:included-flavors`, `:default-handler`, `:method-combination`,
+  `:no-vanilla-flavor`), `(defmethod (flavor [type] message) ...)` with the instance variables and `self` visible in the
+  body, `send` and friends, `:before`/`:after`/`:around` daemons (only the most specific primary method runs),
+  `defwhopper` and `defwrapper`, the `:progn :or :and :append :nconc :list :max :min :+ :case` and
+  `:daemon-with-or/and/override` combinations, `:inverse-around`, the `:init` message, `vanilla-flavor` and
+  `property-list-mixin`. Flavors use the Flavors component order, not C3, and `describe` shows flavor instances in
+  the Lisp Machine format. See docs/manual/flavors-manual.md; not supported: funcallable instances,
+  `:inverse-list`/`:pass-on` and `:alias-flavor`.
 * **Weak hash tables and finalization.** `make-hash-table` takes `:weakness` (`:key`, `:value`, `:key-and-value`,
   `:key-or-value`), and `hash-table-weakness` returns it; `:key` entries are ephemerons, so a value that refers to its
   key does not keep the entry alive. `make-weak-pointer`, `weak-pointer-p` and `weak-pointer-value` give single weak

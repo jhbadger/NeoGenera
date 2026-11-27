@@ -4,6 +4,7 @@
 (load "tests/lisp/compiler-tests.lisp")
 (load "tests/lisp/phase4-tests.lisp")
 (load "tests/lisp/language-tests.lisp")
+(load "tests/lisp/flavors-tests.lisp")
 (load "tests/lisp/ui-tests.lisp")
 (load "tests/lisp/debugger-tests.lisp")
 (load "tests/lisp/accept-tests.lisp")

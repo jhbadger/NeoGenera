@@ -75,7 +75,7 @@
    defstruct "Define a structure type with a constructor, predicate, copier and accessors. Options: `:conc-name`, `:constructor`, `:include`, `:predicate`, `:copier`."
    defclass "Define a CLOS class: superclasses, slots (`:initarg :initform :reader :writer :accessor`) and `:default-initargs`. Redefinition updates the class in place; existing instances are not changed."
    defgeneric "Declare a generic function, optionally with `:method` clauses."
-   defmethod "Define a method on a generic function, with specializers (classes or `(eql x)`) and optional `:before`, `:after` or `:around` qualifiers."
+   defmethod "Define a method on a generic function, with specializers (classes or `(eql x)`) and optional `:before`, `:after` or `:around` qualifiers. With a list for a name, `(flavor [type] message)`, define a Flavors method."
    define-condition "Define a condition class with slots and a `:report` option."
    dolist "Iterate over the elements of a list: `(dolist (x list result) body)`."
    dotimes "Iterate COUNT times with a variable counting from zero: `(dotimes (i n result) body)`."

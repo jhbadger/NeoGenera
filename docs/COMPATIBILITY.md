@@ -49,6 +49,15 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
   redefining a class does not update existing instances. `standard-class` is not a type specifier for class objects.
 * The meta-object protocol is a small subset (`class-of`, `find-class`, `class-precedence-list`, slot access).
 
+**Flavors** (the Symbolics/Lisp Machine object system, a layer over CLOS; see `docs/manual/flavors-manual.md`)
+* Supported, following the Lisp Machine Manual's Flavors chapter: `defflavor` with the common options (including `:abstract-flavor`),
+  `(defmethod (flavor [type] message) ...)` including `:case`, `send` and friends, daemons, `:around` and `:inverse-around` with
+  the manual's calling convention, `defwrapper`, `defwhopper` (a Symbolics addition), the `:daemon-with-or/and/override`, `:progn :or :and
+  :append :nconc :list :max :min :+ :case` combinations, `:init`, `vanilla-flavor` and `property-list-mixin`.
+* Not supported: funcallable instances (use `send`), `:inverse-list` and `:pass-on` combinations, `:alias-flavor`,
+  `:run-time-alternatives`, `:instantiation-flavor-function`, `with-self-variables-bound`, and instance variables as special
+  variables outside methods. `describe` and `:print-self` follow the manual's format except that instances print without an address.
+
 **Conditions and the debugger**
 * The interactive debugger with restarts runs in both the line-mode and the window Listener. `break` enters it with a CONTINUE restart, and it honours `*debugger-hook*`.
 * Missing: `with-condition-restarts`, `invoke-restart-interactively`, return-from-frame and retry in the debugger.

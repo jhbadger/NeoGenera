@@ -12,6 +12,7 @@
     "lisp/core/50-loop.lisp"
     "lisp/core/52-clos.lisp"
     "lisp/core/54-conditions.lisp"
+    "lisp/core/55-flavors.lisp"
     "lisp/core/56-streams.lisp"
     "lisp/core/57-reader.lisp"
     "lisp/core/58-pprint.lisp"

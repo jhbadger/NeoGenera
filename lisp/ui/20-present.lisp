@@ -288,8 +288,10 @@ terminal of the line Listener in kitty or Ghostty it is shown at the cursor; on 
 
 (defun describe (object &optional (stream *standard-output*))
   (let ((class (class-of object)))
-    (format stream "~&~S~%  is of type ~A~%" object (string-downcase (symbol-name (%cls-name class))))
-    (cond ((and (symbolp object) object)
+    (unless (flavor-instance-p object)       ; a flavor instance describes itself (the :DESCRIBE message)
+      (format stream "~&~S~%  is of type ~A~%" object (string-downcase (symbol-name (%cls-name class)))))
+    (cond ((flavor-instance-p object) (let ((*standard-output* stream)) (send object :describe)))
+          ((and (symbolp object) object)
            (when (boundp object) (format stream "  value: ~S~%" (symbol-value object)))
            (when (fboundp object) (format stream "  function: ~S~%" (symbol-function object)))
            (when (documentation object 'function) (format stream "  documentation: ~A~%" (documentation object 'function)))

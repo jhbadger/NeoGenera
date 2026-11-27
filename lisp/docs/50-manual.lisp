@@ -17,6 +17,8 @@
 (import-markdown :documentation-system "docs/manual/documentation-system.md" :category :manual
                  :keywords (documentation docstring markdown export html pdf search tutorial))
 
+(import-markdown :flavors-manual "docs/manual/flavors-manual.md" :category :manual
+                 :keywords (flavors flavor defflavor send message-passing vanilla daemon whopper wrapper symbolics genera oop))
 (import-markdown :math-manual "docs/manual/math-manual.md" :category :manual
                  :keywords (math statistics matrix linear-algebra random distribution regression plot data-frame symbolic))
 (import-markdown :bio-manual "docs/manual/bio-manual.md" :category :manual

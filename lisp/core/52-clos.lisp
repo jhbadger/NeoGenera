@@ -109,7 +109,9 @@
     (mapcar (lambda (n) (cdr (assq n table))) (nreverse order))))
 
 (defun %finalize-class (class)
-  (let* ((cpl (%c3 class (%cls-supers class)))
+  (let* ((cpl (if (get (%cls-name class) '%flavor-def)
+                  (%flavor-class-cpl class)                 ; a flavor: Flavors component order (55-flavors.lisp)
+                  (%c3 class (%cls-supers class))))
          (slots (%compute-slots cpl))
          (i -1)
          (index (mapcar (lambda (sd) (cons (slotd-name sd)
@@ -538,6 +540,12 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
 (defun method-qualifiers-of (m) (method-qualifiers m))
 
 (defmacro defmethod (name &rest rest)
+  ;; (defmethod (flavor [type] message) ...) defines a Flavors method (55-flavors.lisp); (setf f) names are CLOS's
+  (if (and (consp name) (not (eq (car name) 'setf)))
+      (%flavor-defmethod name rest)
+      (%clos-defmethod name rest)))
+
+(defun %clos-defmethod (name rest)
   (let ((qualifiers nil))
     (block nil
       (tagbody top

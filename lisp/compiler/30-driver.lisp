@@ -210,6 +210,7 @@
     (let ((kind (case (car form)
                   (defun :function) (defmacro :macro) ((defvar defparameter defconstant) :variable)
                   (defstruct :structure) (defclass :class) (defgeneric :generic) (defmethod :method)
+                  (defflavor :flavor) ((defwhopper defwrapper) :method)
                   (define-condition :condition) (deftest :test) (define-command :command) (deftype :type)
                   (t nil)))
           (name (cadr form)))
