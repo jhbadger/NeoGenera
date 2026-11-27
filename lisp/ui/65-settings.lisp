@@ -9,7 +9,7 @@
 ;;;; Preferences (theme, tile-mode, save-history) are saved only when the user asks.  Session data
 ;;;; (history, bookmarks) is refreshed in an existing settings file when the window system exits.
 ;;;; Other files register their own settings with DEFINE-SETTING (the documentation viewer does
-;;;; so for bookmarks).  Commands: :settings (the window), :set, :save-settings.
+;;;; so for bookmarks).  Commands: :settings (the window), :set, :save-settings, :cursor.
 
 (in-package :cl)
 
@@ -229,6 +229,22 @@ other entries of an existing file are kept.  Returns PATH."
 
 (define-command (graphics :documentation "Say how images and graphs are shown (see the graphics setting)") ()
   (format t "~&Images: ~A~%" (graphics-status)))
+
+(define-setting :cursor :choice "Text cursor: blink (the default) or solid (steady, never blinks)."
+  :default :blink :choices '(:blink :solid)
+  :get (lambda () *cursor-style*)
+  :set (lambda (v)
+         (setq *cursor-style* v)
+         (when *wm-live* (apply-cursor-style))))
+
+(define-command (cursor :documentation "Make the cursor blink or be solid: :cursor blink | solid")
+    ((style word :default ""))
+  (if (string= style "")
+      (format t "~&The cursor is ~A  (:cursor blink or :cursor solid changes it; :save-settings keeps it)~%"
+              (string-downcase (symbol-name *cursor-style*)))
+      (let ((s (find-setting :cursor)))
+        (set-setting :cursor (%parse-setting-value s style))
+        (format t "~&The cursor is now ~A  (:save-settings keeps it)~%" (string-downcase (symbol-name *cursor-style*))))))
 
 (define-setting :save-history :boolean "Keep your command history between sessions."
   :default t

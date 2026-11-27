@@ -347,6 +347,13 @@
       (when (< (+ (length left) (length right) 2) cols)
         (screen-draw-string s r2 (- cols (length right)) right (tc :wholine-fg) (tc :wholine-bg) (logior reverse-attr +bold+))))))
 
+(defvar *cursor-style* :blink "How the terminal's text cursor looks: :blink (the default) or :solid.  See the cursor setting.")
+
+(defun apply-cursor-style ()
+  "Tell the terminal to show a blinking or a steady block cursor (DECSCUSR), per *CURSOR-STYLE*."
+  (%term-write-codes (map 'vector #'char-code
+                          (format nil "~C[~D q" (code-char 27) (if (eq *cursor-style* :solid) 2 1)))))
+
 (defun wm-draw (wm)
   (let ((s (wm-screen wm)))
     (screen-clear s (tc :desktop-fg) (tc :desktop-bg))
@@ -356,7 +363,10 @@
     (let* ((fw (wm-focus wm)) (cur (and fw (null (wm-popups wm)) (window-cursor fw))))
       (if cur
           (progn
-            (setf (scr-cursor-row s) (car cur) (scr-cursor-col s) (cdr cur) (scr-cursor-visible s) t)
+            ;; a solid cursor on a theme with its own painted block (classic: black) hides the terminal's
+            ;; cursor, which would otherwise sit on top of the block and mask it
+            (setf (scr-cursor-row s) (car cur) (scr-cursor-col s) (cdr cur)
+                  (scr-cursor-visible s) (not (and (eq *cursor-style* :solid) (>= (tc :cursor) 0))))
             ;; themes that define :cursor get a software block cursor in that colour
             (when (>= (tc :cursor) 0)
               (let ((r (car cur)) (c (cdr cur)))
@@ -611,6 +621,8 @@ animated window's next frame) and handle it."
   (setq *color-mode* (detect-color-mode))
   (graphics-reset)
   (ignore-errors (detect-graphics))
+  ;; the cursor setting: a blinking (default) or a steady block cursor
+  (apply-cursor-style)
   (unwind-protect
        (progn
          (multiple-value-bind (r c) (%term-size) (wm-resize wm r c))
@@ -619,4 +631,5 @@ animated window's next frame) and handle it."
          (let ((*wm-live* t))
            (loop (wm-serve wm) (when (wm-quit wm) (return)))))
     (when (eq *graphics* :kitty) (%term-image-delete 0) (graphics-reset))
+    (%term-write-codes (map 'vector #'char-code (format nil "~C[0 q" (code-char 27))))   ; the terminal's own cursor style
     (%term-restore)))

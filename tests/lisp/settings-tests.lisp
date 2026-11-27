@@ -76,7 +76,7 @@
      (set-setting :tile-mode :main)
      (set-setting :history nil)
      (set-setting :bookmarks nil)
-     (is-equal '(:theme :tile-mode :graphics :save-history :history :bookmarks) (settings-load))
+     (is-equal '(:theme :tile-mode :graphics :cursor :save-history :history :bookmarks) (settings-load))
      (is-equal :green (theme-name *theme*))
      (is-equal :grid *tile-mode*)
      (is-equal '("(+ 1 2)" "second line") (setting-value :history))
@@ -186,6 +186,36 @@
 
 (defun documentation-of-command-help ()
   (with-output-to-string (s) (let ((*standard-output* s)) (execute-command-line "help"))))
+
+(deftest settings-cursor
+  (multiple-value-bind (wm lw) (make-test-wm)
+    (declare (ignore lw))
+    (call-with-test-settings
+     (lambda ()
+       (set-setting :cursor :blink)
+       (type-line wm ":cursor")
+       (is (screen-has wm "The cursor is blink"))
+       (type-line wm ":cursor solid")
+       (is-equal :solid *cursor-style*)
+       (is-equal :solid (setting-value :cursor))
+       ;; classic paints a black block; the terminal's cursor must not cover it when solid
+       (set-theme :classic)
+       (wm-draw wm)
+       (is (not (scr-cursor-visible (wm-screen wm))))
+       (let ((cell (screen-cell (wm-screen wm) (scr-cursor-row (wm-screen wm)) (scr-cursor-col (wm-screen wm)))))
+         (is-equal (tc :cursor) (nth 2 cell)))
+       (set-setting :cursor :blink)
+       (wm-draw wm)
+       (is (scr-cursor-visible (wm-screen wm)))
+       (set-setting :cursor :solid)
+       (type-line wm ":set cursor blink")
+       (is-equal :blink *cursor-style*)
+       (type-line wm ":cursor flashing")
+       (is (screen-has wm "must be one of"))
+       (is-equal :blink *cursor-style*)
+       (set-setting :cursor :solid)
+       (is-equal :solid (progn (settings-save) (st-entry :cursor)))
+       (set-setting :cursor :blink)))))
 
 (deftest settings-window
   (multiple-value-bind (wm lw) (make-test-wm)
