@@ -410,3 +410,28 @@
   (is (not (package-locked-p "COMMON-LISP")))
   (is-equal :no-error (%pkt-condition-type (intern "PKT-CL-TEMP-2" "COMMON-LISP")))
   (unintern (find-symbol "PKT-CL-TEMP-2" "COMMON-LISP") "COMMON-LISP"))
+
+(deftest package-locks-type-definitions
+  (%pkt-cleanup "PKT-LT")
+  (let* ((p (make-package "PKT-LT" :use nil))
+         (s (intern "S" p)) (c (intern "C" p)) (ty (intern "TY" p)) (cond-name (intern "CND" p))
+         (free (intern "FREE" p)))
+    (lock-package p)
+    (is-equal :lock (%pkt-condition-type (eval `(defstruct ,s a b))))
+    (is-equal :lock (%pkt-condition-type (eval `(defstruct (,s (:include ,free)) a))))
+    (is-equal :lock (%pkt-condition-type (eval `(defclass ,c () ()))))
+    (is-equal :lock (%pkt-condition-type (eval `(deftype ,ty () 'integer))))
+    (is-equal :lock (%pkt-condition-type (eval `(define-condition ,cond-name (error) ()))))
+    (is (null (find-class c nil)))
+    (is (null (get ty '%deftype)))
+    ;; a package-lock error is a condition whose report names the operation
+    (let ((e (handler-case (eval `(defclass ,c () ())) (error (e) e))))
+      (is (search "define a class named" (condition-report-string e))))
+    (is-equal :no-error (%pkt-condition-type (without-package-locks (eval `(defstruct ,s a b)))))
+    (is-equal :no-error (%pkt-condition-type (with-unlocked-packages (p) (eval `(defclass ,c () ())))))
+    (is (find-class c nil))
+    ;; types defined in other packages may use symbols of the locked one as slot names and supertypes
+    (let ((o (make-package "PKT-LT-OTHER" :use nil)))
+      (is-equal :no-error (%pkt-condition-type (eval `(defclass ,(intern "MINE" o) (,c) ((,s :initarg :s))))))
+      (delete-package o)))
+  (%pkt-cleanup "PKT-LT"))

@@ -23,6 +23,7 @@
   (let ((k (gensym)))
     `(let ((,k ,key)) (typecase ,k ,@clauses (t (error "~S fell through an ETYPECASE" ,k))))))
 (defmacro deftype (name args &body body)
+  (%symbol-lock-check name "define a type on")
   `(%put ',name '%deftype (lambda ,args ,@body)))
 
 ;;; ---- characters -----------------------------------------------------------

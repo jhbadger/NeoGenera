@@ -581,3 +581,67 @@
     (let ((*print-pretty* t)) (is-equal "(A B)" (string-trim '(#\Newline) (with-output-to-string (s) (pprint '(a b) s)))))
     ;; the variable is restored
     (is (null *print-pretty*))))
+
+(deftest print-level-and-length
+  (is-equal "(A # E)" (write-to-string '(a (b (c (d))) e) :level 1))
+  (is-equal "(A (B #) E)" (write-to-string '(a (b (c (d))) e) :level 2))
+  (is-equal "#" (write-to-string '(a) :level 0))
+  (is-equal "5" (write-to-string 5 :level 0))                       ; atoms are never abbreviated
+  (is-equal "(1 2 3 ...)" (write-to-string '(1 2 3 4 5) :length 3))
+  (is-equal "(1 2 3)" (write-to-string '(1 2 3) :length 3))
+  (is-equal "(...)" (write-to-string '(1 2 3) :length 0))
+  (is-equal "#(1 2 ...)" (write-to-string (vector 1 2 3 4) :length 2))
+  (is-equal "(1 (2 3 ...) ...)" (write-to-string '(1 (2 3 4) 5 6) :length 2 :level 2))
+  (is-equal "(1 . 2)" (write-to-string '(1 . 2) :length 2))
+  (is-equal "(1 #)" (write-to-string '(1 (2 (3))) :level 1 :pretty t))   ; pretty printing falls back to the flat printer
+  (is-equal "(a b)" (let ((*print-level* 1) (*print-length* 5)) (string-downcase (prin1-to-string '(a b)))))
+  ;; the variables are special and bindable, and WITH-STANDARD-IO-SYNTAX resets them
+  (is-equal "(A # E)" (let ((*print-level* 1)) (prin1-to-string '(a (b) e))))
+  (is-equal "(A (B) E)" (let ((*print-level* 1)) (with-standard-io-syntax (prin1-to-string '(a (b) e))))))
+
+(deftest print-circle
+  (let ((x (list 1 2 3)))
+    (setf (cdr (last x)) x)
+    (is-equal "#1=(1 2 3 . #1#)" (write-to-string x :circle t)))
+  (let* ((s (list 'a)) (x (list s s)))
+    (is-equal "(#1=(A) #1#)" (write-to-string x :circle t))
+    (is-equal "((A) (A))" (write-to-string x)))
+  (let ((v (vector 1 nil)))
+    (setf (aref v 1) v)
+    (is-equal "#1=#(1 #1#)" (write-to-string v :circle t)))
+  (let* ((tail (list 3 4)) (x (list 1 2 tail)) (y (list* 0 tail)))
+    (is-equal "((1 2 #1=(3 4)) (0 . #1#))" (write-to-string (list x y) :circle t)))
+  (let* ((a (list 'a)) (b (list 'b)) (x (list a b a b)))
+    (is-equal "(#1=(A) #2=(B) #1# #2#)" (write-to-string x :circle t)))
+  ;; no sharing, no labels
+  (is-equal "(1 (2 3) \"s\")" (write-to-string (list 1 (list 2 3) "s") :circle t))
+  ;; atoms and strings are not labelled even when shared
+  (let* ((s "str") (x (list s s)))
+    (is-equal "(\"str\" \"str\")" (write-to-string x :circle t)))
+  ;; a structure that contains itself
+  (let ((x (list 1)))
+    (setf (car x) x)
+    (is-equal "#1=(#1#)" (write-to-string x :circle t)))
+  ;; the pretty printer is bypassed, not broken
+  (let ((x (list 'a)))
+    (is-equal "(#1=(A) #1#)" (write-to-string (list x x) :circle t :pretty t)))
+  (is (not *print-circle*)))
+
+(deftest print-case
+  (is-equal "(a b c)" (write-to-string '(a b c) :case :downcase :escape nil))
+  (is-equal "(A B C)" (write-to-string '(a b c) :case :upcase))
+  (is-equal "(Foo-Bar Baz)" (write-to-string '(foo-bar baz) :case :capitalize))
+  (is-equal ":keyword" (write-to-string :keyword :case :downcase))
+  (is-equal ":Keyword" (write-to-string :keyword :case :capitalize))
+  (is-equal "cl:car" (let ((*package* (make-package "PKT-PRINT-CASE" :use nil)))
+                       (unwind-protect (write-to-string 'car :case :downcase)
+                         (delete-package *package*))))
+  (is-equal "nil" (write-to-string nil :case :downcase))
+  ;; names with lowercase letters are left alone, and still get bars under escaping
+  (is-equal "|MixedCase|" (write-to-string '|MixedCase| :case :downcase))
+  (is-equal "MixedCase" (write-to-string '|MixedCase| :case :downcase :escape nil))
+  ;; numbers and strings are unaffected
+  (is-equal "(1 \"ABC\" #\\A)" (write-to-string (list 1 "ABC" #\A) :case :downcase))
+  (is-equal "abc" (let ((*print-case* :downcase)) (princ-to-string 'abc)))
+  (is-equal :upcase *print-case*)
+  (is-equal "(A B)" (let ((*print-case* :downcase)) (with-standard-io-syntax (prin1-to-string '(a b))))))

@@ -133,7 +133,8 @@ for a constituent, no macro.  (Only macro syntax can be copied: a character cann
 (defmacro with-standard-io-syntax (&body body)
   "Run BODY with the standard reader and printer settings."
   `(let ((*readtable* %standard-readtable) (*read-eval* t) (*package* (find-package "COMMON-LISP-USER"))
-         (*print-pretty* nil) (*print-length* nil) (*print-base* 10) (*print-radix* nil))
+         (*print-pretty* nil) (*print-length* nil) (*print-level* nil) (*print-circle* nil) (*print-case* :upcase)
+         (*print-base* 10) (*print-radix* nil))
      ,@body))
 
 ;;; The standard readtable: the built-in syntax, with # as a dispatching character whose user-visible table holds

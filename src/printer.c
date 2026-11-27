@@ -76,18 +76,38 @@ static int needs_bars(const char *s, size_t n) {
   return 0;
 }
 
+/* Printer state read from the printer variables when the outermost print starts (saved and restored around nested
+   prints, because a PRINT-OBJECT method may rebind them). */
+static int pr_case = 0;                         /* *PRINT-CASE*: 0 :UPCASE, 1 :DOWNCASE, 2 :CAPITALIZE */
+static long pr_level = -1, pr_length = -1;      /* *PRINT-LEVEL*, *PRINT-LENGTH*; -1 for no limit */
+
+/* NAME with *PRINT-CASE* applied.  Only all-uppercase names change: a name with lowercase letters is already
+   distinctive (it is printed with bars under escaping). */
+static void put_cased(Buf *b, const char *s, size_t n) {
+  if (pr_case == 0) { buf_put(b, s, n); return; }
+  for (size_t i = 0; i < n; i++) if (s[i] >= 'a' && s[i] <= 'z') { buf_put(b, s, n); return; }
+  int in_word = 0;
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)s[i];
+    int alnum = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    if (c >= 'A' && c <= 'Z' && (pr_case == 1 || in_word)) c = (unsigned char)(c + 32);
+    in_word = alnum;
+    buf_putc(b, c);
+  }
+}
+
 static void print_symbol_name(Buf *b, Obj name, int escape) {
   size_t n; const char *s = str_c(name, &n);
   if (escape && needs_bars(s, n)) {
     buf_putc(b, '|');
     for (size_t i = 0; i < n; i++) { if (s[i] == '|' || s[i] == '\\') buf_putc(b, '\\'); buf_putc(b, s[i]); }
     buf_putc(b, '|');
-  } else buf_put(b, s, n);
+  } else put_cased(b, s, n);
 }
 
 static void print_symbol(Buf *b, Obj sym, int escape, int readable) {
   Obj name = SYM_NAME(sym), pkg = SYM_PKG(sym);
-  if (!escape) { buf_put_str(b, name); return; }
+  if (!escape) { size_t n; const char *s = str_c(name, &n); put_cased(b, s, n); return; }
   if (pkg == NIL && sym != NIL) { buf_puts(b, "#:"); print_symbol_name(b, name, 1); return; }
   if (pkg == PKG_KEYWORD) { buf_putc(b, ':'); print_symbol_name(b, name, 1); return; }
   int st = 0;
@@ -99,7 +119,7 @@ static void print_symbol(Buf *b, Obj sym, int escape, int readable) {
   st = 0; (void)find_symbol_in(name, pkg, &st);
   Obj pn = SLOT(pkg, PK_NAME);
   /* use the shortest nickname for CL */
-  if (pkg == PKG_CL) buf_puts(b, "CL"); else print_symbol_name(b, pn, 1);
+  if (pkg == PKG_CL) put_cased(b, "CL", 2); else print_symbol_name(b, pn, 1);
   buf_puts(b, st == 2 ? ":" : "::");
   print_symbol_name(b, name, 1);
 }
@@ -159,6 +179,73 @@ static void print_rational(Buf *b, Obj o) {
   number_print(b, o, pr_base);
   if (pr_radix && pr_base == 10 && !ratio) buf_putc(b, '.');
 }
+/* ---- *PRINT-CIRCLE* ------------------------------------------------------------------------------------------
+   A first pass over the object records every cons, vector and structure in an open-addressing table keyed by address
+   (nothing moves while a print runs).  An object met twice is shared; its label is 0 (seen once), -1 (shared, no label
+   yet) or N > 0 (printed as #N=; later occurrences print #N#). */
+typedef struct { Obj *key; long *lab; size_t cap, cnt; } CTab;
+static CTab *pr_circ = NULL;
+static long pr_next_label = 0;
+
+static int composite_p(Obj o) {
+  if (CONSP(o)) return 1;
+  if (!OBJP(o)) return 0;
+  switch (OBJ_TYPE(o)) {
+  case T_VECTOR: case T_MDARRAY: case T_STRUCT: return 1;
+  case T_ADVEC: return !STRINGP(SLOT(o, AV_DATA));
+  default: return 0;
+  }
+}
+static size_t ct_slot(Obj o, size_t cap) { return (size_t)(((uint64_t)o >> 3) * 0x9E3779B97F4A7C15ULL) & (cap - 1); }
+static CTab *ct_new(void) {
+  CTab *t = malloc(sizeof *t);
+  t->cap = 256; t->cnt = 0; t->key = calloc(t->cap, sizeof(Obj)); t->lab = calloc(t->cap, sizeof(long));
+  return t;
+}
+static void ct_free(CTab *t) { if (t) { free(t->key); free(t->lab); free(t); } }
+static long *ct_find(CTab *t, Obj o) {
+  for (size_t i = ct_slot(o, t->cap); t->key[i]; i = (i + 1) & (t->cap - 1)) if (t->key[i] == o) return &t->lab[i];
+  return NULL;
+}
+static void ct_grow(CTab *t) {
+  Obj *ok = t->key; long *ol = t->lab; size_t ocap = t->cap;
+  t->cap *= 2; t->key = calloc(t->cap, sizeof(Obj)); t->lab = calloc(t->cap, sizeof(long));
+  for (size_t j = 0; j < ocap; j++) if (ok[j]) {
+    size_t i = ct_slot(ok[j], t->cap);
+    while (t->key[i]) i = (i + 1) & (t->cap - 1);
+    t->key[i] = ok[j]; t->lab[i] = ol[j];
+  }
+  free(ok); free(ol);
+}
+/* 1 if O was already visited (and is now marked shared) */
+static int ct_visit(CTab *t, Obj o) {
+  long *p = ct_find(t, o);
+  if (p) { if (*p == 0) *p = -1; return 1; }
+  if ((t->cnt + 1) * 2 > t->cap) ct_grow(t);
+  size_t i = ct_slot(o, t->cap);
+  while (t->key[i]) i = (i + 1) & (t->cap - 1);
+  t->key[i] = o; t->lab[i] = 0; t->cnt++;
+  return 0;
+}
+static void circ_scan(CTab *t, Obj o) {
+  STACK_CHECK();
+  for (;;) {
+    if (CONSP(o)) { if (ct_visit(t, o)) return; circ_scan(t, CAR(o)); o = CDR(o); continue; }
+    if (!composite_p(o)) return;
+    if (ct_visit(t, o)) return;
+    switch (OBJ_TYPE(o)) {
+    case T_VECTOR: for (size_t i = 0; i < OBJ_NWORDS(o); i++) circ_scan(t, SLOT(o, i)); break;
+    case T_ADVEC: { Obj d = SLOT(o, AV_DATA); long fill = (long)UNFIX(SLOT(o, AV_FILL)); for (long i = 0; i < fill; i++) circ_scan(t, SLOT(d, i)); break; }
+    case T_STRUCT: for (size_t i = 1; i < OBJ_NWORDS(o); i++) circ_scan(t, SLOT(o, i)); break;
+    case T_MDARRAY: { Obj d = SLOT(o, AR_DATA); if (!STRINGP(d)) circ_scan(t, d); break; }
+    default: break;
+    }
+    return;
+  }
+}
+/* A cdr that is shared (or labelled) must be printed in dotted form so that it can carry its label. */
+static int circ_shared(Obj o) { long *p = pr_circ ? ct_find(pr_circ, o) : NULL; return p && *p != 0; }
+
 /* the elements of a multi-dimensional array from row-major index START, as nested lists by DIMS */
 static long print_md(Buf *b, Obj data, Obj dims, long start, int escape, int readable, int depth) {
   if (dims == NIL) {
@@ -179,21 +266,33 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   if (depth > 2000) { buf_puts(b, "..."); return; }
   if (FIXP(o)) { print_rational(b, o); return; }
   if (CHARP(o)) { print_char(b, CHAR_CODE(o), escape); return; }
+  if (composite_p(o)) {
+    int too_deep = pr_level >= 0 && depth >= pr_level;
+    if (pr_circ) {
+      long *lab = ct_find(pr_circ, o);
+      if (lab && *lab > 0) { char t[32]; snprintf(t, sizeof t, "#%ld#", *lab); buf_puts(b, t); return; }
+      if (lab && *lab == -1 && !too_deep) { char t[32]; *lab = ++pr_next_label; snprintf(t, sizeof t, "#%ld=", *lab); buf_puts(b, t); }
+    }
+    if (too_deep) { buf_putc(b, '#'); return; }
+  }
   if (CONSP(o)) {
     Obj h = CAR(o);
     if (CONSP(CDR(o)) && CDR(CDR(o)) == NIL) {
       const char *pre = NULL;
       if (h == Q_quote) pre = "'";
       else if (h == Q_function) pre = "#'";
-      if (pre) { buf_puts(b, pre); print_rec(b, CAR(CDR(o)), escape, readable, depth + 1); return; }
+      if (pre && !circ_shared(CDR(o))) { buf_puts(b, pre); print_rec(b, CAR(CDR(o)), escape, readable, depth + 1); return; }
     }
     buf_putc(b, '(');
-    long n = 0;
+    long n = 0, cnt = 0;
     for (;;) {
+      if (pr_length >= 0 && cnt >= pr_length) { buf_puts(b, "..."); break; }
       print_rec(b, CAR(o), escape, readable, depth + 1);
+      cnt++;
       o = CDR(o);
       if (o == NIL) break;
       if (!CONSP(o)) { buf_puts(b, " . "); print_rec(b, o, escape, readable, depth + 1); break; }
+      if (circ_shared(o)) { buf_puts(b, " . "); print_rec(b, o, escape, readable, depth); break; }
       buf_putc(b, ' ');
       if (++n > 100000) { buf_puts(b, "..."); break; }
     }
@@ -215,7 +314,11 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_COMPLEX: number_print(b, o, pr_base); return;
   case T_VECTOR: {
     buf_puts(b, "#(");
-    for (size_t i = 0; i < OBJ_NWORDS(o); i++) { if (i) buf_putc(b, ' '); print_rec(b, SLOT(o, i), escape, readable, depth + 1); }
+    for (size_t i = 0; i < OBJ_NWORDS(o); i++) {
+      if (i) buf_putc(b, ' ');
+      if (pr_length >= 0 && (long)i >= pr_length) { buf_puts(b, "..."); break; }
+      print_rec(b, SLOT(o, i), escape, readable, depth + 1);
+    }
     buf_putc(b, ')');
     return;
   }
@@ -232,7 +335,11 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
       print_string(b, s, escape);
     } else {
       buf_puts(b, "#(");
-      for (long i = 0; i < fill; i++) { if (i) buf_putc(b, ' '); print_rec(b, SLOT(data, i), escape, readable, depth + 1); }
+      for (long i = 0; i < fill; i++) {
+        if (i) buf_putc(b, ' ');
+        if (pr_length >= 0 && i >= pr_length) { buf_puts(b, "..."); break; }
+        print_rec(b, SLOT(data, i), escape, readable, depth + 1);
+      }
       buf_putc(b, ')');
     }
     return;
@@ -280,16 +387,31 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
 }
 
 void print_to_buf(Buf *b, Obj o, int escape, int readable) {
-  int sb = pr_base, sr = pr_radix;
+  int sb = pr_base, sr = pr_radix, sc = pr_case;
+  long slv = pr_level, sln = pr_length, snext = pr_next_label;
+  CTab *scirc = pr_circ;
   pr_base = current_print_base(); pr_radix = SYM_VALUE(Q_print_radix) != NIL;
+  Obj v = SYM_VALUE(Q_print_level);  pr_level  = (FIXP(v) && UNFIX(v) >= 0) ? (long)UNFIX(v) : -1;
+  v = SYM_VALUE(Q_print_length);     pr_length = (FIXP(v) && UNFIX(v) >= 0) ? (long)UNFIX(v) : -1;
+  v = SYM_VALUE(Q_print_case);
+  pr_case = 0;
+  if (SYMBOLP(v) && v != NIL) {
+    const char *nm = STR_C(SYM_NAME(v));
+    if (!strcmp(nm, "DOWNCASE")) pr_case = 1; else if (!strcmp(nm, "CAPITALIZE")) pr_case = 2;
+  }
+  pr_circ = NULL; pr_next_label = 0;
+  if (SYM_VALUE(Q_print_circle) != NIL && composite_p(o)) { pr_circ = ct_new(); circ_scan(pr_circ, o); }
   print_rec(b, o, escape, readable, 0);
-  pr_base = sb; pr_radix = sr;
+  ct_free(pr_circ);
+  pr_base = sb; pr_radix = sr; pr_case = sc; pr_level = slv; pr_length = sln; pr_circ = scirc; pr_next_label = snext;
 }
 
 /* *PRINT-PRETTY* true: a list is laid out by the Lisp function %PP-HOOK (object escape stream -> string, or NIL to
-   print it flat); STREAM is NIL when printing to a string */
+   print it flat); STREAM is NIL when printing to a string.  *PRINT-LEVEL* and *PRINT-CIRCLE* are honoured only by the
+   flat printer, so when either is set the list is printed flat. */
 static Obj pretty_string(Obj o, int escape, Obj stream) {
   if (!CONSP(o) || SYM_VALUE(Q_print_pretty) == NIL) return NIL;
+  if (SYM_VALUE(Q_print_circle) != NIL || SYM_VALUE(Q_print_level) != NIL) return NIL;
   Obj hook = SYM_FUNC(Q_pp_hook);
   if (hook == NIL || CONSP(hook)) return NIL;
   gc_inhibit++;

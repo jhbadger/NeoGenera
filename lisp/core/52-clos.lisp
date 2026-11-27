@@ -405,6 +405,7 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
 
 (defmacro defclass (name supers slots &rest options)
   (let ((accessor-forms nil) (default-initargs nil) (metaclass nil) (doc nil) (extra nil))
+    (%symbol-lock-check name "define a class named")
     (dolist (spec slots)
       (let ((sname (if (consp spec) (car spec) spec)) (opts (if (consp spec) (cdr spec) nil)))
         (do-list-tails (o opts)

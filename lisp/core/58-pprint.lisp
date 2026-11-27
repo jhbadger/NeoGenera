@@ -16,7 +16,10 @@
 (in-package :cl)
 
 (defvar *print-right-margin* 80)
-(defvar *print-length* nil "If an integer, logical blocks print at most this many elements of a list (then \"...\").")
+(defvar *print-length* nil "If an integer, lists and vectors print at most this many elements (then \"...\").")
+(defvar *print-level* nil "If an integer, lists, vectors and structures nested deeper than this print as #.")
+(defvar *print-circle* nil "When true, shared and circular structure is printed with #n= and #n# labels.")
+(defvar *print-case* :upcase "How all-uppercase symbol names print: :UPCASE, :DOWNCASE or :CAPITALIZE.")
 (defvar *print-pretty* nil "When true, PRIN1, PRINC, PRINT, WRITE and the string printers lay out lists with the pretty printer (as PPRINT).")
 (defvar *print-base* 10 "The radix (2-36) in which integers and ratios are printed.")
 (defvar *print-radix* nil "When true, integers and ratios are printed with their radix: #x1F, #b101, #o17, #3r12; decimal integers end in a point.")
@@ -30,11 +33,14 @@
     (%pp-string obj (if stream (%stream-column stream) 0) (or *print-right-margin* 80))))
 
 (defun write (obj &key stream (escape *print-escape*) (base *print-base*) (radix *print-radix*)
-                    (pretty *print-pretty*) (length *print-length*) (right-margin *print-right-margin*)
+                    (pretty *print-pretty*) (length *print-length*) (level *print-level*) (circle *print-circle*)
+                    (case *print-case*) (right-margin *print-right-margin*)
                     &allow-other-keys)
-  "Print OBJ to STREAM, binding the printer variables named by the keywords :ESCAPE :BASE :RADIX :PRETTY :LENGTH :RIGHT-MARGIN."
+  "Print OBJ to STREAM, binding the printer variables named by the keywords :ESCAPE :BASE :RADIX :PRETTY :LENGTH
+:LEVEL :CIRCLE :CASE :RIGHT-MARGIN."
   (let ((*print-escape* escape) (*print-base* base) (*print-radix* radix)
-        (*print-pretty* pretty) (*print-length* length) (*print-right-margin* right-margin))
+        (*print-pretty* pretty) (*print-length* length) (*print-level* level) (*print-circle* circle)
+        (*print-case* case) (*print-right-margin* right-margin))
     (if escape (prin1 obj stream) (princ obj stream)))
   obj)
 

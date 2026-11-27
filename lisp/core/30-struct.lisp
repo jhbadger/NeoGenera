@@ -23,6 +23,7 @@
 
 (defmacro defstruct (name-and-options &rest slot-specs)
   (let* ((name (if (consp name-and-options) (car name-and-options) name-and-options))
+         (%lock (%symbol-lock-check name "define a structure named"))
          (options (if (consp name-and-options) (cdr name-and-options) nil))
          (conc (let ((c (if (%opt-present options :conc-name)
                             (%opt-value options :conc-name nil)

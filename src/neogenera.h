@@ -250,7 +250,8 @@ Obj   fn_symbol(Obj name);                      /* (setf x) -> symbol       */
   X(sf_eval,"EVAL") X(print_pkg,"*PRINT-PACKAGES*") X(read_eval,"*READ-EVAL*") \
   X(in_signal,"*IN-ERROR-SIGNAL*") X(print_hook,"%PRINT-HOOK") X(struct_parent,"%STRUCT-PARENT") \
   X(readtable,"*READTABLE*") X(print_base,"*PRINT-BASE*") X(print_radix,"*PRINT-RADIX*") \
-  X(print_pretty,"*PRINT-PRETTY*") X(pp_hook,"%PP-HOOK") X(pkg_locks_off,"*PACKAGE-LOCKS-DISABLED*")
+  X(print_pretty,"*PRINT-PRETTY*") X(pp_hook,"%PP-HOOK") X(pkg_locks_off,"*PACKAGE-LOCKS-DISABLED*") \
+  X(print_level,"*PRINT-LEVEL*") X(print_length,"*PRINT-LENGTH*") X(print_circle,"*PRINT-CIRCLE*") X(print_case,"*PRINT-CASE*")
 #define X(id, str) extern Obj Q_##id;
 SYMBOL_LIST(X)
 #undef X

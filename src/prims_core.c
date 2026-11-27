@@ -358,6 +358,12 @@ PRIM(p_rename_package) {
 PRIM(p_package_nicknames) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return list_copy(SLOT(p, PK_NICK)); }
 PRIM(p_package_used_by) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return list_copy(SLOT(p, PK_USEDBY)); }
 PRIM(p_package_shadows) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return list_copy(SLOT(p, PK_SHADOW)); }
+PRIM(p_symbol_lock_check) {
+  /* (%symbol-lock-check symbol "define a class named"): signal a package-lock-violation if SYMBOL's home package is locked */
+  UNUSED_ARGS;
+  sym_lock_check(argv[0], STR_C(need_str(argv[1])));
+  return NIL;
+}
 PRIM(p_package_locked_p) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return BOOL(pkg_locked(p)); }
 PRIM(p_set_package_lock) {
   /* (%set-package-lock package flag) -> the previous state; unlocking is never itself a violation */
@@ -762,6 +768,7 @@ void init_prims_core(void) {
   defprim("PACKAGE-NICKNAMES", p_package_nicknames, 1, 1); defprim("PACKAGE-USED-BY-LIST", p_package_used_by, 1, 1);
   defprim("PACKAGE-SHADOWING-SYMBOLS", p_package_shadows, 1, 1);
   defprim("PACKAGE-LOCKED-P", p_package_locked_p, 1, 1); defprim("%SET-PACKAGE-LOCK", p_set_package_lock, 2, 2);
+  defprim("%SYMBOL-LOCK-CHECK", p_symbol_lock_check, 2, 2);
   defprim("%PACKAGE-SYMBOLS", p_package_symbols, 2, 2); defprim("PACKAGE-USE-LIST", p_package_use_list, 1, 1);
   defprim("%SET-EXPORT-ALL-CL", p_set_export_all, 1, 1);
   defprim_mv("FUNCALL", p_funcall, 1, -1); defprim_mv("APPLY", p_apply, 1, -1);
