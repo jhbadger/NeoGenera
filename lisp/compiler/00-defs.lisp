@@ -9,10 +9,13 @@
 (in-package :cl)
 
 (defstruct (cvar (:constructor make-cvar (name lam)))
-  name lam (captured nil) (mutated nil) (slot 0))
+  name lam (captured nil) (mutated nil) (slot 0)
+  (type nil))     ; a ty (05-types.lisp): declared, or inferred for a variable that is never assigned
 
 (defstruct (clam (:constructor make-clam (name parent)))
-  name parent (nreq 0) (nopt 0) (rest nil) (params nil) (body nil) (free nil) (arglist nil))
+  name parent (nreq 0) (nopt 0) (rest nil) (params nil) (body nil) (free nil) (arglist nil)
+  (policy nil)    ; policy changes from the lambda's own OPTIMIZE declarations
+  (checks nil))   ; (cvar . ty) for each parameter whose declared type is checked on entry
 
 (defstruct (cblock (:constructor make-cblock (name lam)))
   name lam label depth nspec (tailp nil))
@@ -31,12 +34,19 @@
   (specials nil)) ; locally declared special symbols
 
 (defparameter *opcodes*
-  '((:const 0 1) (:lref 1 1) (:lset 2 1) (:fref 3 1) (:gref 4 1) (:gset 5 1)
-    (:gfun 6 1) (:pop 7 0) (:dup 8 0) (:jmp 9 1) (:jnil 10 1) (:jnnil 11 1)
-    (:call 12 1) (:tailcall 13 1) (:ret 14 0) (:closure 15 2) (:box 16 0)
-    (:unbox 17 0) (:boxset 18 0) (:bind 19 1) (:unbind 20 1) (:slide 21 1)
-    (:car 22 0) (:cdr 23 0) (:cons 24 0) (:eq 25 0) (:not 26 0) (:add 27 0)
-    (:sub 28 0) (:lt 29 0) (:gt 30 0) (:le 31 0) (:ge 32 0) (:numeq 33 0) (:retv 34 0)))
+  ;; (name operand-count) in the order of the OP_ enum in src/neogenera.h; each entry becomes (name code nargs)
+  (let ((i -1))
+    (mapcar (lambda (e) (setq i (+ i 1)) (list (car e) i (cadr e)))
+            '((:const 1) (:lref 1) (:lset 1) (:fref 1) (:gref 1) (:gset 1) (:gfun 1) (:pop 0) (:dup 0) (:jmp 1)
+              (:jnil 1) (:jnnil 1) (:call 1) (:tailcall 1) (:ret 0) (:closure 2) (:box 0) (:unbox 0) (:boxset 0)
+              (:bind 1) (:unbind 1) (:slide 1) (:car 0) (:cdr 0) (:cons 0) (:eq 0) (:not 0) (:add 0) (:sub 0)
+              (:lt 0) (:gt 0) (:le 0) (:ge 0) (:numeq 0) (:retv 0)
+              ;; specialised by declarations (see 15-specialize.lisp)
+              (:mul 0) (:addfx 0) (:subfx 0) (:mulfx 0) (:incfx 0) (:decfx 0) (:ltfx 0) (:gtfx 0) (:lefx 0)
+              (:gefx 0) (:numeqfx 0) (:logandfx 0) (:logiorfx 0) (:logxorfx 0) (:remfx 0) (:modfx 0) (:ashfx 1)
+              (:addfl 0) (:subfl 0) (:mulfl 0) (:divfl 0) (:ltfl 0) (:gtfl 0) (:lefl 0) (:gefl 0) (:numeqfl 0)
+              (:fixtofl 0) (:carx 0) (:cdrx 0) (:svref 0) (:svrefx 0) (:svset 0) (:svsetx 0) (:schar 0)
+              (:chkfix 0) (:chktype 1) (:chkrange 1)))))
 
 (defun op-code (op) (cadr (assq op *opcodes*)))
 (defun op-nargs (op) (caddr (assq op *opcodes*)))
@@ -44,7 +54,10 @@
 (defun op-delta (op args)
   (case op
     ((:const :lref :fref :gref :gfun :dup) 1)
-    ((:lset :gset :pop :jnil :jnnil :bind :ret :retv :cons :eq :add :sub :lt :gt :le :ge :numeq :boxset) -1)
+    ((:lset :gset :pop :jnil :jnnil :bind :ret :retv :cons :eq :add :sub :lt :gt :le :ge :numeq :boxset
+      :mul :addfx :subfx :mulfx :ltfx :gtfx :lefx :gefx :numeqfx :logandfx :logiorfx :logxorfx :remfx :modfx
+      :addfl :subfl :mulfl :divfl :ltfl :gtfl :lefl :gefl :numeqfl :svref :svrefx :schar) -1)
+    ((:svset :svsetx) -2)
     ((:call :tailcall) (- (car args)))
     (:closure (- 1 (cadr args)))
     (:slide (- (car args)))
@@ -52,4 +65,4 @@
 
 (defparameter *inline-ops*
   '((car :car 1) (cdr :cdr 1) (cons :cons 2) (eq :eq 2) (not :not 1) (null :not 1)
-    (+ :add 2) (- :sub 2) (< :lt 2) (> :gt 2) (<= :le 2) (>= :ge 2) (= :numeq 2)))
+    (+ :add 2) (* :mul 2) (- :sub 2) (< :lt 2) (> :gt 2) (<= :le 2) (>= :ge 2) (= :numeq 2)))

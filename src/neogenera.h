@@ -378,8 +378,24 @@ enum {
   OP_DUP, OP_JMP, OP_JNIL, OP_JNNIL, OP_CALL, OP_TAILCALL, OP_RET, OP_CLOSURE,
   OP_BOX, OP_UNBOX, OP_BOXSET, OP_BIND, OP_UNBIND, OP_SLIDE, OP_CAR, OP_CDR,
   OP_CONS, OP_EQ, OP_NOT, OP_ADD, OP_SUB, OP_LT, OP_GT, OP_LE, OP_GE, OP_NUMEQ, OP_RETV,
+  /* specialised by declarations (docs/design/compiler.md, "Type specialisation"): the FX forms assume both operands
+     are fixnums and wrap modulo 2^61 instead of overflowing, the FL forms assume flonums, CARX/CDRX a cons,
+     SVREFX/SVSETX a simple vector and an in-range index; the compiler emits them only when the operand types are
+     established (by an inserted check, or by a declaration under (safety 0)) */
+  OP_MUL, OP_ADDFX, OP_SUBFX, OP_MULFX, OP_INCFX, OP_DECFX, OP_LTFX, OP_GTFX, OP_LEFX, OP_GEFX, OP_NUMEQFX,
+  OP_LOGANDFX, OP_LOGIORFX, OP_LOGXORFX, OP_REMFX, OP_MODFX, OP_ASHFX,
+  OP_ADDFL, OP_SUBFL, OP_MULFL, OP_DIVFL, OP_LTFL, OP_GTFL, OP_LEFL, OP_GEFL, OP_NUMEQFL, OP_FIXTOFL,
+  OP_CARX, OP_CDRX, OP_SVREF, OP_SVREFX, OP_SVSET, OP_SVSETX, OP_SCHAR,
+  OP_CHKFIX, OP_CHKTYPE, OP_CHKRANGE,
   OP_COUNT
 };
+/* operand of CHKTYPE */
+enum { TC_FIXNUM, TC_INTEGER, TC_FLONUM, TC_REAL, TC_NUMBER, TC_CONS, TC_LIST, TC_SYMBOL, TC_NULL, TC_STRING, TC_SVEC,
+       TC_CHAR, TC_COUNT };
+Obj   ng_aref2(Obj a, Obj i);                                /* (aref a i) and (%aset a i v) for the VM's open-coded forms */
+Obj   ng_aset3(Obj a, Obj i, Obj v);
+int   vm_op_nargs(int op);                                 /* operand words of OP, or -1 for a bad opcode */
+const char *vm_validate_code(const int32_t *ip, size_t n, size_t nconsts);   /* NULL if sound, else a reason */
 
 /* ---- primitives ------------------------------------------------------- */
 typedef Obj (*PrimFn)(int argc, Obj *argv);
@@ -399,6 +415,7 @@ void  prof_record(void);
 extern volatile sig_atomic_t prof_pending;
 void  term_cleanup(void);
 void  init_prims_io(void);
+void  init_fasl(void);
 Obj   values_list(Obj list);
 #define PRIM(name) static Obj name(int argc, Obj *argv)
 #define UNUSED_ARGS (void)argc; (void)argv

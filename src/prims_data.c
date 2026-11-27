@@ -185,6 +185,9 @@ PRIM(p_aset) {
   }
   type_error("ARRAY", x);
 }
+Obj ng_aref2(Obj a, Obj i) { Obj args[2] = { a, i }; return p_aref(2, args); }
+Obj ng_aset3(Obj a, Obj i, Obj v) { Obj args[3] = { a, i, v }; return p_aset(3, args); }
+
 PRIM(p_make_adjustable) {
   /* (%make-adjustable capacity stringp) -> adjustable vector with fill pointer 0 */
   UNUSED_ARGS;

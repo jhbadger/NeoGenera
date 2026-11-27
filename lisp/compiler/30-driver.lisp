@@ -110,10 +110,12 @@
   ;; returns a code object
   (let* ((*lam* nil) (env (make-aenv)))
     (if lambda-p
-        (gen-lambda (an-lambda nil (cadr form-or-lambda) (cddr form-or-lambda) env))
+        (let ((lam (an-lambda nil (cadr form-or-lambda) (cddr form-or-lambda) env)))
+          (sp-lambda lam)
+          (gen-lambda lam))
         (let ((root (make-clam nil nil)))
           (let ((*lam* root))
-            (setf (clam-body root) (an form-or-lambda env)))
+            (setf (clam-body root) (sp-node (an form-or-lambda env))))
           (gen-lambda root)))))
 
 (defun %compile-toplevel (form)
@@ -188,7 +190,8 @@
                        (nth 6 s)))
               (nth 7 s)))
 
-(defvar *fasl-header* ";;; NeoGenera fasl 1")
+(defvar *fasl-header* ";;; NeoGenera fasl 1")      ; first line of the text format (compile-file :format :text)
+(defconstant +fasl-first-entry+ 16 "Byte offset of the first entry of a binary fasl file.")
 
 (defun %write-fasl-entry (stream code)
   (write-string (%readable-to-string (%code->sexp code)) stream)
@@ -230,58 +233,104 @@
   "Recorded source locations of NAME: a list of (kind file position)."
   (get (if (consp name) (%fn-symbol name) name) '%source))
 
-(defun %process-toplevel (form stream)
+(defun %process-toplevel (form emit)
   (cond ((and (consp form) (eq (car form) 'progn))
-         (dolist (f (cdr form)) (%process-toplevel f stream)))
+         (dolist (f (cdr form)) (%process-toplevel f emit)))
         ((and (consp form) (eq (car form) 'eval-when))
          (let ((sits (cadr form)))
            (when (memq :compile-toplevel sits) (dolist (f (cddr form)) (eval (copy-tree f))))
            (when (or (memq :load-toplevel sits) (memq :execute sits))
-             (dolist (f (cddr form)) (%process-toplevel f stream)))))
+             (dolist (f (cddr form)) (%process-toplevel f emit)))))
         (t (when (%toplevel-compile-time-p form) (eval (copy-tree form)))
            (multiple-value-bind (name kind) (%definition-info form)
              (let ((expanded (macroexpand form)))
                (if (and (consp expanded) (eq (car expanded) 'progn) (not (eq expanded form)))
-                   (%process-toplevel expanded stream)
-                   (%write-fasl-entry stream (%compile-root expanded nil)))
+                   (%process-toplevel expanded emit)
+                   (funcall emit (%compile-root expanded nil)))
                ;; the note is written for the ORIGINAL form: macros, structures, classes and generic
                ;; functions expand into PROGN and would otherwise lose their source location
                (when (and name *compile-file-name*)
-                 (%write-fasl-entry stream
-                                    (%compile-root (list '%note-definition (list 'quote name) kind
-                                                         *compile-file-name* *form-pos*) nil))))))))
+                 (funcall emit
+                          (%compile-root (list '%note-definition (list 'quote name) kind
+                                               *compile-file-name* *form-pos*) nil))))))))
 
-(defun compile-file (path &key output-file)
+(defun %compile-forms (path emit)
+  "Process every top-level form of the source file PATH, calling EMIT on the code object of each."
+  (with-open-file (in path)
+    (let ((eof (list nil)))
+      (block nil
+        (tagbody top
+           (let ((form (read in nil eof)))
+             (when (eq form eof) (return))
+             (let ((*form-pos* (%last-read-start)))
+               (%process-toplevel form emit)))
+           (go top))))))
+
+(defun compile-file (path &key output-file ((:format fmt) :binary))
   (let* ((out (or output-file
                   (let ((p (%string-position-char (reverse path) #\. 0)))
                     (if p (%string-concat (subseq path 0 (- (length path) p 1)) ".nfasl") (%string-concat path ".nfasl")))))
-         (*package* *package*) (*compile-file-name* path))
-    (with-open-file (in path)
-      (with-open-file (o out :direction :output)
-        (write-line *fasl-header* o)
-        (let ((eof (list nil)))
-          (block nil
-            (tagbody top
-               (let ((form (read in nil eof)))
-                 (when (eq form eof) (return))
-                 (let ((*form-pos* (%last-read-start)))
-                   (%process-toplevel form o)))
-               (go top))))))
+         (*package* *package*) (*compile-file-name* path) (*policy* *policy*))
+    (cond ((eq fmt :binary)
+           (let ((entries nil))
+             (%compile-forms path (lambda (code) (setq entries (cons (%fasl-encode code) entries))))
+             (%fasl-write-file out (nreverse entries))))
+          ((eq fmt :text)
+           (with-open-file (o out :direction :output)
+             (write-line *fasl-header* o)
+             (%compile-forms path (lambda (code) (%write-fasl-entry o code)))))
+          (t (error "COMPILE-FILE: unknown fasl format ~S (use :BINARY or :TEXT)" fmt)))
     out))
 
+(defun %load-text-fasl (path)
+  (with-open-file (s path)
+    (let ((eof (list nil)) (header (read-line s nil nil)))
+      (unless (and header (%starts-with header *fasl-header*))
+        (error "Not a NeoGenera fasl file: ~A" path))
+      (block nil
+        (tagbody top
+           (let ((form (read s nil eof)))
+             (when (eq form eof) (return))
+             (funcall (%code-closure (%sexp->code form) nil)))
+           (go top))))))
+
+(defun %binary-fasl-p (bytes)
+  (and (> (length bytes) 0) (= (char-code (char bytes 0)) 127)))
+
+(defun %map-binary-fasl (bytes fn)
+  "Call FN on the code object of each entry of the binary fasl file BYTES, decoding each just before its call (an
+entry may create the package that the symbols of a later one live in)."
+  (let ((n (%fasl-entries bytes)) (pos +fasl-first-entry+))
+    (dotimes (i n)
+      (let ((r (%fasl-decode bytes pos)))
+        (setq pos (cdr r))
+        (funcall fn (car r))))))
+
 (defun load-fasl (path)
-  (let ((*package* *package*))
-    (with-open-file (s path)
-      (let ((eof (list nil)) (header (read-line s nil nil)))
-        (unless (and header (%starts-with header *fasl-header*))
-          (error "Not a NeoGenera fasl file: ~A" path))
-        (block nil
-          (tagbody top
-             (let ((form (read s nil eof)))
-               (when (eq form eof) (return))
-               (funcall (%code-closure (%sexp->code form) nil)))
-             (go top))))))
+  (let ((*package* *package*) (*policy* *policy*) (bytes (%fasl-read-file path)))
+    (cond ((null bytes) (error "Cannot open ~A" path))
+          ((%binary-fasl-p bytes)
+           (%map-binary-fasl bytes (lambda (code) (funcall (%code-closure code nil)))))
+          (t (%load-text-fasl path))))
   t)
+
+(defun %dump-code (code)
+  (disassemble (%code-closure code nil))
+  (dolist (c (%vector-to-list (nth 5 (%code-parts code))))
+    (when (%codep c) (terpri) (%dump-code c))))
+
+(defun dump-fasl (path &optional (stream *standard-output*))
+  "Print a disassembly of every top-level entry of the binary compiled-code file PATH."
+  (let ((bytes (%fasl-read-file path)) (i 0))
+    (unless bytes (error "Cannot open ~A" path))
+    (unless (%binary-fasl-p bytes) (error "~A is not a binary fasl file" path))
+    (let ((*standard-output* stream))
+      (%map-binary-fasl bytes (lambda (code)
+                                (format t "~&;;; entry ~D~%" i)
+                                (setq i (+ i 1))
+                                (%dump-code code)
+                                (terpri))))
+    i))
 
 (defun %ends-with (s suffix)
   (let ((n (length suffix)) (m (length s)))
@@ -291,7 +340,7 @@
   (declare (ignore if-does-not-exist))
   (if (%ends-with path ".nfasl")
       (load-fasl path)
-      (let ((*package* *package*) (*load-pathname* path) (*compile-file-name* path))
+      (let ((*package* *package*) (*load-pathname* path) (*compile-file-name* path) (*policy* *policy*))
         (with-open-file (s path)
           (let ((eof (list nil)))
             (block nil

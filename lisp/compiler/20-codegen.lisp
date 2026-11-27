@@ -62,6 +62,13 @@
     (:labels (gen-labels node tail))
     (:lambda (gen-closure (cadr node)) (finish tail))
     (:call (gen-call node tail))
+    (:ncall (gen-call (list* :call (caddr node) (cdddr node)) tail t (cadr node)))
+    (:rcall (gen-call (list* :call (cadddr node) (cddddr node)) tail t (caddr node))
+            (unless tail (gen-check-ops (cadr node))))
+    (:op (dolist (a (cddr node)) (gen a nil))
+         (apply #'emit (cadr node))
+         (finish tail))
+    (:check (gen (caddr node) nil) (gen-check-ops (cadr node)) (finish tail))
     (:block (gen-block node tail))
     (:return-from (gen-return-from node tail))
     (:tagbody (gen-tagbody node tail))
@@ -172,9 +179,22 @@
   (let ((e (assq name *inline-ops*)))
     (and e (= (caddr e) nargs) e)))
 
-(defun gen-call (node tail)
+(defun gen-check-ops (ty)
+  "Emit the instruction that checks the value on top of the stack against the ty TY (it stays on the stack)."
+  (cond ((ty-intp ty)
+         (cond ((ty-full-fixnum-p ty) (emit :chkfix))
+               ((and (ty-fixnum-p ty)) (emit :chkrange (const-index (cons (ty-lo ty) (ty-hi ty)))))
+               (t (emit :chktype 1))))
+        (t (emit :chktype (case ty (:flonum 2) (:real 3) (:number 4) (:cons 5) (:list 6) (:symbol 7) (:null 8)
+                            (:string 9) (:svec 10) (:char 11)
+                            (t (error "gen: no check for the type ~S" ty)))))))
+
+(defun gen-call (node tail &optional plain notail)
+  ;; PLAIN: a real call even to an open-coded function; NOTAIL: a call in tail position is not merged into a jump
+  ;; (DEBUG 3), so the caller stays on the stack for the debugger.
   (let* ((fn (cadr node)) (args (cddr node)) (n (length args)))
-    (cond ((and (eq (car fn) :gfun) (inline-spec (cadr fn) n))
+    (cond (plain (gen-plain-call fn args n tail notail))
+          ((and (eq (car fn) :gfun) (inline-spec (cadr fn) n))
            (dolist (a args) (gen a nil))
            (emit (cadr (inline-spec (cadr fn) n)))
            (finish tail))
@@ -188,12 +208,17 @@
            (emit :const (const-index 1))
            (emit (if (eq (cadr fn) '1+) :add :sub))
            (finish tail))
-          (t (gen fn nil)
-             (dolist (a args) (gen a nil))
-             (cond ((not tail) (emit :call n))
-                   ((> *cg-nspec* 0)             ; cannot TAILCALL out of dynamic bindings: call, unbind, return all values
-                    (emit :call n) (emit :unbind *cg-nspec*) (emit :retv))
-                   (t (emit :tailcall n)))))))
+          (t (gen-plain-call fn args n tail notail)))))
+
+(defun gen-plain-call (fn args n tail notail)
+  (gen fn nil)
+  (dolist (a args) (gen a nil))
+  (cond ((not tail) (emit :call n))
+        ((or notail (> *cg-nspec* 0))     ; cannot TAILCALL out of dynamic bindings: call, unbind, return all values
+         (emit :call n)
+         (when (> *cg-nspec* 0) (emit :unbind *cg-nspec*))
+         (emit :retv))
+        (t (emit :tailcall n))))
 
 (defun gen-block (node tail)
   ;; A block in tail position is compiled in tail mode: a normal exit leaves via
@@ -263,6 +288,8 @@
         (setf (cvar-slot p) i)
         (setq i (+ i 1))))
     (setq *cg-depth* (length (clam-params lam)))
+    (dolist (c (clam-checks lam))            ; declared parameter types are checked on entry (before any boxing)
+      (emit :lref (cvar-slot (car c))) (gen-check-ops (cdr c)) (emit :pop))
     (dolist (p (clam-params lam))
       (when (var-boxed-p p)
         (emit :lref (cvar-slot p)) (emit :box) (emit :lset (cvar-slot p))))

@@ -77,14 +77,60 @@
             (setq ,l (cdr ,l))
             (go ,top))))))
 
+(defun %decl-int-type-p (ty)
+  ;; true for a type specifier that denotes only fixnums
+  (cond ((eq ty 'fixnum) t)
+        ((eq ty 'bit) t)
+        ((consp ty)
+         (let ((h (car ty)) (a (cadr ty)) (b (caddr ty)))
+           (cond ((eq h 'integer) (and (integerp a) (integerp b) (<= most-negative-fixnum a) (<= b most-positive-fixnum)))
+                 ((eq h 'unsigned-byte) (and (integerp a) (<= a 60)))
+                 ((eq h 'signed-byte) (and (integerp a) (<= a 61)))
+                 ((eq h 'mod) (and (integerp a) (<= a most-positive-fixnum)))
+                 (t nil))))
+        (t nil)))
+
+(defun %decl-int-var-p (var body)
+  ;; true when the leading DECLARE forms of BODY declare VAR an integer type of fixnum size
+  (cond ((and (consp body) (consp (car body)) (eq (caar body) 'declare))
+         (or (%decl-int-var-in-specs-p var (cdar body))
+             (%decl-int-var-p var (cdr body))))
+        (t nil)))
+
+(defun %decl-int-var-in-specs-p (var specs)
+  (cond ((null specs) nil)
+        ((and (consp (car specs))
+              (let ((d (car specs)))
+                (if (eq (car d) 'type)
+                    (and (%decl-int-type-p (cadr d)) (member var (cddr d)))
+                    (and (%decl-int-type-p (car d)) (member var (cdr d))))))
+         t)
+        (t (%decl-int-var-in-specs-p var (cdr specs)))))
+
+(defun %split-leading-declares (body)
+  ;; (declarations . forms)
+  (let ((decls nil))
+    (block nil
+      (tagbody top
+         (when (and (consp body) (consp (car body)) (eq (caar body) 'declare))
+           (setq decls (cons (car body) decls))
+           (setq body (cdr body))
+           (go top))))
+    (cons (nreverse decls) body)))
+
 (defmacro dotimes ((var count &optional result) &body body)
-  (let ((n (gensym)) (top (gensym)))
+  ;; A fixnum declaration for VAR also types the counter and the limit (the loop never makes VAR exceed the limit,
+  ;; so the increment cannot overflow), which lets the compiler use fixnum instructions for the whole loop.
+  (let ((n (gensym)) (top (gensym)) (fix (%decl-int-var-p var body)))
     `(block nil
        (let ((,n ,count) (,var 0))
+         ,@(if fix `((declare (type fixnum ,n ,var))) nil)
          (tagbody ,top
             (if (>= ,var ,n) (return-from nil ,result))
             (let ((,var ,var)) ,@body)
-            (setq ,var (+ ,var 1))
+            (setq ,var ,(if fix
+                            `(locally (declare (optimize (safety 0))) (the fixnum (+ ,var 1)))
+                            `(+ ,var 1)))
             (go ,top))))))
 
 (defmacro declaim (&rest specs) (list 'progn (list '%declaim (list 'quote specs))))
@@ -404,21 +450,23 @@
     `(let ,(nreverse bindings) ,@(nreverse assigns) nil)))
 
 (defmacro do (varlist (test &rest result) &body body)
-  (let ((top (gensym)))
+  (let* ((top (gensym)) (split (%split-leading-declares body)))
     `(block nil
        (let ,(mapcar (lambda (v) (if (consp v) (list (car v) (cadr v)) v)) varlist)
+         ,@(car split)
          (tagbody ,top
             (when ,test (return-from nil (progn ,@result)))
-            ,@body
+            ,@(cdr split)
             (psetq ,@(%do-steps varlist))
             (go ,top))))))
 (defmacro do* (varlist (test &rest result) &body body)
-  (let ((top (gensym)))
+  (let* ((top (gensym)) (split (%split-leading-declares body)))
     `(block nil
        (let* ,(mapcar (lambda (v) (if (consp v) (list (car v) (cadr v)) v)) varlist)
+         ,@(car split)
          (tagbody ,top
             (when ,test (return-from nil (progn ,@result)))
-            ,@body
+            ,@(cdr split)
             (setq ,@(%do-steps varlist))
             (go ,top))))))
 (defun %do-steps (varlist)

@@ -186,6 +186,118 @@ static Obj vm_execute(int stop_vfp) {
     case OP_NUMEQ: { Obj b = vstack[--vsp], a = vstack[vsp - 1];
       vstack[vsp - 1] = (FIXP(a) && FIXP(b)) ? BOOL(a == b) : BOOL(num_equal(a, b));
       break; }
+    case OP_MUL: {
+      Obj b = vstack[--vsp], a = vstack[vsp - 1]; SObj p;
+      if (FIXP(a) && FIXP(b) && !__builtin_mul_overflow(UNFIX(a), UNFIX(b), &p) && FIX_FITS(p)) vstack[vsp - 1] = FIX(p);
+      else vstack[vsp - 1] = num_mul(a, b);
+      break;
+    }
+    /* ---- specialised operations (operand types established by the compiler) ---- */
+    case OP_ADDFX: { Obj b = vstack[--vsp]; vstack[vsp - 1] = (Obj)((uint64_t)vstack[vsp - 1] + (uint64_t)b); break; }
+    case OP_SUBFX: { Obj b = vstack[--vsp]; vstack[vsp - 1] = (Obj)((uint64_t)vstack[vsp - 1] - (uint64_t)b); break; }
+    case OP_MULFX: { Obj b = vstack[--vsp]; vstack[vsp - 1] = (Obj)((uint64_t)vstack[vsp - 1] * (uint64_t)((SObj)b >> 3)); break; }
+    case OP_INCFX: vstack[vsp - 1] = (Obj)((uint64_t)vstack[vsp - 1] + 8); break;
+    case OP_DECFX: vstack[vsp - 1] = (Obj)((uint64_t)vstack[vsp - 1] - 8); break;
+#define CMPFX(OPC, OP) case OPC: { Obj b = vstack[--vsp]; vstack[vsp - 1] = BOOL((SObj)vstack[vsp - 1] OP (SObj)b); break; }
+    CMPFX(OP_LTFX, <) CMPFX(OP_GTFX, >) CMPFX(OP_LEFX, <=) CMPFX(OP_GEFX, >=) CMPFX(OP_NUMEQFX, ==)
+    case OP_LOGANDFX: { Obj b = vstack[--vsp]; vstack[vsp - 1] &= b; break; }
+    case OP_LOGIORFX: { Obj b = vstack[--vsp]; vstack[vsp - 1] |= b; break; }
+    case OP_LOGXORFX: { Obj b = vstack[--vsp]; vstack[vsp - 1] ^= b; break; }
+    case OP_REMFX: {
+      SObj y = UNFIX(vstack[--vsp]);
+      if (y == 0) lisp_error("Division by zero");
+      vstack[vsp - 1] = FIX(UNFIX(vstack[vsp - 1]) % y);
+      break;
+    }
+    case OP_MODFX: {
+      SObj y = UNFIX(vstack[--vsp]);
+      if (y == 0) lisp_error("Division by zero");
+      SObj r = UNFIX(vstack[vsp - 1]) % y;
+      if (r != 0 && ((r < 0) != (y < 0))) r += y;
+      vstack[vsp - 1] = FIX(r);
+      break;
+    }
+    case OP_ASHFX: {
+      int k = ip[pc++];
+      uint64_t w = (uint64_t)vstack[vsp - 1];
+      if (k >= 0) vstack[vsp - 1] = (Obj)(k >= 64 ? 0 : w << k);
+      else { int s = -k > 63 ? 63 : -k; vstack[vsp - 1] = (Obj)((uint64_t)((SObj)w >> s) & ~(uint64_t)7); }
+      break;
+    }
+    case OP_ADDFL: { Obj b = vstack[--vsp]; vstack[vsp - 1] = make_flonum(flonum_value(vstack[vsp - 1]) + flonum_value(b)); break; }
+    case OP_SUBFL: { Obj b = vstack[--vsp]; vstack[vsp - 1] = make_flonum(flonum_value(vstack[vsp - 1]) - flonum_value(b)); break; }
+    case OP_MULFL: { Obj b = vstack[--vsp]; vstack[vsp - 1] = make_flonum(flonum_value(vstack[vsp - 1]) * flonum_value(b)); break; }
+    case OP_DIVFL: {
+      double d = flonum_value(vstack[--vsp]);
+      if (d == 0.0) lisp_error("Division by zero");
+      vstack[vsp - 1] = make_flonum(flonum_value(vstack[vsp - 1]) / d);
+      break;
+    }
+#define CMPFL(OPC, OP) case OPC: { double b = flonum_value(vstack[--vsp]); vstack[vsp - 1] = BOOL(flonum_value(vstack[vsp - 1]) OP b); break; }
+    CMPFL(OP_LTFL, <) CMPFL(OP_GTFL, >) CMPFL(OP_LEFL, <=) CMPFL(OP_GEFL, >=) CMPFL(OP_NUMEQFL, ==)
+    case OP_FIXTOFL: vstack[vsp - 1] = make_flonum((double)UNFIX(vstack[vsp - 1])); break;
+    case OP_CARX: vstack[vsp - 1] = CAR(vstack[vsp - 1]); break;
+    case OP_CDRX: vstack[vsp - 1] = CDR(vstack[vsp - 1]); break;
+    case OP_SVREF: {                    /* AREF / SVREF on one subscript; anything but a simple vector goes the generic way */
+      Obj i = vstack[--vsp], x = vstack[vsp - 1];
+      if (VECTORP(x) && FIXP(i) && (uint64_t)UNFIX(i) < OBJ_NWORDS(x)) vstack[vsp - 1] = SLOT(x, UNFIX(i));
+      else vstack[vsp - 1] = ng_aref2(x, i);
+      break;
+    }
+    case OP_SVREFX: { Obj i = vstack[--vsp]; vstack[vsp - 1] = SLOT(vstack[vsp - 1], UNFIX(i)); break; }
+    case OP_SVSET: {
+      Obj x = vstack[--vsp], i = vstack[vsp - 1], v = vstack[vsp - 2];
+      if (VECTORP(v) && FIXP(i) && (uint64_t)UNFIX(i) < OBJ_NWORDS(v)) { SLOT(v, UNFIX(i)) = x; WB(v, x); }
+      else x = ng_aset3(v, i, x);
+      vsp--; vstack[vsp - 1] = x;
+      break;
+    }
+    case OP_SVSETX: {
+      Obj x = vstack[--vsp], i = vstack[vsp - 1], v = vstack[vsp - 2];
+      SLOT(v, UNFIX(i)) = x; WB(v, x);
+      vsp--; vstack[vsp - 1] = x;
+      break;
+    }
+    case OP_SCHAR: {
+      Obj i = vstack[--vsp], s = vstack[vsp - 1];
+      if (STRINGP(s) && FIXP(i) && (uint64_t)UNFIX(i) < str_len(s)) vstack[vsp - 1] = MK_CHAR(str_ref(s, (size_t)UNFIX(i)));
+      else vstack[vsp - 1] = ng_aref2(s, i);
+      break;
+    }
+    case OP_CHKFIX: if (!FIXP(vstack[vsp - 1])) type_error("FIXNUM", vstack[vsp - 1]); break;
+    case OP_CHKRANGE: {
+      Obj c = consts[ip[pc++]], x = vstack[vsp - 1];
+      if (!FIXP(x) || (SObj)x < (SObj)CAR(c) || (SObj)x > (SObj)CDR(c)) {
+        char what[96];
+        snprintf(what, sizeof what, "(INTEGER %ld %ld)", (long)UNFIX(CAR(c)), (long)UNFIX(CDR(c)));
+        type_error(what, x);
+      }
+      break;
+    }
+    case OP_CHKTYPE: {
+      int tc = ip[pc++]; Obj v = vstack[vsp - 1]; int ok;
+      switch (tc) {
+      case TC_FIXNUM: ok = FIXP(v); break;
+      case TC_INTEGER: ok = is_integer(v); break;
+      case TC_FLONUM: ok = FLONUMP(v); break;
+      case TC_REAL: ok = FIXP(v) || FLONUMP(v) || IS_TYPE(v, T_BIGNUM) || IS_TYPE(v, T_RATIO); break;
+      case TC_NUMBER: ok = is_number(v); break;
+      case TC_CONS: ok = CONSP(v); break;
+      case TC_LIST: ok = LISTP(v); break;
+      case TC_SYMBOL: ok = SYMBOLP(v); break;
+      case TC_NULL: ok = v == NIL; break;
+      case TC_STRING: ok = STRINGP(v); break;
+      case TC_SVEC: ok = VECTORP(v); break;
+      case TC_CHAR: ok = CHARP(v); break;
+      default: ok = 0;
+      }
+      if (!ok) {
+        static const char *const names[] = { "FIXNUM", "INTEGER", "DOUBLE-FLOAT", "REAL", "NUMBER", "CONS", "LIST", "SYMBOL",
+                                             "NULL", "STRING", "SIMPLE-VECTOR", "CHARACTER" };
+        type_error(tc >= 0 && tc < TC_COUNT ? names[tc] : "?", v);
+      }
+      break;
+    }
     default:
       lisp_error("VM: bad opcode %d", ip[pc - 1]);
     }
@@ -209,8 +321,57 @@ static int frame_nparams(int k) {
 static const int op_nargs[OP_COUNT] = {
   [OP_CONST] = 1, [OP_LREF] = 1, [OP_LSET] = 1, [OP_FREF] = 1, [OP_GREF] = 1, [OP_GSET] = 1, [OP_GFUN] = 1,
   [OP_JMP] = 1, [OP_JNIL] = 1, [OP_JNNIL] = 1, [OP_CALL] = 1, [OP_TAILCALL] = 1, [OP_CLOSURE] = 2,
-  [OP_BIND] = 1, [OP_UNBIND] = 1, [OP_SLIDE] = 1
+  [OP_BIND] = 1, [OP_UNBIND] = 1, [OP_SLIDE] = 1, [OP_ASHFX] = 1, [OP_CHKTYPE] = 1, [OP_CHKRANGE] = 1
 };
+
+int vm_op_nargs(int op) { return op < 0 || op >= OP_COUNT ? -1 : op_nargs[op]; }
+
+/* Check an instruction stream that came from outside (a fasl file) so that the interpreter loop cannot run off its
+   code or index its constants out of range.  It does not check stack depth or local slots: a fasl file is code, and
+   loading one is as trusted as loading source (docs/SECURITY.md). */
+const char *vm_validate_code(const int32_t *ip, size_t n, size_t nconsts) {
+  if (n == 0) return "empty code";
+  unsigned char *start = calloc(n + 1, 1);
+  if (!start) return "out of memory";
+  const char *err = NULL;
+  size_t pc = 0;
+  while (pc < n) {
+    int na = vm_op_nargs(ip[pc]);
+    if (na < 0) { err = "bad opcode"; break; }
+    if (pc + 1 + (size_t)na > n) { err = "truncated instruction"; break; }
+    start[pc] = 1;
+    switch (ip[pc]) {
+    case OP_CONST: case OP_GREF: case OP_GSET: case OP_GFUN: case OP_BIND: case OP_CHKRANGE:
+      if (ip[pc + 1] < 0 || (size_t)ip[pc + 1] >= nconsts) err = "constant index out of range";
+      break;
+    case OP_CLOSURE:
+      if (ip[pc + 1] < 0 || (size_t)ip[pc + 1] >= nconsts) err = "constant index out of range";
+      else if (ip[pc + 2] < 0) err = "bad closure size";
+      break;
+    case OP_LREF: case OP_LSET: case OP_FREF: case OP_UNBIND: case OP_SLIDE: case OP_CALL: case OP_TAILCALL:
+      if (ip[pc + 1] < 0) err = "negative operand";
+      break;
+    case OP_CHKTYPE:
+      if (ip[pc + 1] < 0 || ip[pc + 1] >= TC_COUNT) err = "bad type code";
+      break;
+    default: break;
+    }
+    if (err) break;
+    pc += 1 + (size_t)na;
+  }
+  if (!err) {
+    int last = 0;
+    for (size_t p = 0; p < n; ) { last = ip[p]; p += 1 + (size_t)op_nargs[ip[p]]; }
+    if (last != OP_RET && last != OP_RETV && last != OP_TAILCALL && last != OP_JMP) err = "code can fall off its end";
+    for (size_t p = 0; !err && p < n; p += 1 + (size_t)op_nargs[ip[p]]) {
+      int op = ip[p];
+      if ((op == OP_JMP || op == OP_JNIL || op == OP_JNNIL) && (ip[p + 1] < 0 || (size_t)ip[p + 1] >= n || !start[ip[p + 1]]))
+        err = "jump target is not an instruction";
+    }
+  }
+  free(start);
+  return err;
+}
 
 /* parameters boxed in place (LREF i BOX LSET i) before PC hold boxes now: take their values out again */
 static void unbox_params(int k) {

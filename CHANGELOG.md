@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+* **The compiler honours declarations.** `(declare (type ...))` and the shorthand forms, `the`, `(declaim (type ...))`, `(declaim
+  (ftype ...))` and `optimize` / `notinline` are acted on instead of ignored. A new pass between analysis and code generation
+  (`lisp/compiler/15-specialize.lisp`) infers types, with interval arithmetic for integers, and replaces generic calls whose
+  operand types it knows with specialised VM instructions: unchecked fixnum and float arithmetic and comparison, bitwise
+  operations, `rem`/`mod`/`ash`, `car`/`cdr` of a known cons, and open-coded `svref`/`aref`/`char`/`schar`/`(setf aref)`. At
+  `safety` 1-3 (the default is 1) declared types are checked, on entry to a function, on binding and assignment, at `the` and on
+  declaimed function results, and a violation is an ordinary `type-error`; at `safety` 0 declarations are trusted and no
+  checks are made. `debug` 3 stops tail-call merging; `notinline` stops open-coding. `dotimes`, `do` and `do*` now pass their
+  variable declarations to the compiler, and a fixnum-typed `dotimes` variable types its counter and limit. About 2-3x faster
+  on tight fixnum and float loops at `safety 0` (`bench/bench.lisp`); code without declarations is unchanged. `*` is now
+  open-coded (`MUL`). 37 new VM instructions (docs/design/vm.md), a bytecode verifier (`vm_validate_code`), and
+  `tests/lisp/specialize-tests.lisp`. Design: docs/design/compiler.md, "Declarations, policy and type specialisation".
+* **A binary fasl format.** `compile-file` now writes a compact binary `.nfasl` (`src/fasl.c`): a header with a format version,
+  one length-prefixed entry per top-level form, and a CRC-32; floats round-trip bit for bit, and uninterned symbols keep their
+  identity within a form. Loading verifies the checksum and every instruction stream before running anything and reports damaged,
+  truncated or wrong-version files with a clear message. `(compile-file f :format :text)` still writes the text format, and
+  `load` / `load-fasl` read either. `(dump-fasl file)` disassembles a binary fasl. The self-hosting fixed point, the
+  reproducible-build check and ASan/UBSan runs pass with it; the decoder has fuzz tests.
+
 * **Two new `:demo` demos**, Mandelbrot (painted progressively, then zooms through a tour of views) and Boids (flocking),
   and two matching example programs: `examples/13-mandelbrot.lisp` (escape-time iteration with built-in complex numbers; ASCII art plus a
   colour PPM image written to `build/examples/mandelbrot.ppm`) and `examples/14-boids.lisp` (Reynolds flocking on a torus,

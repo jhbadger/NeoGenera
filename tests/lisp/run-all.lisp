@@ -22,6 +22,7 @@
 (load "tests/lisp/fuzz-tests.lisp")
 (load "tests/lisp/hardening-tests.lisp")
 (load "tests/lisp/package-tests.lisp")
+(load "tests/lisp/specialize-tests.lisp")
 (load "tests/lisp/mop-tests.lisp")
 (let ((ok (run-tests)))
   (exit (if ok 0 1)))

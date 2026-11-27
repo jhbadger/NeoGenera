@@ -45,7 +45,25 @@ Operands are `int32` words following the opcode.
 | `BIND k` / `UNBIND n` | symbol constant / count | dynamic binding |
 | `SLIDE n` | | drop `n` values *below* the top (used at `let` exit) |
 | `CAR CDR CONS EQ NOT` | | open-coded primitives |
-| `ADD SUB LT GT LE GE NUMEQ` | | open-coded two-argument arithmetic with fixnum fast path |
+| `ADD SUB MUL LT GT LE GE NUMEQ` | | open-coded two-argument arithmetic with fixnum fast path |
+| `ADDFX SUBFX MULFX INCFX DECFX` | | fixnum arithmetic with no tests; wraps modulo 2^61 (see below) |
+| `LTFX GTFX LEFX GEFX NUMEQFX` | | fixnum comparison with no tests |
+| `LOGANDFX LOGIORFX LOGXORFX` | | bitwise operations on fixnums |
+| `REMFX MODFX` | | fixnum `rem`/`mod`; signal `Division by zero` |
+| `ASHFX n` | shift | fixnum shift by the constant `n` (negative: right) |
+| `ADDFL SUBFL MULFL DIVFL` | | flonum arithmetic on two flonums (`DIVFL` signals `Division by zero`) |
+| `LTFL GTFL LEFL GEFL NUMEQFL` | | flonum comparison |
+| `FIXTOFL` | | fixnum to flonum |
+| `CARX CDRX` | | `car`/`cdr` of a value known to be a cons |
+| `SVREF SVSET SCHAR` | | `aref`/`svref`, `(setf aref)`/`%aset` and `char` with one subscript; a simple vector or string in range takes the fast path, anything else the generic `aref` |
+| `SVREFX SVSETX` | | the same with the vector, the fixnum index and the range all trusted (`safety 0`) |
+| `CHKFIX` | | signal a type error unless the top of stack is a fixnum (it stays) |
+| `CHKTYPE tc` | type code | the same for `integer double-float real number cons list symbol null string simple-vector character` |
+| `CHKRANGE k` | constant | the same for a fixnum in the range `(lo . hi)` held in constant `k` |
+
+The `…FX`, `…FL`, `CARX`, `CDRX`, `SVREFX` and `SVSETX` instructions do no checking of their own: the compiler emits them only
+where operand types are established (see compiler.md, "Declarations, policy and type specialisation"). `ADDFX`, `SUBFX`,
+`MULFX`, `INCFX`, `DECFX` and `ASHFX` wrap modulo 2^61 on overflow.
 
 `(+ a b c)` folds into `ADD ADD`; `1+`/`1-` become `CONST 1; ADD/SUB`. Open-coding assumes the
 standard definitions of these functions are not redefined.

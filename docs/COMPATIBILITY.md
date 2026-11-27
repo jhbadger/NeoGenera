@@ -38,8 +38,16 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
   array unless the vector is adjustable.
 
 **Evaluation and the compiler**
-* There is one lexical environment model and no `compile-file` external format: the compiler writes text fasls; `compile` and `compiled-eval` compile to bytecode.
-* No `declare` optimisation qualities are acted on; type declarations are ignored (the compiler does not specialise).
+* There is one lexical environment model. `compile-file` writes a binary `.nfasl` (`:format :text` writes the older text one); the file format is
+  specific to this system and its version (a file from another version is refused with a message that says to recompile it).
+* Declarations are acted on by the compiler: `type`, `ftype`, `the`, `optimize` (`safety` and `debug`; `speed`, `space` and
+  `compilation-speed` are accepted and have no effect), `inline`/`notinline` (only `notinline` does anything) and `special`.
+  At `safety` 1-3 declared types are checked and a violation signals a `type-error`; at `safety` 0 they are trusted, and a false
+  declaration is undefined behaviour. Types outside the compiler's lattice (`string`, `vector`, user `deftype`s, `member`, ...) are
+  accepted and ignored, not checked. A checked `the` returns only the primary value of a multiple-value form.
+  `loop` has no `of-type`. See docs/design/compiler.md.
+* `(make-array n :adjustable t)` without `:fill-pointer` gives a vector of fill pointer 0, and ignores `:initial-element` and
+  `:initial-contents` (use `:fill-pointer t` or `vector-push-extend`).
 * Redefinition of a function replaces it everywhere at once, including calls inside already-compiled code, because calls go through the symbol.
 * `defmacro` expansion is memoised in place by the evaluator, so macros with side effects at expansion time run once per source form.
 

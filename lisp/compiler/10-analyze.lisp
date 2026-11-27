@@ -74,6 +74,17 @@
            (go top))))
     (values specials body)))
 
+(defun an-locally (body env)
+  "LOCALLY: the body's declarations apply to it -- special ones to the variables it binds, OPTIMIZE / INLINE /
+NOTINLINE to the policy."
+  (multiple-value-bind (specs forms) (parse-declarations body)
+    (let ((env2 env) (specials (decl-specials specs)))
+      (when specials
+        (setq env2 (copy-aenv env))
+        (setf (aenv-specials env2) (append specials (aenv-specials env2))))
+      (let ((node (an-body forms env2)) (delta (parse-policy-delta specs)))
+        (if delta (list :policy delta node) node)))))
+
 (defun an-body (forms env)
   (let ((nodes (mapcar (lambda (f) (an f env)) forms)))
     (cond ((null nodes) (list :const nil))
@@ -105,8 +116,9 @@
     (if (list :if (an (cadr form) env) (an (caddr form) env)
               (if (cdddr form) (an (cadddr form) env) (list :const nil))))
     (progn (an-body (cdr form) env))
-    (locally (an-body (cdr form) env))
-    (the (an (caddr form) env))
+    (locally (an-locally (cdr form) env))
+    (the (let ((ty (parse-type (cadr form))) (node (an (caddr form) env)))
+           (if ty (list :the ty node) node)))
     (setq (an-setq (cdr form) env))
     (let (an-let (cadr form) (cddr form) env nil))
     (let* (an-let-star (cadr form) (cddr form) env))
@@ -185,9 +197,17 @@
         (when (null (cdr l)) (error "Odd number of keyword arguments")))
       (setq l (cdr l)))))
 
-(defun expand-lambda-list (ll body)
+(defun type-decls-for (specs vars)
+  "The (TYPE ..) declarations in SPECS for the variables VARS, as a DECLARE form (or NIL)."
+  (let ((acc nil))
+    (dolist (s specs)
+      (when (and (eq (car s) 'type) (memq (caddr s) vars) (parse-type (cadr s))) (setq acc (cons s acc))))
+    (if acc (list (cons 'declare (nreverse acc))) nil)))
+
+(defun expand-lambda-list (ll body &optional specs)
   ;; Returns (values params nreq nopt restp wrapped-body).  Optional/keyword/aux
-  ;; processing is expressed as source forms around BODY.
+  ;; processing is expressed as source forms around BODY.  SPECS: the body's declarations (normalised); the types
+  ;; of optional, keyword and auxiliary variables are applied by binding them again (optional) or declaring them.
   (multiple-value-bind (req opt rest keys aux allow) (lambda-list-parts ll)
     (let* ((restsym (or rest (and keys (gensym "REST"))))
            (params (append req (mapcar (lambda (o) (if (consp o) (car o) o)) opt)
@@ -200,7 +220,8 @@
         ;; aux (innermost)
         (when aux
           (setq inner (list (list* 'let* (mapcar (lambda (a) (if (consp a) (list (car a) (cadr a)) (list a nil))) aux)
-                                  inner))))
+                                  (append (type-decls-for specs (mapcar (lambda (a) (if (consp a) (car a) a)) aux))
+                                          inner)))))
         ;; keys
         (when keys
           (let ((bindings nil))
@@ -214,7 +235,12 @@
                 (setq bindings (cons (list probe (list '%getf-key restsym (list 'quote kw))) bindings))
                 (setq bindings (cons (list var (list 'if (list '%unsupplied-p probe) def probe)) bindings))
                 (when svar (setq bindings (cons (list svar (list 'not (list '%unsupplied-p probe))) bindings)))))
-            (setq inner (list (list* 'let* (nreverse bindings) inner))))
+            (setq inner (list (list* 'let* (nreverse bindings)
+                                     (append (type-decls-for specs (mapcar (lambda (k)
+                                                                             (let ((spec (if (consp k) (car k) k)))
+                                                                               (if (consp spec) (cadr spec) spec)))
+                                                                           keys))
+                                             inner)))))
           (setq inner (cons (list '%check-keys restsym
                                   (list 'quote (mapcar (lambda (k)
                                                          (let ((spec (if (consp k) (car k) k)))
@@ -228,6 +254,8 @@
                  (def (if (consp o) (cadr o) nil))
                  (svar (if (consp o) (caddr o) nil))
                  (fix (list 'when (list '%unsupplied-p var) (list 'setq var def))))
+            (when (type-decls-for specs (list var))      ; a typed optional: a fresh, typed binding once defaulted
+              (setq inner (list (list* 'let (list (list var var)) (append (type-decls-for specs (list var)) inner)))))
             (setq inner
                   (if svar
                       (list (list* 'let (list (list svar (list 'not (list '%unsupplied-p var)))) fix inner))
@@ -244,16 +272,23 @@
 
 (defun an-lambda (name ll body env)
   (let* ((lam (make-clam name *lam*)))
-    (multiple-value-bind (params nreq nopt restp wrapped) (expand-lambda-list ll body)
-      (let* ((*lam* lam) (env2 (copy-aenv env)) (cvars nil))
+    (multiple-value-bind (specs forms) (parse-declarations body)
+     (let ((specials (decl-specials specs)))
+      (when specials                       ; keep special declarations visible to the body (as LOCALLY would)
+        (setq forms (list (list* 'locally (list 'declare (cons 'special specials)) forms))))
+      (setf (clam-policy lam) (parse-policy-delta specs))
+    (multiple-value-bind (params nreq nopt restp wrapped) (expand-lambda-list ll forms specs)
+      (let* ((*lam* lam) (env2 (copy-aenv env)) (cvars nil) (i 0))
         (dolist (p params)
           (let ((v (make-cvar p lam)))
+            (when (< i nreq) (setf (cvar-type v) (decl-var-type specs p)))
+            (setq i (+ i 1))
             (setq cvars (append cvars (list v)))
             (setf (aenv-vars env2) (acons p v (aenv-vars env2)))))
         (setf (clam-params lam) cvars (clam-nreq lam) nreq (clam-nopt lam) nopt (clam-rest lam) restp)
         (setf (clam-arglist lam) (and (%interned-tree-p ll) ll))
         (setf (clam-body lam) (an-body wrapped env2))
-        lam))))
+        lam))))))
 
 (defun an-flet (specs body env labels-p)
   (let* ((env2 (copy-aenv env)) (vars nil))
@@ -270,7 +305,7 @@
                                                (list (list* 'block (if (consp (car s)) (cadr (car s)) (car s)) forms)))
                                        (if labels-p env2 env))))
                         specs)))
-      (list (if labels-p :labels :flet) vars lams (an-body body env2)))))
+      (list (if labels-p :labels :flet) vars lams (an-locally body env2)))))
 
 (defun an-macrolet (specs body env)
   (let ((env2 (copy-aenv env)))
@@ -285,8 +320,8 @@
 
 (defun an-let (bindings body env star-inner)
   (declare (ignore star-inner))
-  (multiple-value-bind (specials forms) (split-declarations body)
-    (let ((env2 (copy-aenv env)) (items nil) (inits nil))
+  (multiple-value-bind (specs forms) (parse-declarations body)
+    (let ((env2 (copy-aenv env)) (items nil) (inits nil) (specials (decl-specials specs)))
       (setf (aenv-specials env2) (append specials (aenv-specials env2)))
       (dolist (b bindings)
         (let* ((sym (if (consp b) (car b) b))
@@ -295,15 +330,27 @@
           (if (special-var-p sym env2)
               (setq items (append items (list sym)))
               (let ((v (make-cvar sym *lam*)))
+                (setf (cvar-type v) (decl-var-type specs sym))
                 (setq items (append items (list v)))
                 (setf (aenv-vars env2) (acons sym v (aenv-vars env2)))))))
       ;; shadowing: later bindings of the same name hide earlier ones (alist order)
-      (list :let items inits (an-body forms env2)))))
+      (let ((body-node (an-body forms env2)) (delta (parse-policy-delta specs)))
+        (list :let items inits (if delta (list :policy delta body-node) body-node))))))
 
 (defun an-let-star (bindings body env)
   (if (or (null bindings) (null (cdr bindings)))
       (an-let bindings body env nil)
-      (an-let (list (car bindings)) (list (list* 'let* (cdr bindings) body)) env nil)))
+      ;; LET* nests one LET per binding, so each declaration goes to the LET that binds its variable; the free
+      ;; ones (OPTIMIZE ...) go to the innermost body
+      (multiple-value-bind (specs forms) (parse-declarations body)
+        (let* ((b (car bindings)) (var (if (consp b) (car b) b)) (mine nil) (rest nil))
+          (dolist (s specs)
+            (if (eq (decl-spec-var s) var) (setq mine (cons s mine)) (setq rest (cons s rest))))
+          (an-let (list b)
+                  (append (if mine (list (cons 'declare (nreverse mine))) nil)
+                          (list (list* 'let* (cdr bindings)
+                                       (append (if rest (list (cons 'declare (nreverse rest))) nil) forms))))
+                  env nil)))))
 
 (defun an-setq (pairs env)
   (cond ((null pairs) (list :const nil))
