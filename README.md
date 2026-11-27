@@ -21,6 +21,9 @@ mathematics, statistics and bioinformatics. Version **1.0.0**. A scripted tour r
 * **The Pascal Tool Kit.** As on Genera, Pascal (ISO and Pascal/VS) compiles into Lisp: bignum integers, checked
   uninitialised variables and subscripts, units, calls between Pascal and Lisp, and a syntax-directed Pascal mode in the
   editor with templates, completion and incremental compilation. See `:doc pascal-manual` and `examples/11-pascal.lisp`.
+* **The FORTRAN Tool Kit.** ANSI FORTRAN 77 with the Symbolics extensions compiles into Lisp: arbitrary-size integers, detection of
+  uninitialised values, stronger type checks, `DO WHILE`/`ENDDO`/`INCLUDE`, bit operations and binary patterns, packages, full
+  formatted and list-directed I/O, and a fixed-format FORTRAN mode in the editor. See `:doc fortran-manual` and `examples/12-fortran.lisp`.
 * **Bioinformatics.** Sequences, FASTA/FASTQ/GenBank/GFF3/GTF/BED/VCF/SAM/BAM, pairwise alignment, suffix arrays, seeded search, motifs, phylogenetics, genomic
   intervals and a safe layer for BLAST, minimap2 and samtools, with clickable sequence, alignment and tree viewers.
 * **Hardened.** Every parser is fuzzed under ASan/UBSan; memory and stack exhaustion are recoverable errors; heap images are checksummed and saved atomically;

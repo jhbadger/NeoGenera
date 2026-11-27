@@ -125,3 +125,57 @@ break" "ünï") *fuzz-rng*)) (4 (rand-choice '(foo bar |Hello World| :key nil t)
   (multiple-value-bind (ok errors) (fuzz-each (s 200 (fuzz-string 30)) (run-tool s nil)) (is-equal 200 (+ ok errors)) (is-equal 0 ok))
   (multiple-value-bind (ok errors) (fuzz-each (s 300 (fuzz-string 40)) (search-documentation s) (resolve-topic s)) (is-equal 300 (+ ok errors)))
   (multiple-value-bind (ok errors) (fuzz-each (s 300 (fuzz-mutate "(+ x (* 3 y) (expt z 2) (sin (* 2 x)))")) (let ((e (read-from-string s))) (simplify e) (differentiate e 'x) (expr->string e))) (is-equal 300 (+ ok errors))))
+
+(deftest fuzz-fortran
+  ;; the FORTRAN Tool Kit: card reading, squeezing, tokens, parser, FORMAT, translation and input
+  (let ((seed "      PROGRAM P
+      INTEGER I, A(10)
+      REAL X
+      CHARACTER*8 S
+      COMMON /B/ X
+      DATA A /10*0/
+      DO 10 I = 1, 10
+         A(I) = I**2 + MOD(I, 3)
+   10 CONTINUE
+      IF (X .GT. 1.5) THEN
+         WRITE (*, 100) A(1), X
+      ELSE
+         S = 'it''s' // 'ok'
+      END IF
+  100 FORMAT (1X, I5, F8.3, 2(A, ' '), /)
+      END
+"))
+    (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-mutate seed)) (f77-parse s))
+      (is (> (+ ok errors) 1499)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 800 (fuzz-mutate seed)) (f77-translate s))
+      (is (> (+ ok errors) 799)) (is (> ok 100)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 2000 (fuzz-string 50)) (f77-tokenize (%f7-squeeze s)))
+      (is (> (+ ok errors) 1999)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 2000 (fuzz-string 70)) (f77-read-statements s))
+      (is (> (+ ok errors) 1999)))
+    (multiple-value-bind (ok errors) (fuzz-each (s 2000 (fuzz-mutate "(1X,'x=',F8.3,3I5,/,2(A,I3),E12.4E2,2PF6.2,T3,TL1,Z4,BZ,5HHello)")) (f77-parse-format s))
+      (is (> (+ ok errors) 1999)))
+    ;; huge counts and sizes are errors, not allocations
+    (signals-error (f77-parse-format "(I99999999999)"))
+    (is (null (f77-translate (format nil "      INTEGER A(2000000000)~%      A(1) = 1~%      END~%"))))
+    (is (null (f77-translate (format nil "      PARAMETER (N = 9**9**9)~%      END~%"))))
+    (is (null (f77-translate (format nil "      INTEGER A(3)~%      DATA (A(I), I=1,1000000000) /1/~%      END~%"))))
+    (is (stringp (%f7-squeeze "FORMAT(99999999999HX)")))
+    (signals-error (%f7-ipow 3 100000000))
+    (signals-error (%f7-ishft 1 1000000000))
+    ;; every edit descriptor on odd numbers
+    (dolist (x (list 0d0 1d300 -1d-300 123456789.123456789d0 1d0 0.5d0 9.9999d0 99999.5d0 -2.5d0))
+      (dolist (w '(0 1 3 8 20))
+        (dolist (d '(0 1 3 8))
+          (%f7-edit-f x w d 0 nil) (%f7-edit-e x w d nil 0 nil #\E) (%f7-edit-e x w d 2 1 t #\D) (%f7-edit-g x w d nil 0 nil))))
+    ;; formatted and list-directed input from random text
+    (flet ((reading (fmt text)
+             (let ((*f77-env* (%make-fenv :input (make-string-input-stream text))))
+               (let ((st (%f7-begin :read 5 fmt)))
+                 (%f7-get st :integer #'identity) (%f7-get st :double #'identity)
+                 (%f7-get st :character #'identity 5) (%f7-get st :logical #'identity) (%f7-end st)))))
+      (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 30)) (reading nil s))
+        (is (> (+ ok errors) 1499)))
+      (let ((fmt (f77-parse-format "(I3,F5.1,A4,L2)")))
+        (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 30)) (reading fmt s))
+          (is (> (+ ok errors) 1499)))))))

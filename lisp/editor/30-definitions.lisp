@@ -95,6 +95,7 @@ used to read the names that follow.  Nothing is evaluated."
         (let ((h (make-hash-table :test 'equal)))
           (dolist (sec secs) (setf (gethash (sec-key sec) h) (sec-text sec)))
           (%set-baseline b w h)))))
+  (when (eq (buffer-mode b) 'fortran-mode) (f77-reset-baselines b which))
   b)
 
 (defun buffer-note-compiled (b &optional (pred (constantly t)) sections)

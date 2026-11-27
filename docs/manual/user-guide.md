@@ -80,3 +80,5 @@ the selected function. See [Developer Tools](topic:tools-manual).
 * [Bioinformatics](topic:bio-manual) for sequences, file formats, alignment, search, phylogenetics and the clickable viewers.
 * [The Pascal Tool Kit](topic:pascal-manual) for compiling and running Pascal programs in the Lisp world, and Pascal mode
   in the editor.
+* [The FORTRAN Tool Kit](topic:fortran-manual) for compiling and running ANSI FORTRAN 77 with the Symbolics extensions, and
+  FORTRAN mode in the editor.

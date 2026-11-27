@@ -25,6 +25,8 @@
                  :keywords (bioinformatics sequence dna protein fasta alignment blast phylogeny genome))
 (import-markdown :pascal-manual "docs/manual/pascal-manual.md" :category :manual
                  :keywords (pascal compiler units dialect iso vs templates electric pascal-mode tool-kit))
+(import-markdown :fortran-manual "docs/manual/fortran-manual.md" :category :manual
+                 :keywords (fortran f77 ftn compiler format fixed-format electric fortran-mode tool-kit symbolics))
 
 ;;; Coverage is measured over what exists now; symbols defined later (user code, tests) are not counted.
 (snapshot-core-symbols)

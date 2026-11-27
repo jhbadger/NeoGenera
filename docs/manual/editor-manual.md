@@ -148,6 +148,14 @@ it moves over and deletes statements, routines, expressions and tokens, finds sy
 constructs, completes reserved words, puts them in capitals in Electric Pascal mode, indents, and compiles the routine
 at point with `C-c C-c`. See [The Pascal Tool Kit](topic:pascal-manual).
 
+## FORTRAN mode
+
+Files ending in `.f`, `.for`, `.ftn`, `.f77` or `.fortran` are edited in FORTRAN mode, a fixed-format mode for the FORTRAN
+Tool Kit: `TAB` pads the label and continuation fields and indents statements by their block nesting, `C-j` opens an
+indented statement line, `C-M-j` opens a continuation card, Electric FORTRAN mode wraps long statements onto continuation
+cards, `C-M-a`/`C-M-e`/`C-M-f`/`C-M-b`/`C-M-h` move over and mark routines and statements, and `C-c C-c` compiles the
+routine at point. See [The FORTRAN Tool Kit](topic:fortran-manual).
+
 Other language modes can be added the same way: a mode is a symbol whose property list gives its `mode-keymap`,
 `mode-name`, `line-syntax` function (for colouring), `match-offsets` function and `before-self-insert` and
 `after-self-insert` hooks, and `*auto-mode-alist*` maps file name suffixes to modes.

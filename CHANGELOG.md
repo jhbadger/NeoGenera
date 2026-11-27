@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+* **The FORTRAN Tool Kit**, after the Symbolics one: ANSI FORTRAN 77 (X3.9-1978) compiled into Lisp (and then to bytecode),
+  with arbitrary-size integers, detection of uninitialised values, stronger type checks (including checks of calls against
+  routines compiled earlier), packages (`FTN-USER`, with no superiors), integer/logical coercions, `DO WHILE`, `ENDDO`,
+  `INCLUDE`, `IMPLICIT NONE`, the Department of Defense bit functions, binary patterns (`B'..'`, `O'..'`, `Z'..'`) and
+  the `Z`/`O`/`B` edit descriptors, bit-wise logical operators, and bit substrings `I(lo:hi)` (the syntax is a reconstruction).
+  Fixed-format source with continuation cards, tabs, sequence numbers and the column-72 limit; Hollerith constants; all of
+  the edit descriptors with format reversion; list-directed, unformatted, direct-access and internal-file I/O; `COMMON`,
+  `EQUIVALENCE`, `BLOCK DATA`, statement functions, alternate returns, adjustable arrays and `COMPLEX`. Storage is in a
+  number space and a character space; arguments are references, so `f77:with-fortran-number-data` and
+  `f77:with-fortran-character-data` hand Lisp storage to FORTRAN. `f77:execute` (`f77:xqt`) runs a program with the options
+  of the Genera command (Init to Zero, Save Environment, Libraries, Pathname Default, Additional Externals, ...);
+  `f77:def-library` and `f77:def-program` declare systems; `:Execute FORTRAN` (with options), `:Compile FORTRAN`,
+  `:Show FORTRAN Programs`. Not implemented: `ENTRY`, `NAMELIST`, recursion. Manual: `:doc fortran-manual`.
+* **FORTRAN mode** in the editor (`.f`, `.for`, `.ftn`, `.f77`, `.fortran`): fixed-format `TAB` and `C-j`, continuation cards
+  (`C-M-j`), Electric FORTRAN mode wrapping at `f77:wraparound-column` with `f77:continuation-character`, motion over routines
+  and statements, compiling the routine at point, compiler warnings, changed definitions, Edit Definition, sequence-number and
+  tab commands.
 * **Flavors.** The Symbolics/Lisp Machine object system, layered on CLOS: `defflavor` (instance variables with default
   forms, component flavors and the usual options: gettable/settable/inittable variables, `:init-keywords`,
   `:default-init-plist`, `:required-*`, `:included-flavors`, `:default-handler`, `:method-combination`,
