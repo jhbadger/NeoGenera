@@ -106,7 +106,7 @@ enum { PR_INDEX, PR_NAME, PR_MIN, PR_MAX, PR_SLOTS };
 enum { ST_KIND, ST_FILE, ST_BUF, ST_LEN, ST_POS, ST_COL, ST_PEEK, ST_SLOTS };
 enum { SK_STDIN, SK_STDOUT, SK_STDERR, SK_FILE_IN, SK_FILE_OUT, SK_STR_IN, SK_STR_OUT, SK_CLOSED };
 /* packages */
-enum { PK_NAME, PK_NICK, PK_INTERNAL, PK_EXTERNAL, PK_USES, PK_USEDBY, PK_SLOTS };
+enum { PK_NAME, PK_NICK, PK_INTERNAL, PK_EXTERNAL, PK_USES, PK_USEDBY, PK_SHADOW, PK_LOCK, PK_SLOTS };
 /* adjustable vectors */
 enum { AV_DATA, AV_FILL, AV_SLOTS };
 /* a multi-dimensional array: its elements in row-major order (a simple vector, or a string for characters) and its
@@ -208,6 +208,20 @@ Obj   find_package_c(const char *name);
 Obj   make_package(Obj name, Obj nicks, Obj uses);
 void  export_symbol(Obj sym, Obj pkg);
 void  use_package(Obj pkg, Obj used);
+void  unuse_package(Obj pkg, Obj used);
+int   unexport_symbol(Obj sym, Obj pkg);
+int   unintern_symbol(Obj sym, Obj pkg);
+Obj   shadow_name(Obj namestr, Obj pkg);
+void  shadowing_import_symbol(Obj sym, Obj pkg);
+void  import_symbol(Obj sym, Obj pkg);
+int   delete_package(Obj pkg);
+void  rename_package(Obj pkg, Obj newname, Obj nicks);
+int   package_shadows_p(Obj pkg, Obj sym);
+/* package locks: the check functions signal a PACKAGE-LOCK-VIOLATION unless the package is unlocked or
+   *PACKAGE-LOCKS-DISABLED* is true.  OP is a verb phrase for the message ("define a function on"). */
+int   pkg_locked(Obj pkg);
+void  pkg_lock_check(Obj pkg, const char *op);
+void  sym_lock_check(Obj sym, const char *op);
 Obj   current_package(void);
 extern Obj PKG_CL, PKG_KEYWORD, PKG_USER, all_packages;
 extern int export_all_cl;                       /* boot flag                */
@@ -236,7 +250,7 @@ Obj   fn_symbol(Obj name);                      /* (setf x) -> symbol       */
   X(sf_eval,"EVAL") X(print_pkg,"*PRINT-PACKAGES*") X(read_eval,"*READ-EVAL*") \
   X(in_signal,"*IN-ERROR-SIGNAL*") X(print_hook,"%PRINT-HOOK") X(struct_parent,"%STRUCT-PARENT") \
   X(readtable,"*READTABLE*") X(print_base,"*PRINT-BASE*") X(print_radix,"*PRINT-RADIX*") \
-  X(print_pretty,"*PRINT-PRETTY*") X(pp_hook,"%PP-HOOK")
+  X(print_pretty,"*PRINT-PRETTY*") X(pp_hook,"%PP-HOOK") X(pkg_locks_off,"*PACKAGE-LOCKS-DISABLED*")
 #define X(id, str) extern Obj Q_##id;
 SYMBOL_LIST(X)
 #undef X

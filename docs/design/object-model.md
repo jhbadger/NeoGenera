@@ -31,7 +31,7 @@ the collector can size any object without knowing its type.
 | code | name, nreq, nopt, rest flag, instruction bytes, constants vector, arglist | instructions are an `int32` array in a raw string |
 | primitive | table index, name, min/max args | C function pointers live in `prim_table`, never in the heap |
 | stream | kind, file index, buffer, length, position, column, peek | stdio, file and string streams |
-| package | name, nicknames, symbol table, external table, use list, used-by | tables are 1021-bucket vectors of symbol lists |
+| package | name, nicknames, symbol table, external table, use list, used-by, shadowing list, lock flag | tables are 1021-bucket vectors of symbol lists; the symbol table holds every present symbol (external ones are in both); a deleted package has a `nil` name |
 | struct | descriptor `(NAME . SLOTS)`, then slot values | `defstruct` instances |
 | adjustable vector | data vector or string, fill pointer | `make-array :fill-pointer` |
 

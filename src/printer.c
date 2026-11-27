@@ -242,7 +242,9 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_CODE: buf_puts(b, "#<CODE "); print_rec(b, SLOT(o, C_NAME), 1, 0, depth + 1); buf_putc(b, '>'); return;
   case T_PRIM: buf_puts(b, "#<PRIMITIVE "); print_rec(b, SLOT(o, PR_NAME), 1, 0, depth + 1); buf_putc(b, '>'); return;
   case T_STREAM: buf_puts(b, "#<STREAM>"); return;
-  case T_PACKAGE: buf_puts(b, "#<PACKAGE "); print_string(b, SLOT(o, PK_NAME), 0); buf_putc(b, '>'); return;
+  case T_PACKAGE:
+    if (SLOT(o, PK_NAME) == NIL) { buf_puts(b, "#<PACKAGE (deleted)>"); return; }
+    buf_puts(b, "#<PACKAGE "); print_string(b, SLOT(o, PK_NAME), 0); buf_putc(b, '>'); return;
   case T_STRUCT: {
     Obj hook = SYM_FUNC(Q_print_hook);
     if (hook != NIL && !CONSP(hook)) {

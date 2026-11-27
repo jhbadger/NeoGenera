@@ -426,3 +426,22 @@
    caaar "Composition of three `car`s." caadr "Composition `car`, `car`, `cdr`." cadar "Composition `car`, `cdr`, `car`."
    cdaar "Composition `cdr`, `car`, `car`." cdadr "Composition `cdr`, `car`, `cdr`." cddar "Composition `cdr`, `cdr`, `car`."
    cdddar "Composition of `cdr` three times after a `car`."))
+
+;;; ---- packages and package locks -------------------------------------------------------------------
+
+(%doc-bulk '%doc-function
+ '(unuse-package "Stop a package inheriting the external symbols of the given packages."
+   unexport "Make symbols internal again in a package; they stay present."
+   unintern "Remove a symbol from a package; it becomes uninterned if that was its home. Returns true if it was present."
+   shadowing-import "Import symbols into a package, displacing any different symbol of the same name already present there."
+   package-nicknames "The nicknames of a package."
+   package-used-by-list "The packages that use a package."
+   package-shadowing-symbols "The symbols a package has declared as shadowing inherited ones (`shadow`, `shadowing-import`)."
+   package-locked-p "True if a package is locked; see `lock-package`."))
+
+(%doc-bulk '%doc-variable
+ '(*package-locks-disabled* "When true, package locks are ignored. Bind it with `without-package-locks`."))
+
+(%doc-bulk '%doc-type
+ '(simple-package-error "A package error with a format message."
+   package-lock-violation "Signalled when a locked package is modified, or a symbol it owns is defined as a function, macro, special variable or constant."))

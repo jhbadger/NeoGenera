@@ -20,6 +20,8 @@
 (defun ng-finalize-image ()
   ;; Called just before the final image is saved.
   (%set-export-all-cl nil)
+  ;; COMMON-LISP is deliberately NOT locked here: the system sources, the tests and the runners all live in
+  ;; COMMON-LISP.  Opt in with (lock-package :cl) -- see docs/COMPATIBILITY.md, "Package locks".
   (setq *source-root* nil)   ; not baked in: the image must not depend on where it was built (see NG_SOURCE_ROOT)
   (setq *record-lambda-expressions* t)
   (setq *package* (find-package "COMMON-LISP-USER"))

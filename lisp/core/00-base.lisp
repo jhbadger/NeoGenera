@@ -30,8 +30,12 @@
       (intern (%string-concat "(SETF " (symbol-name (cadr name)) ")") (symbol-package (cadr name)))
       name))
 
+(defun %package-or-error (name)
+  (or (find-package name)
+      (error 'simple-package-error :package nil :format-control "There is no package named ~S" :format-arguments (list name))))
+
 (defmacro in-package (name)
-  (list 'setq '*package* (list 'find-package (list 'quote name))))
+  (list 'setq '*package* (list '%package-or-error (list 'quote name))))
 
 (defmacro lambda (&rest r) (list 'function (cons 'lambda r)))
 

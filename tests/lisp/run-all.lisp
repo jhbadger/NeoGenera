@@ -21,5 +21,6 @@
 (load "tests/lisp/bio-tests.lisp")
 (load "tests/lisp/fuzz-tests.lisp")
 (load "tests/lisp/hardening-tests.lisp")
+(load "tests/lisp/package-tests.lisp")
 (let ((ok (run-tests)))
   (exit (if ok 0 1)))

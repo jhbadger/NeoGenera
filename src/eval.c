@@ -757,6 +757,7 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
   case SFID_DEFUN: {
     PROTECT(form); PROTECT(vars); PROTECT(funs);
     Obj name = CAR(CDR(form)), sym = fn_symbol(name);
+    sym_lock_check(sym, "define a function on");
     Obj ll = CAR(CDR(CDR(form))), body = skip_docstring(CDR(CDR(CDR(form))));
     Obj blk = cons(Q_block, cons(SYMBOLP(name) ? name : sym, body));
     SYM_FUNC(sym) = make_evalfn(sym, ll, list1(blk), vars, funs); WB(sym, SYM_FUNC(sym));
@@ -766,6 +767,7 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
   case SFID_DEFMACRO: {
     PROTECT(form); PROTECT(vars); PROTECT(funs);
     Obj sym = CAR(CDR(form));
+    sym_lock_check(sym, "define a macro on");
     Obj fn = make_evalfn(sym, CAR(CDR(CDR(form))), skip_docstring(CDR(CDR(CDR(form)))), vars, funs);
     SLOT(fn, EF_SIMPLE) = FIX(-2);
     SYM_FUNC(sym) = cons(Q_macro_marker, fn); WB(sym, SYM_FUNC(sym));
@@ -777,6 +779,8 @@ static Obj eval_special(int sf, Obj form, Obj vars, Obj funs) {
     Obj sym = CAR(CDR(form));
     Obj rest = CDR(CDR(form));
     PROTECT(sym); PROTECT(rest);
+    if (sf == SFID_DEFCONSTANT ? !(UNFIX(SYM_FLAGS(sym)) & SF_CONSTANT) : !(UNFIX(SYM_FLAGS(sym)) & SF_SPECIAL))
+      sym_lock_check(sym, sf == SFID_DEFCONSTANT ? "define as a constant" : "define as a special variable");
     long fl = UNFIX(SYM_FLAGS(sym)) | SF_SPECIAL | (sf == SFID_DEFCONSTANT ? SF_CONSTANT : 0);
     if (sf == SFID_DEFCONSTANT) {
       Obj v = eval(CAR(rest), vars, funs);

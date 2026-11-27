@@ -22,6 +22,7 @@
     "lisp/core/62-process.lisp"
     "lisp/core/63-unicode.lisp"
     "lisp/core/64-pathnames.lisp"
+    "lisp/core/65-packages.lisp"
     "lisp/core/90-test.lisp"
     "lisp/compiler/00-defs.lisp"
     "lisp/compiler/10-analyze.lisp"

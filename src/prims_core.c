@@ -26,6 +26,7 @@ Obj defprim_mv(const char *n, PrimFn f, int min, int max) { return def_prim(n, f
 static SObj need_fix(Obj o) { if (!FIXP(o)) type_error("FIXNUM", o); return UNFIX(o); }
 static Obj need_sym(Obj o) { if (!SYMBOLP(o)) type_error("SYMBOL", o); return o; }
 static Obj need_str(Obj o) { if (!STRINGP(o)) type_error("STRING", o); return o; }
+static Obj list_copy(Obj l) { Obj r = NIL; for (; CONSP(l); l = CDR(l)) r = cons(CAR(l), r); return nreverse_list(r); }
 static Obj str_designator(Obj o) {
   if (STRINGP(o)) return o;
   if (SYMBOLP(o)) return SYM_NAME(o);
@@ -208,14 +209,14 @@ PRIM(p_symbol_function) {
   if (f == NIL) lisp_error("The function %s is undefined", STR_C(SYM_NAME(s)));
   return CONSP(f) ? CDR(f) : f;
 }
-PRIM(p_set_symbol_function) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = argv[1]; WB(argv[0], argv[1]); return argv[1]; }
+PRIM(p_set_symbol_function) { UNUSED_ARGS; sym_lock_check(need_sym(argv[0]), "define a function on"); SYM_FUNC(argv[0]) = argv[1]; WB(argv[0], argv[1]); return argv[1]; }
 PRIM(p_macro_function) {
   UNUSED_ARGS;
   if (!SYMBOLP(argv[0])) return NIL;
   Obj f = SYM_FUNC(argv[0]);
   return (CONSP(f) && CAR(f) == Q_macro_marker) ? CDR(f) : NIL;
 }
-PRIM(p_set_macro_function) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = cons(Q_macro_marker, argv[1]); WB(argv[0], SYM_FUNC(argv[0])); return argv[1]; }
+PRIM(p_set_macro_function) { UNUSED_ARGS; sym_lock_check(need_sym(argv[0]), "define a macro on"); SYM_FUNC(argv[0]) = cons(Q_macro_marker, argv[1]); WB(argv[0], SYM_FUNC(argv[0])); return argv[1]; }
 PRIM(p_special_operator_p) {
   UNUSED_ARGS;
   if (!SYMBOLP(argv[0])) return NIL;
@@ -236,14 +237,14 @@ PRIM(p_get) { return plist_get(SYM_PLIST(need_sym(argv[0])), argv[1], argc > 2 ?
 PRIM(p_put) { UNUSED_ARGS; Obj s = need_sym(argv[0]); SYM_PLIST(s) = plist_put(SYM_PLIST(s), argv[1], argv[2]); WB(s, SYM_PLIST(s)); return argv[2]; }
 PRIM(p_boundp) { UNUSED_ARGS; return BOOL(SYM_VALUE(need_sym(argv[0])) != UNBOUND); }
 PRIM(p_fboundp) { UNUSED_ARGS; return BOOL(SYM_FUNC(need_sym(argv[0])) != NIL); }
-PRIM(p_makunbound) { UNUSED_ARGS; SYM_VALUE(need_sym(argv[0])) = UNBOUND; return argv[0]; }
-PRIM(p_fmakunbound) { UNUSED_ARGS; SYM_FUNC(need_sym(argv[0])) = NIL; return argv[0]; }
+PRIM(p_makunbound) { UNUSED_ARGS; sym_lock_check(need_sym(argv[0]), "remove the value of"); SYM_VALUE(argv[0]) = UNBOUND; return argv[0]; }
+PRIM(p_fmakunbound) { UNUSED_ARGS; sym_lock_check(need_sym(argv[0]), "remove the function definition of"); SYM_FUNC(argv[0]) = NIL; return argv[0]; }
 PRIM(p_make_symbol) { UNUSED_ARGS; need_str(argv[0]); return make_symbol_obj(substring(argv[0], 0, str_len(argv[0]))); }
 PRIM(p_keywordp) { UNUSED_ARGS; return BOOL(SYMBOLP(argv[0]) && SYM_PKG(argv[0]) == PKG_KEYWORD); }
-PRIM(p_proclaim_special) { UNUSED_ARGS; Obj s = need_sym(argv[0]); SYM_FLAGS(s) = FIX(UNFIX(SYM_FLAGS(s)) | SF_SPECIAL); return s; }
+PRIM(p_proclaim_special) { UNUSED_ARGS; Obj s = need_sym(argv[0]); if (!(UNFIX(SYM_FLAGS(s)) & SF_SPECIAL)) sym_lock_check(s, "proclaim as special"); SYM_FLAGS(s) = FIX(UNFIX(SYM_FLAGS(s)) | SF_SPECIAL); return s; }
 PRIM(p_special_p) { UNUSED_ARGS; return BOOL(SYMBOLP(argv[0]) && (UNFIX(SYM_FLAGS(argv[0])) & SF_SPECIAL)); }
 PRIM(p_constant_p) { UNUSED_ARGS; return BOOL(SYMBOLP(argv[0]) && (UNFIX(SYM_FLAGS(argv[0])) & SF_CONSTANT)); }
-PRIM(p_proclaim_constant) { UNUSED_ARGS; Obj s = need_sym(argv[0]); SYM_FLAGS(s) = FIX(UNFIX(SYM_FLAGS(s)) | SF_SPECIAL | SF_CONSTANT); return s; }
+PRIM(p_proclaim_constant) { UNUSED_ARGS; Obj s = need_sym(argv[0]); if (!(UNFIX(SYM_FLAGS(s)) & SF_CONSTANT)) sym_lock_check(s, "define as a constant"); SYM_FLAGS(s) = FIX(UNFIX(SYM_FLAGS(s)) | SF_SPECIAL | SF_CONSTANT); return s; }
 
 static Obj status_kw(int st) {
   switch (st) { case 1: return intern_kw("INTERNAL"); case 2: return intern_kw("EXTERNAL"); case 3: return intern_kw("INHERITED"); default: return NIL; }
@@ -251,11 +252,15 @@ static Obj status_kw(int st) {
 static Obj pkg_arg(int argc, Obj *argv, int i) {
   if (argc > i && argv[i] != NIL) {
     Obj p = find_package(argv[i]);
-    if (p == NIL) lisp_error("No package named %s", STR_C(print_to_string(argv[i], 1, 0)));
+    if (p == NIL) lisp_error("Package error: no package named %s", STR_C(print_to_string(argv[i], 1, 0)));
+    if (SLOT(p, PK_NAME) == NIL) lisp_error("Package error: the package has been deleted");
     return p;
   }
   return current_package();
 }
+/* A symbol-list argument: NIL is the empty list, a single symbol stands for itself. */
+static Obj sym_list_arg(Obj l) { return l == NIL ? NIL : CONSP(l) ? l : list1(l); }
+
 PRIM(p_intern) {
   Obj pkg = pkg_arg(argc, argv, 1);
   int st; Obj s = intern_obj(need_str(argv[0]), pkg, &st);
@@ -269,50 +274,100 @@ PRIM(p_find_symbol) {
   mv_vals[0] = st ? s : NIL; mv_vals[1] = status_kw(st); mv_count = 2;
   return mv_vals[0];
 }
-PRIM(p_find_package) { UNUSED_ARGS; return find_package(argv[0]); }
+PRIM(p_find_package) { UNUSED_ARGS; Obj p = find_package(argv[0]); return (p != NIL && SLOT(p, PK_NAME) == NIL) ? NIL : p; }
 PRIM(p_make_package) {
   /* (%make-package name nicknames uses) */
   UNUSED_ARGS;
   Obj name = str_designator(argv[0]);
-  if (find_package(name) != NIL) lisp_error("Package %s already exists", STR_C(name));
+  if (find_package(name) != NIL) lisp_error("Package error: a package named %s already exists", STR_C(name));
   Obj uses = NIL;
-  for (Obj l = argv[2]; CONSP(l); l = CDR(l)) { Obj p = find_package(CAR(l)); if (p == NIL) lisp_error("No such package to use"); uses = cons(p, uses); }
+  for (Obj l = argv[2]; CONSP(l); l = CDR(l)) { Obj p = find_package(CAR(l)); if (p == NIL) lisp_error("Package error: no package named %s to use", STR_C(print_to_string(CAR(l), 1, 0))); uses = cons(p, uses); }
   Obj nicks = NIL;
-  for (Obj l = argv[1]; CONSP(l); l = CDR(l)) nicks = cons(str_designator(CAR(l)), nicks);
+  for (Obj l = argv[1]; CONSP(l); l = CDR(l)) {
+    Obj nk = str_designator(CAR(l));
+    if (find_package(nk) != NIL) lisp_error("Package error: a package named %s already exists", STR_C(nk));
+    nicks = cons(nk, nicks);
+  }
   return make_package(name, nicks, nreverse_list(uses));
 }
 PRIM(p_package_name) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return SLOT(p, PK_NAME); }
-PRIM(p_list_all_packages) { UNUSED_ARGS; return all_packages; }
+PRIM(p_list_all_packages) { UNUSED_ARGS; return list_copy(all_packages); }
 PRIM(p_use_package) {
   Obj pkg = pkg_arg(argc, argv, 1);
-  Obj l = argv[0];
-  if (!CONSP(l)) l = list1(l);
-  for (; CONSP(l); l = CDR(l)) { Obj u = find_package(CAR(l)); if (u == NIL) lisp_error("No such package"); use_package(pkg, u); }
+  Obj l = sym_list_arg(argv[0]);
+  for (; CONSP(l); l = CDR(l)) { Obj u = find_package(CAR(l)); if (u == NIL) lisp_error("Package error: no package named %s", STR_C(print_to_string(CAR(l), 1, 0))); use_package(pkg, u); }
+  return TT;
+}
+PRIM(p_unuse_package) {
+  Obj pkg = pkg_arg(argc, argv, 1);
+  Obj l = sym_list_arg(argv[0]);
+  for (; CONSP(l); l = CDR(l)) { Obj u = find_package(CAR(l)); if (u == NIL) lisp_error("Package error: no package named %s", STR_C(print_to_string(CAR(l), 1, 0))); unuse_package(pkg, u); }
   return TT;
 }
 PRIM(p_export) {
   Obj pkg = pkg_arg(argc, argv, 1);
-  Obj l = argv[0];
-  if (!CONSP(l)) l = list1(l);
-  for (; CONSP(l); l = CDR(l)) export_symbol(need_sym(CAR(l)), pkg);
+  for (Obj l = sym_list_arg(argv[0]); CONSP(l); l = CDR(l)) export_symbol(need_sym(CAR(l)), pkg);
+  return TT;
+}
+PRIM(p_unexport) {
+  Obj pkg = pkg_arg(argc, argv, 1);
+  for (Obj l = sym_list_arg(argv[0]); CONSP(l); l = CDR(l)) {
+    Obj s = need_sym(CAR(l)); int st;
+    Obj acc = find_symbol_in(SYM_NAME(s), pkg, &st);
+    if (!st || acc != s) lisp_error("Package error: the symbol %s is not accessible in package %s", STR_C(SYM_NAME(s)), STR_C(SLOT(pkg, PK_NAME)));
+    if (st == 3) lisp_error("Package error: cannot unexport %s: it is inherited, not present, in package %s", STR_C(SYM_NAME(s)), STR_C(SLOT(pkg, PK_NAME)));
+    unexport_symbol(s, pkg);
+  }
   return TT;
 }
 PRIM(p_import) {
   Obj pkg = pkg_arg(argc, argv, 1);
-  Obj l = argv[0];
-  if (!CONSP(l)) l = list1(l);
-  for (; CONSP(l); l = CDR(l)) {
-    Obj s = need_sym(CAR(l)); int st; Obj name = SYM_NAME(s);
-    Obj ex = find_symbol_in(name, pkg, &st);
-    if (st == 1 || st == 2) { if (ex != s) lisp_error("Import conflict for %s", STR_C(name)); continue; }
-    /* add into the package's present table */
-    Obj tab = SLOT(pkg, PK_INTERNAL);
-    size_t idx = str_hash(name) % OBJ_NWORDS(tab);
-    SLOT(tab, idx) = cons(s, SLOT(tab, idx)); WB(tab, SLOT(tab, idx));
-    if (SYM_PKG(s) == NIL) { SYM_PKG(s) = pkg; WB(s, pkg); }
-  }
+  for (Obj l = sym_list_arg(argv[0]); CONSP(l); l = CDR(l)) import_symbol(need_sym(CAR(l)), pkg);
   return TT;
 }
+PRIM(p_shadowing_import) {
+  Obj pkg = pkg_arg(argc, argv, 1);
+  for (Obj l = sym_list_arg(argv[0]); CONSP(l); l = CDR(l)) shadowing_import_symbol(need_sym(CAR(l)), pkg);
+  return TT;
+}
+PRIM(p_shadow_name) {
+  /* (%shadow name package) -> the shadowing symbol */
+  Obj pkg = pkg_arg(argc, argv, 1);
+  return shadow_name(need_str(argv[0]), pkg);
+}
+PRIM(p_unintern) {
+  Obj pkg = pkg_arg(argc, argv, 1);
+  return BOOL(unintern_symbol(need_sym(argv[0]), pkg));
+}
+PRIM(p_delete_package) {
+  /* (%delete-package package) -> T, or NIL if already deleted.  The caller handles packages that are still used. */
+  UNUSED_ARGS;
+  Obj p = find_package(argv[0]);
+  if (p == NIL) lisp_error("Package error: no package named %s", STR_C(print_to_string(argv[0], 1, 0)));
+  return BOOL(delete_package(p));
+}
+PRIM(p_rename_package) {
+  /* (%rename-package package new-name nicknames) */
+  UNUSED_ARGS;
+  Obj p = pkg_arg(argc, argv, 0);
+  Obj nicks = NIL;
+  for (Obj l = argv[2]; CONSP(l); l = CDR(l)) nicks = cons(str_designator(CAR(l)), nicks);
+  rename_package(p, str_designator(argv[1]), nreverse_list(nicks));
+  return p;
+}
+PRIM(p_package_nicknames) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return list_copy(SLOT(p, PK_NICK)); }
+PRIM(p_package_used_by) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return list_copy(SLOT(p, PK_USEDBY)); }
+PRIM(p_package_shadows) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return list_copy(SLOT(p, PK_SHADOW)); }
+PRIM(p_package_locked_p) { UNUSED_ARGS; Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]); return BOOL(pkg_locked(p)); }
+PRIM(p_set_package_lock) {
+  /* (%set-package-lock package flag) -> the previous state; unlocking is never itself a violation */
+  UNUSED_ARGS;
+  Obj p = find_package(argv[0]); if (p == NIL) type_error("PACKAGE", argv[0]);
+  Obj old = BOOL(pkg_locked(p));
+  SLOT(p, PK_LOCK) = argv[1] != NIL ? TT : NIL; WB(p, SLOT(p, PK_LOCK));
+  return old;
+}
+
 PRIM(p_package_symbols) {
   /* (%package-symbols pkg external-only-p) */
   UNUSED_ARGS;
@@ -700,6 +755,13 @@ void init_prims_core(void) {
   defprim("FIND-PACKAGE", p_find_package, 1, 1); defprim("%MAKE-PACKAGE", p_make_package, 3, 3);
   defprim("PACKAGE-NAME", p_package_name, 1, 1); defprim("LIST-ALL-PACKAGES", p_list_all_packages, 0, 0);
   defprim("USE-PACKAGE", p_use_package, 1, 2); defprim("EXPORT", p_export, 1, 2); defprim("IMPORT", p_import, 1, 2);
+  defprim("UNUSE-PACKAGE", p_unuse_package, 1, 2); defprim("UNEXPORT", p_unexport, 1, 2);
+  defprim("SHADOWING-IMPORT", p_shadowing_import, 1, 2); defprim("UNINTERN", p_unintern, 1, 2);
+  defprim("%SHADOW", p_shadow_name, 1, 2); defprim("%DELETE-PACKAGE", p_delete_package, 1, 1);
+  defprim("%RENAME-PACKAGE", p_rename_package, 3, 3);
+  defprim("PACKAGE-NICKNAMES", p_package_nicknames, 1, 1); defprim("PACKAGE-USED-BY-LIST", p_package_used_by, 1, 1);
+  defprim("PACKAGE-SHADOWING-SYMBOLS", p_package_shadows, 1, 1);
+  defprim("PACKAGE-LOCKED-P", p_package_locked_p, 1, 1); defprim("%SET-PACKAGE-LOCK", p_set_package_lock, 2, 2);
   defprim("%PACKAGE-SYMBOLS", p_package_symbols, 2, 2); defprim("PACKAGE-USE-LIST", p_package_use_list, 1, 1);
   defprim("%SET-EXPORT-ALL-CL", p_set_export_all, 1, 1);
   defprim_mv("FUNCALL", p_funcall, 1, -1); defprim_mv("APPLY", p_apply, 1, -1);

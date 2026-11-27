@@ -77,6 +77,9 @@
 (define-condition %reader-error (reader-error simple-error) () (:report %message-report))
 (define-condition %end-of-file (end-of-file simple-error) () (:report %message-report))
 (define-condition %file-error (file-error simple-error) () (:report %message-report))
+;; PACKAGE-LOCK-VIOLATION is signalled for an attempt to modify a locked package or to define a symbol it owns
+(define-condition simple-package-error (package-error simple-error) () (:report %message-report))
+(define-condition package-lock-violation (simple-package-error) ())
 
 (defun condition-report-string (c)
   (let ((report nil))
@@ -336,7 +339,9 @@ the restarts with it, as the standard says."
 (defun %msg-has (msg text) (if (%string-search text msg 0) t nil))
 
 (defun %condition-class-for (msg)
-  (cond ((and (%msg-has msg "variable") (%msg-has msg "is unbound")) '%unbound-variable)
+  (cond ((%msg-has msg "Package lock violation:") 'package-lock-violation)
+        ((%msg-has msg "Package error:") 'simple-package-error)
+        ((and (%msg-has msg "variable") (%msg-has msg "is unbound")) '%unbound-variable)
         ((and (%msg-has msg "function") (%msg-has msg "is undefined")) '%undefined-function)
         ((%msg-has msg "Division by zero") '%division-by-zero)
         ((%msg-has msg "is not of type") 'simple-type-error)
