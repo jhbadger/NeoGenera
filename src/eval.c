@@ -377,6 +377,17 @@ Obj apply_stack(int n) {
     return r;
   }
   case T_CLOSURE: return vm_apply_closure(n);
+  case T_STRUCT: {
+    /* A structure is callable if Lisp says so (funcallable CLOS instances, Flavors instances): the function
+       %FUNCALL-INSTANCE is called with the instance and the arguments.  It signals the usual error otherwise. */
+    Obj hook = SYM_FUNC(Q_funcall_instance);
+    if (hook == NIL || CONSP(hook)) type_error("FUNCTION", fn);
+    int base = vsp - n - 1;
+    PUSH(NIL);
+    for (int i = vsp - 1; i > base; i--) vstack[i] = vstack[i - 1];
+    vstack[base] = hook;
+    return apply_stack(n + 1);
+  }
   default: type_error("FUNCTION", fn);
   }
 }

@@ -352,7 +352,7 @@
     (is-equal :overridden (send e :h)))
   (is-equal '(:inv-in :around-in :zip :around-out :inv-out) (trace-of (lambda () (is-equal 7 (send (make-instance 'inv) :zip)))))
   (is-equal '(:wrapped :tag (1 2)) (send (make-instance 'wrapq) :tag 1 2))
-  (signals-error (eval '(defflavor bad-style () () (:method-combination (:pass-on :base-flavor-last :x))))))
+  (signals-error (eval '(defflavor bad-style () () (:method-combination (:bogus-style :base-flavor-last :x))))))
 
 ;;; method named by a function, Lisp Machine utilities, property-list-mixin
 (defun wide-handler (op x) (list op x self))

@@ -69,8 +69,10 @@ must supply, and `:default-handler` names the function for unhandled messages. `
 is mixed into; they are checked when an instance is made. `:included-flavors` names flavors that should be components
 of anything that uses this flavor, without a flavor having to list them. `:no-vanilla-flavor` leaves out
 [vanilla-flavor](fn:vanilla-flavor). `:method-combination` is described below. `:abstract-flavor` makes instantiating the flavor an error.
-`:special-instance-variables`, `:ordered-instance-variables` and `:outside-accessible-instance-variables` are accepted
-and do nothing. Redefining a flavor keeps its methods, updates its instances, and changes the flavors built on it.
+`:ordered-instance-variables` and `:outside-accessible-instance-variables` are accepted and do nothing. Redefining a flavor
+keeps its methods, updates its instances, and changes the flavors built on it. The options below are described in
+their own sections: `:special-instance-variables`, `:alias-flavor`, `:run-time-alternatives` and
+`:instantiation-flavor-function`.
 
 ## Mixing flavors
 
@@ -133,11 +135,45 @@ variable by name, `*all-flavor-names*` lists the flavors, and [funcall-self](fn:
 `:putprop`, `:remprop`, `:push-property`, `:property-list` and `:set-property-list`, and the init keyword
 `:property-list`.
 
+## Instances as functions
+
+An instance of a flavor can be called: `(funcall instance :message arg ...)` is `(send instance :message arg ...)`, and
+`functionp` is true of it, so an instance can be passed where a function is wanted (to `mapcar`, say, as a handler that
+dispatches on its first argument). Calling an instance with no message is an error. Instances of classes whose
+metaclass is `funcallable-standard-class` are callable too, running the function set by
+[set-funcallable-instance-function](fn:set-funcallable-instance-function).
+
+## Two more combinations
+
+`:pass-on` passes the values of each method as the arguments of the next, most specific flavor first (`:base-flavor-first`
+reverses that), and returns the values of the last. It is declared as `(:method-combination (:pass-on (:base-flavor-last
+arg ...) :message))`; the argument names are accepted for compatibility and not used. `:inverse-list` is for a message
+whose one argument is a list: method N receives element N, and the values come back as a list.
+
+## Alias flavors, run-time alternatives and instantiation
+
+`(defflavor new-name () () (:alias-flavor flavor))` makes `new-name` another name for `flavor`: instances made through
+either name are of `flavor`, `typep` and `defmethod` accept either, and `undefflavor` of the alias removes only the alias.
+
+`(:run-time-alternatives (key (value flavor ...) ...) ...)` lets an init keyword choose components when an instance is
+made. `(make-instance 'f :key value)` makes an instance of a flavor named `F/KEY=VALUE`, defined the first time it is
+needed, whose components are the flavors listed for that value, then `f`. The first value listed is the default, and any
+other value is an error. `(:instantiation-flavor-function function)` names a function that is called with the flavor name
+and the init plist whenever the flavor is instantiated; if it returns another flavor's name, that flavor is instantiated
+instead (with the same plist; the keywords must be ones it accepts), and `nil` means the flavor itself.
+
+## Instance variables as special variables
+
+`(:special-instance-variables)` (all the flavor's own variables) or `(:special-instance-variables a b)` declares variables
+special, and each method of the flavor binds them for its duration to the values in the instance, so a function the
+method calls can use them as ordinary variables. [with-self-variables-bound](fn:with-self-variables-bound) does the same
+for all the variables of `self` around a body of code. The values are **copied** in and copied back when the method or
+body exits, and only if they changed: they are not aliases of the slots, so a nested send to the same instance sees the
+slot values as of the outer method's entry. Declaring a name special makes it special everywhere, so use distinctive names.
+
 ## What is not supported
 
-Instances are not funcallable. The `:inverse-list` and `:pass-on` combinations, `:alias-flavor`,
-`:run-time-alternatives`, `:instantiation-flavor-function`, `with-self-variables-bound`, `(declare (:self-flavor ..))`,
-`si:print-readably-mixin` and the `:break` message are not implemented, and
+`(declare (:self-flavor ..))`, `si:print-readably-mixin` and the `:break` message are not implemented, and
 [compile-flavor-methods](fn:compile-flavor-methods) and [recompile-flavor](fn:recompile-flavor) are accepted but do
 nothing, since methods are combined when first used. Instance variables are visible in methods and under
 `declare-flavor-instance-variables`, but not as special variables in arbitrary functions, and `:funcall-inside-yourself`

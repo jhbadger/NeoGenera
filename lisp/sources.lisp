@@ -11,6 +11,7 @@
     "lisp/core/40-format.lisp"
     "lisp/core/50-loop.lisp"
     "lisp/core/52-clos.lisp"
+    "lisp/core/53-mop.lisp"
     "lisp/core/54-conditions.lisp"
     "lisp/core/55-flavors.lisp"
     "lisp/core/56-streams.lisp"

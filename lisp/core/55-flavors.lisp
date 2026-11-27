@@ -15,9 +15,14 @@
 ;;;;    :METHOD-COMBINATION defflavor option.
 ;;;;  * Instance variables are variables inside a method body (symbol macros over SLOT-VALUE) and SELF is the instance.
 ;;;;
-;;;; What is not here: instances are not funcallable (use SEND), :CASE and :OVERRIDE methods, :INVERSE-LIST and
-;;;; :PASS-ON combinations, :ALIAS-FLAVOR, and instance variables seen from ordinary functions (only SELF is: it is
-;;;; also a special variable, bound by SEND).
+;;;; Also here: instances are funcallable ((funcall instance :message args...) is SEND; FUNCTIONP is true), the
+;;;; :PASS-ON and :INVERSE-LIST combinations, :ALIAS-FLAVOR, :RUN-TIME-ALTERNATIVES, :INSTANTIATION-FLAVOR-FUNCTION,
+;;;; :SPECIAL-INSTANCE-VARIABLES and WITH-SELF-VARIABLES-BOUND.  These were written from memory of the Lisp Machine
+;;;; manual (the manual could not be consulted): the exact syntax of :RUN-TIME-ALTERNATIVES and the return value of
+;;;; :INVERSE-LIST in particular are this system's reading of it (see docs/manual/flavors-manual.md).
+;;;;
+;;;; What is not here: instance variables are visible to ordinary functions only through :SPECIAL-INSTANCE-VARIABLES or
+;;;; WITH-SELF-VARIABLES-BOUND, which copy the values in and out (they are not aliases of the slots).
 
 (in-package :cl)
 
@@ -33,7 +38,8 @@ elsewhere it is the special variable that SEND binds, so a function called from 
   name (ivars nil) (components nil) (included nil) (required-flavors nil) (required-ivars nil) (required-methods nil)
   (required-keywords nil) (gettable nil) (settable nil) (inittable nil) (init-keywords nil) (default-init-plist nil)
   (default-handler nil) (abstract nil) (documentation nil) (combinations nil) (no-vanilla nil)
-  (methods nil) (cache nil) (epoch -1) (checked -1))
+  (methods nil) (cache nil) (epoch -1) (checked -1)
+  (special nil) (alternatives nil) (instantiation-function nil))
 
 (define-condition unclaimed-message (cell-error)
   ((instance :initarg :instance :initform nil :reader unclaimed-message-object)
@@ -77,6 +83,7 @@ occurrence (so a cycle ends)."
 (defun %flavor-lin (name)
   "The flavors NAME is made of, most specific first: components depth first (first occurrence kept), each included
 flavor right after the last flavor that includes it, VANILLA-FLAVOR last."
+  (setq name (%flv-name (%find-flavor name)))            ; an alias flavor stands for its target
   (let ((lin (%flavor-walk name)))
     (loop
       (let ((m (%missing-included lin)))
@@ -118,7 +125,8 @@ flavor right after the last flavor that includes it, VANILLA-FLAVOR last."
 Options: :gettable-instance-variables :settable-instance-variables :inittable-instance-variables (each alone for all
 of the flavor's variables, or with a list of names), :init-keywords, :default-init-plist, :required-instance-variables,
 :required-methods, :required-flavors, :required-init-keywords, :included-flavors, :default-handler, :method-combination,
-:no-vanilla-flavor, :documentation."
+:no-vanilla-flavor, :abstract-flavor, :special-instance-variables, :run-time-alternatives,
+:instantiation-flavor-function, :alias-flavor (the flavor is another name for a flavor), :documentation."
   (let ((specs (mapcar (lambda (v)
                          (if (consp v)
                              (list 'cons (list 'quote (car v)) (if (cdr v) (list 'lambda nil (cadr v)) nil))
@@ -135,7 +143,7 @@ of the flavor's variables, or with a list of names), :init-keywords, :default-in
     (list '%defflavor (list 'quote name) (cons 'list specs) (list 'quote components) (cons 'list opts))))
 
 (defparameter *flavor-combination-types*
-  '(:daemon :daemon-with-or :daemon-with-and :daemon-with-override :progn :or :and :append :nconc :list :max :min :+ :case)
+  '(:daemon :daemon-with-or :daemon-with-and :daemon-with-override :progn :or :and :append :nconc :list :inverse-list :pass-on :max :min :+ :case)
   "The method combination types a :METHOD-COMBINATION option of DEFFLAVOR accepts.")
 
 (defun %opt-names (args own current)
@@ -144,7 +152,21 @@ of the flavor's variables, or with a list of names), :init-keywords, :default-in
       (dolist (n names) (unless (memq n acc) (setq acc (append acc (list n)))))
       acc)))
 
+(defvar *flavor-aliases* nil "Alist (alias . flavor) of the flavors defined with :ALIAS-FLAVOR.")
+
+(defun %define-alias-flavor (name target)
+  (let ((rec (%find-flavor target)))
+    (when (and (get name '%flavor-def) (not (assq name *flavor-aliases*)))
+      (error "DEFFLAVOR ~S: cannot be an alias of ~S, there is already a flavor of that name" name target))
+    (setf (get name '%flavor-def) rec)
+    (%put name '%class (find-class (%flv-name rec)))
+    (setq *flavor-aliases* (cons (cons name (%flv-name rec)) (remove name *flavor-aliases* :key #'car)))
+    (%flavor-changed)
+    name))
+
 (defun %defflavor (name specs components options)
+  (let ((alias (find :alias-flavor options :key (lambda (o) (and (consp o) (car o))))))
+    (when alias (return-from %defflavor (%define-alias-flavor name (cadr alias)))))
   (dolist (c components) (%find-flavor c))
   (let* ((old (%find-flavor name nil))
          (f (or old (%make-flavor :name name :cache (make-hash-table :test 'eq))))
@@ -152,7 +174,8 @@ of the flavor's variables, or with a list of names), :init-keywords, :default-in
     (setf (%flv-ivars f) specs (%flv-components f) components (%flv-included f) nil (%flv-required-flavors f) nil
           (%flv-required-ivars f) nil (%flv-required-methods f) nil (%flv-required-keywords f) nil (%flv-gettable f) nil
           (%flv-settable f) nil (%flv-inittable f) nil (%flv-init-keywords f) nil (%flv-default-init-plist f) nil
-          (%flv-default-handler f) nil (%flv-documentation f) nil (%flv-combinations f) nil (%flv-no-vanilla f) nil (%flv-abstract f) nil)
+          (%flv-default-handler f) nil (%flv-documentation f) nil (%flv-combinations f) nil (%flv-no-vanilla f) nil (%flv-abstract f) nil
+          (%flv-special f) nil (%flv-alternatives f) nil (%flv-instantiation-function f) nil)
     (dolist (o options)
       (let ((key (if (consp o) (car o) o)) (args (if (consp o) (cdr o) nil)))
         (case key
@@ -171,7 +194,11 @@ of the flavor's variables, or with a list of names), :init-keywords, :default-in
           (:method-combination
            (dolist (spec args)
              (let* ((type (car spec)) (rest (cdr spec))
-                    (order (if (member (car rest) '(:base-flavor-first :base-flavor-last)) (car rest) nil))
+                    ;; the ordering is a keyword, or the first element of a list that also gives the arguments of the
+                    ;; combined method, as in (:pass-on (:base-flavor-last arg1 arg2) :message)
+                    (order (cond ((member (car rest) '(:base-flavor-first :base-flavor-last)) (car rest))
+                                 ((and (consp (car rest)) (member (caar rest) '(:base-flavor-first :base-flavor-last))) (caar rest))
+                                 (t nil)))
                     (msgs (if order (cdr rest) rest)))
                (unless (member type *flavor-combination-types*)
                  (error "DEFFLAVOR ~S: ~S is not a method combination type" name type))
@@ -179,8 +206,12 @@ of the flavor's variables, or with a list of names), :init-keywords, :default-in
           (:no-vanilla-flavor (setf (%flv-no-vanilla f) t))
           (:documentation (setf (%flv-documentation f) (car args)))
           (:abstract-flavor (setf (%flv-abstract f) t))
-          ((:special-instance-variables :ordered-instance-variables
-            :outside-accessible-instance-variables) nil)
+          (:special-instance-variables
+           ;; alone: all of the flavor's own variables; otherwise the named ones
+           (setf (%flv-special f) (if args (append (if (listp (%flv-special f)) (%flv-special f) nil) args) :all)))
+          (:run-time-alternatives (setf (%flv-alternatives f) (append (%flv-alternatives f) args)))
+          (:instantiation-flavor-function (setf (%flv-instantiation-function f) (car args)))
+          ((:ordered-instance-variables :outside-accessible-instance-variables) nil)
           (t (error "DEFFLAVOR ~S: unknown option ~S" name key)))))
     ;; settable variables are gettable and inittable too
     (dolist (v (%flv-settable f))
@@ -188,6 +219,8 @@ of the flavor's variables, or with a list of names), :init-keywords, :default-in
       (unless (memq v (%flv-inittable f)) (setf (%flv-inittable f) (append (%flv-inittable f) (list v)))))
     (when (and (eq name 'vanilla-flavor) (not (%flv-no-vanilla f))) (setf (%flv-no-vanilla f) t))
     (setf (get name '%flavor-def) f)
+    (setq *flavor-aliases* (remove name *flavor-aliases* :key #'car))
+    (dolist (v (%flavor-own-special-ivars f)) (%proclaim-special v))
     (unless (memq name *flavors*) (setq *flavors* (cons name *flavors*)))
     (setq *all-flavor-names* *flavors*)
     (%flavor-lin name)                     ; signals an error now if a component or included flavor is missing
@@ -230,15 +263,6 @@ of the flavor's variables, or with a list of names), :init-keywords, :default-in
 
 (defun %same-method-p (e msg type) (and (eq (car e) msg) (equal (cadr e) type)))
 
-(defparameter *flavor-method-types* '(:before :after :around :inverse-around :whopper :default :override)
-  "The method types every method combination style accepts or that DAEMON combination adds.")
-
-(defun %valid-method-type-p (type)
-  (or (null type) (member type *flavor-method-types*) (member type *flavor-combination-types*)
-      (and (consp type) (eq (car type) :case))))
-
-(defun %same-method-p (e msg type) (and (eq (car e) msg) (equal (cadr e) type)))
-
 (defun %install-method (fname msg type fn auto)
   "Install FN (a function of the instance and the message's arguments) as FNAME's method for MSG of TYPE.  A method made
 by a DEFFLAVOR option (AUTO) never replaces one the user wrote."
@@ -265,11 +289,56 @@ by a DEFFLAVOR option (AUTO) never replaces one the user wrote."
           ((eq (cadr spec) :case) (values (car spec) (list :case (cadddr spec)) (caddr spec)))
           (t (error "Bad flavor method name ~S: only :CASE methods take a suboperation" spec)))))
 
+(defun %flavor-own-special-ivars (f)
+  "The instance variables flavor record F declares special (:SPECIAL-INSTANCE-VARIABLES)."
+  (let ((sp (%flv-special f)))
+    (cond ((eq sp :all) (mapcar #'car (%flv-ivars f)))
+          ((listp sp) sp)
+          (t nil))))
+
+(defun %flavor-special-ivars (fname)
+  "The special instance variables of flavor FNAME and its components."
+  (let ((acc nil))
+    (dolist (n (%flavor-lin fname))
+      (dolist (v (%flavor-own-special-ivars (%find-flavor n))) (unless (memq v acc) (setq acc (cons v acc)))))
+    (nreverse acc)))
+
+(defun %call-with-ivars-bound (instance names thunk)
+  "Call THUNK with the instance variables NAMES of INSTANCE bound as special variables to their values, and copy
+the values that changed back into the instance when THUNK returns or exits (the variables are copies, not aliases of
+the slots)."
+  (let ((bound nil) (vals nil))
+    (dolist (n names)
+      (when (slot-boundp instance n) (setq bound (cons n bound)) (setq vals (cons (slot-value instance n) vals))))
+    (let ((originals vals))
+      (progv bound vals
+        (unwind-protect (funcall thunk)
+          ;; only a variable that was changed is copied back, so a slot set in the meantime is not overwritten
+          (let ((o originals))
+            (dolist (n bound)
+              (unless (eq (symbol-value n) (car o)) (setf (slot-value instance n) (symbol-value n)))
+              (setq o (cdr o)))))))))
+
+(defmacro with-self-variables-bound (&body body)
+  "Run BODY with the instance variables of SELF bound as special variables, so that ordinary functions BODY calls can
+refer to them.  The values are copied in, and back into the instance when BODY exits."
+  `(%call-with-ivars-bound self (%flavor-all-ivars (%flv-name (%need-flavor-instance self 'with-self-variables-bound)))
+                           (lambda () ,@body)))
+
 (defun %ivar-bindings (fname object-form ll)
-  "Symbol-macro bindings for SELF and the instance variables of FNAME that the lambda list LL does not rebind."
-  (cons (list 'self object-form)
-        (mapcar (lambda (v) (list v (list 'slot-value object-form (list 'quote v))))
-                (remove-if (lambda (v) (%tree-contains ll v)) (%flavor-all-ivars fname)))))
+  "Symbol-macro bindings for SELF and the instance variables of FNAME that the lambda list LL does not rebind (and that
+are not special: those are variables bound for the method, see %WRAP-SPECIAL-IVARS)."
+  (let ((specials (%flavor-special-ivars fname)))
+    (cons (list 'self object-form)
+          (mapcar (lambda (v) (list v (list 'slot-value object-form (list 'quote v))))
+                  (remove-if (lambda (v) (or (%tree-contains ll v) (memq v specials))) (%flavor-all-ivars fname))))))
+
+(defun %wrap-special-ivars (fname object-form ll form)
+  "FORM, run with the special instance variables of FNAME that LL does not rebind bound (a no-op without any)."
+  (let ((names (remove-if (lambda (v) (%tree-contains ll v)) (%flavor-special-ivars fname))))
+    (if names
+        (list '%call-with-ivars-bound object-form (list 'quote names) (list 'lambda nil form))
+        form)))
 
 (defun %flavor-defmethod (spec rest)
   "Expand (DEFMETHOD (flavor [type] message) lambda-list . body), or (DEFMETHOD (flavor message) function-name)."
@@ -281,7 +350,8 @@ by a DEFFLAVOR option (AUTO) never replaces one the user wrote."
         (let ((ll (car rest)) (body (cdr rest)) (s (gensym "SELF")))
           (list '%install-method-checked (list 'quote fname) (list 'quote type) (list 'quote msg)
                 (list 'lambda (cons s ll)
-                      (list* 'symbol-macrolet (%ivar-bindings fname s ll) body)))))))
+                      (%wrap-special-ivars fname s ll
+                                           (list* 'symbol-macrolet (%ivar-bindings fname s ll) body))))))))
 
 (defun %spec-parts (spec what)
   "The flavor and message of SPEC, written (flavor message) or (message flavor)."
@@ -298,11 +368,13 @@ LEXPR-CONTINUE-WHOPPER, whose last argument is a list of arguments).  Whoppers a
     (let ((s (gensym "SELF")) (cont (gensym "CONT")))
       (list '%install-method-checked (list 'quote fname) :whopper (list 'quote msg)
             (list 'lambda (list* s cont lambda-list)
-                  (list 'symbol-macrolet (%ivar-bindings fname s lambda-list)
-                        (list 'flet (list (list 'continue-whopper '(&rest %a) (list 'apply cont '%a))
-                                          (list 'lexpr-continue-whopper '(&rest %a)
-                                                (list 'apply cont '(apply (function list*) %a))))
-                              (cons 'progn body))))))))
+                  (%wrap-special-ivars
+                   fname s lambda-list
+                   (list 'symbol-macrolet (%ivar-bindings fname s lambda-list)
+                         (list 'flet (list (list 'continue-whopper '(&rest %a) (list 'apply cont '%a))
+                                           (list 'lexpr-continue-whopper '(&rest %a)
+                                                 (list 'apply cont '(apply (function list*) %a))))
+                               (cons 'progn body)))))))))
 
 (defun %lambda-list-names (ll)
   (let ((acc nil) (rest nil) (mode nil))
@@ -342,8 +414,14 @@ of the forms that run the rest of the message.  The arguments are variables insi
     (if old t nil)))
 
 (defun undefflavor (flavor)
-  "Remove the flavor FLAVOR, its methods and its class."
+  "Remove the flavor FLAVOR, its methods and its class (for an alias flavor: just the alias)."
   (%find-flavor flavor)
+  (when (assq flavor *flavor-aliases*)
+    (setq *flavor-aliases* (remove flavor *flavor-aliases* :key #'car))
+    (remprop flavor '%flavor-def)
+    (remprop flavor '%class)
+    (%flavor-changed)
+    (return-from undefflavor flavor))
   (remprop flavor '%flavor-def)
   (remprop flavor '%class)
   (setq *flavors* (remove flavor *flavors*))
@@ -403,6 +481,15 @@ that are not methods but are called with SELF bound."
             (let ((v nil))
               (dolist (m ms) (setq v (multiple-value-list (apply m obj args))) (unless (car v) (return)))
               (values-list v))))
+    (:pass-on (lambda (obj args)
+                ;; each method's values are the arguments of the next; the last method's values are returned
+                (let ((vals args))
+                  (dolist (m ms) (setq vals (multiple-value-list (apply m obj vals))))
+                  (values-list vals))))
+    (:inverse-list (lambda (obj args)
+                     ;; the one argument is a list: method N gets element N; the values come back as a list
+                     (let ((l (car args)))
+                       (mapcar (lambda (m) (prog1 (funcall m obj (car l)) (setq l (cdr l)))) ms))))
     (:append (lambda (obj args) (apply #'append (mapcar (lambda (m) (apply m obj args)) ms))))
     (:nconc (lambda (obj args) (apply #'nconc (mapcar (lambda (m) (apply m obj args)) ms))))
     (:list (lambda (obj args) (mapcar (lambda (m) (apply m obj args)) ms)))
@@ -435,7 +522,7 @@ that are not methods but are called with SELF bound."
                   ((and (eq type :or) (member style '(:daemon-with-or :case))) (setq ors (cons fn ors)))
                   ((and (eq type :and) (eq style :daemon-with-and)) (setq ands (cons fn ands)))
                   ((and (eq type :override) (eq style :daemon-with-override)) (setq overrides (cons fn overrides)))
-                  ((and (eq type style) (member style '(:progn :or :and :append :nconc :list :max :min :+)))
+                  ((and (eq type style) (member style '(:progn :or :and :append :nconc :list :inverse-list :pass-on :max :min :+)))
                    (setq typed (cons fn typed)))
                   (t (error "The ~S method type does not fit the ~S method combination of message ~S of flavor ~S~@[ (declare one with :METHOD-COMBINATION)~]"
                             type style msg (%flv-name f) (eq style :daemon))))))))
@@ -525,8 +612,22 @@ that are not methods but are called with SELF bound."
         (apply (if (symbolp dh) (symbol-function dh) dh) message args)
         (error 'unclaimed-message :name message :instance object :arguments args))))
 
+(defun %funcallable-instance-p (x)
+  "True for an instance that can be called as a function: a flavor instance, or an instance of a funcallable class."
+  (if (or (%funcallable-clos-p x) (%instance-flavor x)) t nil))
+
+(defun %funcall-instance (instance &rest args)
+  "What the kernel calls when INSTANCE is called as a function."
+  (cond ((%funcallable-clos-p instance) (apply (%struct-ref instance 3) args))
+        ((%instance-flavor instance)
+         (if args
+             (%send instance (car args) (cdr args))
+             (error "~S is a flavor instance: call it with a message, as (funcall instance :message ...)" instance)))
+        (t (error 'simple-type-error :datum instance :expected-type 'function
+                  :format-control "The value ~S is not of type FUNCTION" :format-arguments (list instance)))))
+
 (defun %send (object message args)
-  (if (functionp object)
+  (if (and (functionp object) (not (%instance-flavor object)))
       (apply object message args)
       (let* ((f (%need-flavor-instance object message))
              (h (%flavor-handler f message))
@@ -577,6 +678,7 @@ and :DEFAULT-INIT-PLISTs, and :ALLOW-OTHER-KEYS."
         (dolist (v (%flv-inittable f)) (unless (memq (%keyword-of v) acc) (setq acc (cons (%keyword-of v) acc))))
         (dolist (k (%flv-init-keywords f)) (unless (memq k acc) (setq acc (cons k acc))))
         (dolist (k (%flv-required-keywords f)) (unless (memq k acc) (setq acc (cons k acc))))
+        (dolist (c (%flv-alternatives f)) (unless (memq (car c) acc) (setq acc (cons (car c) acc))))
         (dolist (d (%flv-default-init-plist f)) (unless (memq (car d) acc) (setq acc (cons (car d) acc))))))
     (nreverse acc)))
 
@@ -608,6 +710,58 @@ and :DEFAULT-INIT-PLISTs, and :ALLOW-OTHER-KEYS."
       (dolist (k (%flv-required-keywords (%find-flavor n)))
         (when (%unsupplied-p (%getf-key plist k))
           (error "Flavor ~S requires the init keyword ~S" (%flv-name f) k))))))
+
+;;; ---- choosing the flavor to instantiate ---------------------------------------------------------------------
+;;; :INSTANTIATION-FLAVOR-FUNCTION and :RUN-TIME-ALTERNATIVES.  (:run-time-alternatives (key (value flavor...) ...) ...)
+;;; says that the init keyword KEY chooses among the listed values (the first is the default); the instance is made of
+;;; the chosen flavors mixed in front of the flavor, as a flavor named NAME/KEY=VALUE that is defined on first use.
+
+(defun %alternatives-flavor (name plist)
+  (let ((clauses nil))
+    (dolist (n (%flavor-lin name)) (setq clauses (append clauses (%flv-alternatives (%find-flavor n)))))
+    (if (null clauses)
+        name
+        (let ((mixins nil) (tag nil))
+          (dolist (c clauses)
+            (let* ((key (car c)) (given (%getf-key plist key))
+                   (value (if (%unsupplied-p given) (car (cadr c)) given))
+                   (alt (assoc value (cdr c))))
+              (unless alt
+                (error "~S is not one of the alternatives for ~S of flavor ~S: ~S" value key name (mapcar #'car (cdr c))))
+              (setq mixins (append mixins (cdr alt)))
+              (setq tag (cons (format nil "~A=~A" key value) tag))))
+          (if (null mixins)
+              name
+              (let ((derived (intern (format nil "~A/~{~A~^,~}" (symbol-name name) (reverse tag))
+                                     (or (symbol-package name) *package*)))
+                    (components (append mixins (list name))))
+                (unless (and (get derived '%flavor-def) (equal (%flv-components (get derived '%flavor-def)) components))
+                  (%defflavor derived nil components nil)
+                  (setf (get derived '%flavor-derived) t))
+                derived))))))
+
+(defun %instantiation-flavor (f plist)
+  "The flavor to make an instance of when flavor record F is instantiated with the init plist PLIST."
+  (let ((name (%flv-name f)))
+    (if (get name '%flavor-derived)
+        name
+        (let ((target name))
+          (dolist (n (%flavor-lin name))
+            (let ((fn (%flv-instantiation-function (%find-flavor n))))
+              (when fn
+                (let ((r (funcall fn name plist)))
+                  (when (and r (symbolp r) (not (eq r name))) (setq target r)))
+                (return))))
+          (if (eq target name) (%alternatives-flavor name plist) target)))))
+
+(defmethod make-instance :around ((c class) &rest initargs)
+  (let ((f (and (symbolp (%cls-name c)) (get (%cls-name c) '%flavor-def))))
+    (if f
+        (let ((target (%instantiation-flavor f initargs)))
+          (if (eq target (%flv-name f))
+              (call-next-method)
+              (apply #'make-instance target initargs)))
+        (call-next-method))))
 
 ;;; ---- VANILLA-FLAVOR -------------------------------------------------------------------------------------------
 
@@ -651,9 +805,6 @@ and :DEFAULT-INIT-PLISTs, and :ALLOW-OTHER-KEYS."
       (format t "   ~A: ~A~%" (symbol-name (slotd-name sd))
               (if (slot-boundp self (slotd-name sd)) (prin1-to-string (slot-value self (slotd-name sd))) "void")))
     self))
-
-(defmethod (vanilla-flavor :set) (keyword value)
-  (send self (intern (%string-concat "SET-" (symbol-name keyword)) "KEYWORD") value))
 
 (defmethod (vanilla-flavor :set) (keyword value)
   (send self (intern (%string-concat "SET-" (symbol-name keyword)) "KEYWORD") value))

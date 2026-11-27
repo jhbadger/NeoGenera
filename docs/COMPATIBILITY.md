@@ -49,18 +49,39 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
   (`update-instance-for-redefined-class`, `make-instances-obsolete`), `change-class` with `update-instance-for-different-class`,
   and metaclasses (`(:metaclass m)` for subclasses of `standard-class`; their slots live in a hidden instance), with
   `standard-class`, `built-in-class` and `structure-class` usable as types for class objects.
-* The meta-object protocol is a subset: `class-of`, `find-class`, `ensure-class`, `class-precedence-list`, the class and slot-definition readers,
-  `compute-applicable-methods`, `find-method` and `remove-method`, and `allocate-instance`/`make-instance`/`slot-missing`/`slot-unbound` as generic
-  functions. Method combinations are not objects, and there is no `compute-effective-method` hook or `validate-superclass`.
+* The meta-object protocol covers the protocols programs usually extend, with these limits. Method combinations are objects
+  (`find-method-combination`, `generic-function-method-combination`, `method-combination-name`/`-options`), and
+  `compute-effective-method` is a generic function that returns the effective method as a form using `call-method` and
+  `make-method`; adding a method to it (specialize on `(eql #'a-generic-function)`) changes how that function's methods are
+  combined. `validate-superclass` is called by `defclass`, `compute-class-precedence-list`, `compute-slots` and
+  `compute-effective-slot-definition` are called for classes with their own metaclass, and `slot-value-using-class`,
+  `(setf slot-value-using-class)`, `slot-boundp-using-class` and `slot-makunbound-using-class` are called by the slot
+  functions once a program has defined a method on one of them (until then the slot functions take the direct path).
+  Also provided: `funcallable-standard-class` and `funcallable-standard-object` (with `set-funcallable-instance-function`),
+  `standard-generic-function`, `standard-method` and the slot-definition classes, `add-method`, `compute-applicable-methods-using-classes`,
+  `generic-function-name`/`-lambda-list`/`-argument-precedence-order`/`-method-class`, `method-generic-function`, `method-function`,
+  `method-lambda-list`, `specializer-direct-methods`, `specializer-direct-generic-functions`, EQL specializers as `(:eql . object)`
+  (`intern-eql-specializer`), `slot-definition-location`, `standard-instance-access`, `add-direct-subclass`/`remove-direct-subclass`
+  and the dependents protocol (`add-dependent`, `update-dependent`, ... called when a method is added or removed).
+  Not provided: generic functions are not instances, so a program cannot subclass `standard-generic-function`, use
+  `:generic-function-class`, or customize `compute-discriminating-function` (it only returns the function);
+  `ensure-class-using-class`, `make-method-lambda`, `reader-method-class`/`writer-method-class`, the slot-definition initargs
+  protocol, `finalize-inheritance` as a generic function, and a metaclass inherited by subclasses (each class names its own).
+  A method added to `compute-effective-method` applies to every generic function unless it specializes on one, and
+  discards every cached effective method.
 
 **Flavors** (the Symbolics/Lisp Machine object system, a layer over CLOS; see `docs/manual/flavors-manual.md`)
 * Supported, following the Lisp Machine Manual's Flavors chapter: `defflavor` with the common options (including `:abstract-flavor`),
   `(defmethod (flavor [type] message) ...)` including `:case`, `send` and friends, daemons, `:around` and `:inverse-around` with
   the manual's calling convention, `defwrapper`, `defwhopper` (a Symbolics addition), the `:daemon-with-or/and/override`, `:progn :or :and
   :append :nconc :list :max :min :+ :case` combinations, `:init`, `vanilla-flavor` and `property-list-mixin`.
-* Not supported: funcallable instances (use `send`), `:inverse-list` and `:pass-on` combinations, `:alias-flavor`,
-  `:run-time-alternatives`, `:instantiation-flavor-function`, `with-self-variables-bound`, and instance variables as special
-  variables outside methods. `describe` and `:print-self` follow the manual's format except that instances print without an address.
+* Also supported: instances are funcallable (`(funcall instance :message ...)` sends the message; `functionp` is true), the
+  `:pass-on` and `:inverse-list` combinations, `:alias-flavor`, `:run-time-alternatives`, `:instantiation-flavor-function`,
+  `:special-instance-variables` and `with-self-variables-bound`. **These were written from memory of the Lisp Machine
+  manual, which could not be consulted**: the `:run-time-alternatives` syntax and the list `:inverse-list` returns are this
+  system's reading of it, and special instance variables are copied in and out of the instance, not aliases of its slots.
+  Not supported: `(declare (:self-flavor ...))`, `si:print-readably-mixin` and the `:break` message. `describe` and `:print-self`
+  follow the manual's format except that instances print without an address.
 
 **Conditions and the debugger**
 * The interactive debugger with restarts runs in both the line-mode and the window Listener. `break` enters it with a CONTINUE restart, and it honours `*debugger-hook*`.

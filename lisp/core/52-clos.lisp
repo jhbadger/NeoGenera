@@ -25,14 +25,23 @@
 
 (defstruct (slot-definition (:conc-name slotd-) (:constructor %make-slotd) (:copier nil))
   name (initargs nil) (initfn nil) (readers nil) (writers nil) (allocation :instance) (cell nil) (type t)
-  (documentation nil))
+  (documentation nil) (location nil))
 
 (defstruct (%gf (:conc-name gf-) (:constructor %make-gf) (:copier nil))
   name (methods nil) cache (dispatch-n 0) (nreq 0) (has-eql nil) (lambda-list nil) fn (combination nil)
   (documentation nil))
 
 (defstruct (%method (:conc-name method-) (:constructor %make-method) (:copier nil))
-  gf qualifiers specializers fn)
+  gf qualifiers specializers fn (lambda-list nil) (documentation nil))
+
+(defvar *gf-by-function* (make-hash-table :test 'eq)
+  "Maps the function of each generic function to its %GF record, so that CLASS-OF a generic function is
+STANDARD-GENERIC-FUNCTION.")
+(defvar *slot-hook-generics* '(slot-value-using-class (setf slot-value-using-class) slot-boundp-using-class slot-makunbound-using-class)
+  "The generic functions whose methods turn the slot hooks on.")
+(defvar *slot-hooks* nil "True once a method has been added to one of the SLOT-...-USING-CLASS generic functions.")
+(defvar *cem-generic* nil "The generic function COMPUTE-EFFECTIVE-METHOD (set by 53-mop.lisp).")
+(defvar *mop-loaded* nil "True once lisp/core/53-mop.lisp has been loaded.")
 
 (defun %structp (x) (structp x))
 
@@ -109,15 +118,20 @@
     (mapcar (lambda (n) (cdr (assq n table))) (nreverse order))))
 
 (defun %finalize-class (class)
-  (let* ((cpl (if (get (%cls-name class) '%flavor-def)
-                  (%flavor-class-cpl class)                 ; a flavor: Flavors component order (55-flavors.lisp)
-                  (%c3 class (%cls-supers class))))
-         (slots (%compute-slots cpl))
+  (let* ((hooked (and *mop-loaded* (%cls-meta class)))      ; a class with its own metaclass: ask the MOP generics
+         (cpl (cond ((get (%cls-name class) '%flavor-def)
+                     (%flavor-class-cpl class))             ; a flavor: Flavors component order (55-flavors.lisp)
+                    (hooked (compute-class-precedence-list class))
+                    (t (%c3 class (%cls-supers class)))))
+         (slots (if hooked
+                    (progn (setf (%cls-cpl class) cpl) (compute-slots class))
+                    (%compute-slots cpl)))
          (i -1)
          (index (mapcar (lambda (sd) (cons (slotd-name sd)
                                            (if (eq (slotd-allocation sd) :class) (slotd-cell sd) (setq i (+ i 1)))))
                         slots))
          (old (%cls-index class)))
+    (mapc (lambda (sd e) (setf (slotd-location sd) (cdr e))) slots index)   ; vector index, or the shared cell
     (setf (%cls-cpl class) cpl)
     (setf (%cls-slots class) slots)
     (setf (%cls-nlocal class) (+ i 1))
@@ -186,11 +200,25 @@
 (%make-builtin 'structure-class '(class))
 (%make-builtin 'standard-class '(class))
 (%make-builtin 'method-combination '(t))
+;; the generic-function, method and slot-definition classes of the MOP (their instances are structures or functions)
+(%make-builtin 'funcallable-standard-class '(standard-class))
+(%make-builtin 'funcallable-standard-object '(standard-object function))
+(%make-builtin 'generic-function '(function standard-object))
+(%make-builtin 'standard-generic-function '(%gf generic-function))
+(%make-builtin 'method '(standard-object))
+(%make-builtin 'standard-method '(%method method))
+(%make-builtin 'specializer '(standard-object))
+(%make-builtin 'eql-specializer '(specializer))
+(%make-builtin 'direct-slot-definition '(slot-definition))
+(%make-builtin 'effective-slot-definition '(slot-definition))
+(%make-builtin 'standard-direct-slot-definition '(direct-slot-definition))
+(%make-builtin 'standard-effective-slot-definition '(effective-slot-definition))
 
 (defun %class-metaclass (c)
   (cond ((%cls-meta c) (%struct-type (%cls-meta c)))
         ((eq (%cls-kind c) :builtin) (find-class 'built-in-class))
         ((eq (%cls-kind c) :struct) (find-class 'structure-class))
+        ((eq (%cls-kind c) :funcallable) (find-class 'funcallable-standard-class))
         (t (find-class 'standard-class))))
 
 (defun type-of (x)
@@ -212,9 +240,13 @@
         ((structp x)
          (let ((d (%struct-type x)))
            (cond ((classp d) d)
-                 ((consp d) (find-class (car d)))
+                 ((consp d) (let ((n (car d)))
+                              (cond ((eq n '%gf) (find-class 'standard-generic-function))
+                                    ((eq n '%method) (find-class 'standard-method))
+                                    ((eq n 'slot-definition) (find-class 'standard-effective-slot-definition))
+                                    (t (find-class n)))))
                  (t (find-class 'structure-object)))))
-        ((functionp x) (find-class 'function))
+        ((functionp x) (if (gethash x *gf-by-function*) (find-class 'standard-generic-function) (find-class 'function)))
         ((vectorp x) (find-class 'vector))
         ((%md-array-p x) (find-class 'array))
         ((packagep x) (find-class 'package))
@@ -313,30 +345,61 @@ the structure index."
 (defun %loc-set (o loc v)
   (cond ((consp loc) (rplaca loc v) v) ((%std-instance-p o) (%aset (%struct-ref o 2) loc v) v) (t (%struct-set o loc v))))
 
-(defun slot-value (obj name)
+(defun %slot-value-raw (obj name)
   (let ((loc (and (structp obj) (%slot-location obj name))))
     (if (null loc)
         (slot-missing (class-of obj) obj name 'slot-value)
         (let ((v (%loc-ref (%slot-holder obj) loc)))
           (if (%unsupplied-p v) (slot-unbound (class-of obj) obj name) v)))))
 
-(defun %set-slot-value (obj name value)
+(defun %set-slot-value-raw (obj name value)
   (let ((loc (and (structp obj) (%slot-location obj name))))
     (if (null loc)
         (progn (slot-missing (class-of obj) obj name 'setf value) value)
         (%loc-set (%slot-holder obj) loc value))))
-(%def-setf 'slot-value '%set-slot-value)
 
-(defun slot-boundp (obj name)
+(defun %slot-boundp-raw (obj name)
   (let ((loc (and (structp obj) (%slot-location obj name))))
     (if loc
         (not (%unsupplied-p (%loc-ref (%slot-holder obj) loc)))
         (slot-missing (class-of obj) obj name 'slot-boundp))))
-(defun slot-exists-p (obj name) (and (structp obj) (%slot-location obj name) t))
-(defun slot-makunbound (obj name)
+
+(defun %slot-makunbound-raw (obj name)
   (let ((loc (and (structp obj) (%slot-location obj name))))
     (if loc (%loc-set (%slot-holder obj) loc (%unsupplied)) (slot-missing (class-of obj) obj name 'slot-makunbound))
     obj))
+
+(defun %slot-definition-of (obj name)
+  "The effective slot definition for NAME in standard instance OBJ, or NIL."
+  (and (structp obj) (%std-instance-p obj)
+       (find name (%cls-slots (%struct-type obj)) :key #'slotd-name)))
+
+;; Once a program has defined a method on SLOT-VALUE-USING-CLASS and friends (*SLOT-HOOKS*), the slot functions go
+;; through those generic functions; until then they take the direct path.
+(defun slot-value (obj name)
+  (if *slot-hooks*
+      (let ((sd (%slot-definition-of obj name)))
+        (if sd (slot-value-using-class (class-of obj) obj sd) (%slot-value-raw obj name)))
+      (%slot-value-raw obj name)))
+
+(defun %set-slot-value (obj name value)
+  (if *slot-hooks*
+      (let ((sd (%slot-definition-of obj name)))
+        (if sd (funcall (symbol-function (%fn-symbol '(setf slot-value-using-class))) value (class-of obj) obj sd) (%set-slot-value-raw obj name value)))
+      (%set-slot-value-raw obj name value)))
+(%def-setf 'slot-value '%set-slot-value)
+
+(defun slot-boundp (obj name)
+  (if *slot-hooks*
+      (let ((sd (%slot-definition-of obj name)))
+        (if sd (slot-boundp-using-class (class-of obj) obj sd) (%slot-boundp-raw obj name)))
+      (%slot-boundp-raw obj name)))
+(defun slot-exists-p (obj name) (and (structp obj) (%slot-location obj name) t))
+(defun slot-makunbound (obj name)
+  (if *slot-hooks*
+      (let ((sd (%slot-definition-of obj name)))
+        (if sd (progn (slot-makunbound-using-class (class-of obj) obj sd) obj) (%slot-makunbound-raw obj name)))
+      (%slot-makunbound-raw obj name)))
 
 (defun %update-obsolete-instance (inst)
   "Give INST the current layout of its (redefined) class, keeping the values of the slots still local, then call
@@ -441,13 +504,21 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
   (let* ((old (get name '%class))
          (class (if (and old (not (eq (%cls-kind old) :builtin))) old (%make-class :name name)))
          (meta (and metaclass (not (eq metaclass 'standard-class))
-                    (or (find-class metaclass nil) (error "The metaclass ~S of ~S is not defined" metaclass name)))))
+                    (or (find-class metaclass nil) (error "The metaclass ~S of ~S is not defined" metaclass name))))
+         (super-classes (mapcar (lambda (s) (or (find-class s nil) (error "Superclass ~S of ~S is not defined" s name))) supers))
+         (fso (find-class 'funcallable-standard-object))
+         ;; a class is funcallable (its instances can be called as functions) if its metaclass is, or a superclass is
+         (funcallable (or (and meta (%subclass-p meta (find-class 'funcallable-standard-class)))
+                          (some (lambda (s) (or (eq (%cls-kind s) :funcallable) (eq s fso))) super-classes))))
     (when (eql (%cls-id class) 0) (setf (%cls-id class) (setq *class-counter* (+ *class-counter* 1))))
     (when (and meta (not (%subclass-p meta (find-class 'standard-class))))
       (error "The metaclass ~S of ~S is not a subclass of STANDARD-CLASS" metaclass name))
-    (setf (%cls-supers class)
-          (mapcar (lambda (s) (or (find-class s nil) (error "Superclass ~S of ~S is not defined" s name)))
-                  (or supers '(standard-object))))
+    (when (null super-classes)
+      (setq super-classes (list (if funcallable fso (find-class 'standard-object)))))
+    (when (and funcallable (notany (lambda (s) (%subclass-p s fso)) super-classes))
+      (setq super-classes (append super-classes (list fso))))
+    (setf (%cls-kind class) (if funcallable :funcallable :standard))
+    (setf (%cls-supers class) super-classes)
     ;; a shared slot keeps its cell (and value) when the class is redefined; a new one is initialized now
     (dolist (sd slotds)
       (when (eq (slotd-allocation sd) :class)
@@ -459,15 +530,21 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
     (setf (%cls-direct-slots class) slotds)
     (setf (%cls-default-initargs class) default-initargs)
     (setf (%cls-documentation class) doc)
-    (%register-class class)
-    (%finalize-class class)
-    ;; the metaclass's slots live in a hidden instance of the metaclass
+    ;; the metaclass's slots live in a hidden instance of the metaclass (made first: the MOP generic functions
+    ;; below dispatch on the class's metaclass)
     (cond ((null meta) (setf (%cls-meta class) nil))
           ((and (%cls-meta class) (eq (%struct-type (%cls-meta class)) meta))
            (%shared-init (%cls-meta class) nil meta-initargs))
           (t (let ((m (%allocate-std-instance meta)))
                (setf (%cls-meta class) m)
                (%shared-init m t (%add-default-initargs meta meta-initargs)))))
+    (when *mop-loaded*
+      (dolist (s super-classes)
+        (unless (validate-superclass class s)
+          (error "Class ~S cannot have ~S as a superclass: their metaclasses are not compatible (see VALIDATE-SUPERCLASS)"
+                 name (%cls-name s)))))
+    (%register-class class)
+    (%finalize-class class)
     class))
 
 (defun ensure-class (name &key direct-superclasses direct-slots direct-default-initargs metaclass documentation
@@ -510,6 +587,7 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
              (gf (%make-gf :name name :cache (make-hash-table :test 'eql) :nreq nreq :lambda-list lambda-list))
              (fn (lambda (&rest args) (%call-gf gf args))))
         (setf (gf-fn gf) fn)
+        (setf (gethash fn *gf-by-function*) gf)
         (%put sym '%gf gf)
         (%set-symbol-function sym fn)
         (setq *generic-functions* (cons gf *generic-functions*))
@@ -535,7 +613,10 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
           (gf-documentation gf) doc)
     (%recompute-gf gf)))
 
-(defun %as-gf (x) (cond ((%gf-p x) x) ((functionp x) (find x *generic-functions* :key #'gf-fn)) (t (%find-gf x))))
+(defun %as-gf (x)
+  (cond ((%gf-p x) x)
+        ((functionp x) (or (gethash x *gf-by-function*) (find x *generic-functions* :key #'gf-fn)))
+        (t (%find-gf x))))
 (defun generic-function-methods (gf) (gf-methods (%as-gf gf)))
 (defun %gf-p (x) (%struct-typep x '%gf))
 (defun method-qualifiers-of (m) (method-qualifiers m))
@@ -579,23 +660,28 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
                     (list 'lambda '(%args %next)
                           (list 'apply (list 'function (list* 'lambda plain body)) '%args)))))
         (list '%add-method (list 'quote name) (list 'quote (nreverse qualifiers))
-              (cons 'list specs) (list 'function fn))))))
+              (cons 'list specs) (list 'function fn) (list 'quote plain))))))
 
 (defun %resolve-spec (s) (if (symbolp s) (find-class s) s))
 
-(defun %add-method (name qualifiers specs fn)
+(defun %add-method (name qualifiers specs fn &optional lambda-list)
   (let* ((gf (or (%find-gf name) (%ensure-gf name (length specs))))
          (specs (mapcar #'%resolve-spec specs))
-         (m (%make-method :gf gf :qualifiers qualifiers :specializers specs :fn fn)))
+         (m (%make-method :gf gf :qualifiers qualifiers :specializers specs :fn fn :lambda-list lambda-list)))
+    (when (and *mop-loaded* (member name *slot-hook-generics* :test #'equal)) (setq *slot-hooks* t))
     (setf (gf-methods gf)
           (cons m (remove-if (lambda (o) (and (equal (method-qualifiers o) qualifiers)
                                               (equal (method-specializers o) specs)))
                              (gf-methods gf))))
     (%recompute-gf gf)
     (%set-function-name fn name)
+    (when *mop-loaded* (%notify-dependents gf 'add-method m))
     m))
 
 (defun %recompute-gf (gf)
+  ;; the effective methods of every generic function depend on COMPUTE-EFFECTIVE-METHOD's methods
+  (when (and *cem-generic* (eq gf *cem-generic*))
+    (dolist (g *generic-functions*) (clrhash (gf-cache g))))
   (let ((n 0) (has-eql nil) (tc (find-class 't)))
     (dolist (m (gf-methods gf))
       (let ((i 0))
@@ -612,6 +698,7 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
   (let ((g (%as-gf gf)))
     (setf (gf-methods g) (remove m (gf-methods g)))
     (%recompute-gf g)
+    (when *mop-loaded* (%notify-dependents g 'remove-method m))
     gf))
 
 (defun find-method (gf qualifiers specs &optional (errorp t))
@@ -658,12 +745,19 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
 
 (defun %compute-effective-method (gf args)
   (let ((comb (gf-combination gf)))
+    (if (and *cem-generic* (not (eq gf *cem-generic*)) (cdr (gf-methods *cem-generic*)))
+        ;; the program added methods to COMPUTE-EFFECTIVE-METHOD: it returns the form to run
+        (let ((methods (compute-applicable-methods gf args)))
+          (if (null methods)
+              (lambda (a) (%no-applicable-method gf a))
+              (%effective-form-function
+               (compute-effective-method (gf-fn gf) (generic-function-method-combination gf) methods))))
     (if comb
         (let ((methods (compute-applicable-methods gf args)))
           (if (null methods)
               (lambda (a) (%no-applicable-method gf a))
-              (funcall (get (car comb) '%method-combination) gf methods (cdr comb))))
-        (%standard-effective-method gf args))))
+              (%effective-form-function (funcall (get (car comb) '%method-combination) (gf-fn gf) methods (cdr comb)))))
+        (%standard-effective-method gf args)))))
 
 (defun %standard-effective-method (gf args)
   (let ((methods (compute-applicable-methods gf args))
@@ -733,13 +827,15 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
                                          name name)))))
       (setq around (nreverse around))
       (unless (eq order :most-specific-last) (setq primary (nreverse primary)))
+      ;; the effective method as a form (see COMPUTE-EFFECTIVE-METHOD)
       (if (null primary)
-          (lambda (a) (%no-applicable-method gf a))
-          (let ((main (%effective-form-function
-                       (if (and identity-with-one-argument (null (cdr primary)))
-                           (list 'call-method (car primary))
-                           (cons operator (mapcar (lambda (m) (list 'call-method m)) primary))))))
-            (if around (%chain around main) main))))))
+          (list '%no-applicable-method (list 'quote gf) '%args)
+          (let ((main (if (and identity-with-one-argument (null (cdr primary)))
+                          (list 'call-method (car primary))
+                          (cons operator (mapcar (lambda (m) (list 'call-method m)) primary)))))
+            (if around
+                (list 'call-method (car around) (append (cdr around) (list (list 'make-method main))))
+                main))))))
 
 (defmacro define-method-combination (name &rest rest)
   "Define a method combination.  The short form: (define-method-combination name [:operator op]
@@ -781,11 +877,10 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
                        (destructuring-bind ,lambda-list %options
                          (destructuring-bind ,vars (%partition-methods %methods (list ,@matchers))
                            ,@checks
-                           (%effective-form-function
-                            (list 'let (list ,@(let ((i -1))
-                                                 (mapcar (lambda (a) (setq i (+ i 1)) `(list ',a '(nth ,i %args)))
-                                                         (remove-if (lambda (a) (member a '(&rest &optional &whole))) arguments))))
-                                  (progn ,@body)))))))
+                           (list 'let (list ,@(let ((i -1))
+                                                (mapcar (lambda (a) (setq i (+ i 1)) `(list ',a '(nth ,i %args)))
+                                                        (remove-if (lambda (a) (member a '(&rest &optional &whole))) arguments))))
+                                 (progn ,@body))))))
                ',name))))))
 
 (defun %qualifiers-match-p (pattern qualifiers)
@@ -822,7 +917,7 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
 (define-method-combination progn :identity-with-one-argument t)
 
 (defun %no-applicable-method (gf args)
-  (error "No applicable method for generic function ~S with arguments ~S" (gf-name gf) args))
+  (error "No applicable method for generic function ~S with arguments ~S" (gf-name (%as-gf gf)) args))
 
 (defun %dispatch-key (gf args)
   (let ((n (gf-dispatch-n gf)))
@@ -847,10 +942,22 @@ UPDATE-INSTANCE-FOR-REDEFINED-CLASS."
 ;;; ---- instances -------------------------------------------------------------------------------
 
 (defun %allocate-std-instance (c)
-  (let ((inst (%make-instance c 2)))
-    (%struct-set inst 1 (%cls-index c))
-    (%struct-set inst 2 (%make-vector (%cls-nlocal c) (%unsupplied)))
-    inst))
+  (if (eq (%cls-kind c) :funcallable)
+      ;; a funcallable instance has a fourth slot: the function that calling it runs
+      (let ((inst (%make-instance c 3)))
+        (%struct-set inst 1 (%cls-index c))
+        (%struct-set inst 2 (%make-vector (%cls-nlocal c) (%unsupplied)))
+        (%struct-set inst 3 (lambda (&rest args)
+                              (error "The funcallable instance ~S has no function (see SET-FUNCALLABLE-INSTANCE-FUNCTION); called with ~S"
+                                     inst args)))
+        inst)
+      (let ((inst (%make-instance c 2)))
+        (%struct-set inst 1 (%cls-index c))
+        (%struct-set inst 2 (%make-vector (%cls-nlocal c) (%unsupplied)))
+        inst)))
+
+(defun %funcallable-clos-p (x)
+  (and (structp x) (%std-instance-p x) (eq (%cls-kind (%struct-type x)) :funcallable)))
 
 (defun %add-default-initargs (class initargs)
   (let ((extra nil))

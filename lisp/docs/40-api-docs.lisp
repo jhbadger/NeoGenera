@@ -445,3 +445,55 @@
 (%doc-bulk '%doc-type
  '(simple-package-error "A package error with a format message."
    package-lock-violation "Signalled when a locked package is modified, or a symbol it owns is defined as a function, macro, special variable or constant."))
+
+;;; ---- the meta-object protocol (lisp/core/53-mop.lisp) -------------------------------------------------
+
+(%mark-internal '(slotd-location method-lambda-list method-documentation *cem-generic* *dependents*))
+
+(%doc-bulk '%doc-function
+ '(compute-effective-method "Generic function: return the effective method of a generic function for the given applicable methods and method combination, as a form that uses `call-method` and `make-method`. Add methods to change how methods are combined."
+   validate-superclass "Generic function: true if a class may have the given class as a superclass. Add methods to allow an unusual metaclass to inherit from another."
+   compute-class-precedence-list "Generic function: the class precedence list of a class whose metaclass is user-defined; called when it is finalized."
+   compute-slots "Generic function: the effective slot definitions of a class whose metaclass is user-defined."
+   compute-effective-slot-definition "Generic function: merge the direct slot definitions of one slot name (most specific first) into the effective one."
+   direct-slot-definition-class "The class of a class's direct slot definitions: `standard-direct-slot-definition`."
+   effective-slot-definition-class "The class of a class's effective slot definitions: `standard-effective-slot-definition`."
+   slot-value-using-class "Generic function behind `slot-value`: read a slot given the class, instance and slot definition. Once a method is added, every `slot-value` goes through it."
+   |(SETF SLOT-VALUE-USING-CLASS)| "Generic function behind `(setf slot-value)`: store a slot given the new value, class, instance and slot definition."
+   slot-boundp-using-class "Generic function behind `slot-boundp`."
+   slot-makunbound-using-class "Generic function behind `slot-makunbound`."
+   update-dependent "Generic function called on each dependent of a generic function (when a method is added or removed) or class; the default does nothing."
+   add-dependent "Register an object to be told (`update-dependent`) when a class or generic function changes."
+   remove-dependent "Stop telling an object about changes to a class or generic function."
+   map-dependents "Call a function on each dependent of a class or generic function."
+   find-method-combination "The method combination object for a combination name and options."
+   generic-function-method-combination "The method combination object of a generic function."
+   method-combination-name "The name of a method combination object, such as `standard` or `+`."
+   method-combination-options "The options of a method combination object."
+   generic-function-name "The name of a generic function." generic-function-lambda-list "The lambda list of a generic function."
+   generic-function-argument-precedence-order "The required parameters of a generic function, in dispatch order."
+   generic-function-declarations "The declarations of a generic function (always `nil`)."
+   generic-function-method-class "The class of a generic function's methods: `standard-method`."
+   method-generic-function "The generic function a method belongs to."
+   method-function "The function that runs a method: it takes the argument list and the next-method function."
+   add-method "Add a method object to a generic function, replacing one with the same qualifiers and specializers."
+   compute-applicable-methods-using-classes "The methods applicable to arguments of the given classes, and true if that is definitive (false when a method has an `eql` specializer)."
+   compute-discriminating-function "The function that is a generic function's definition."
+   intern-eql-specializer "The `eql` specializer for an object." eql-specializer-object "The object an `eql` specializer names."
+   eql-specializer-p "True for an `eql` specializer."
+   specializer-direct-methods "The methods that have a class or `eql` specializer among their specializers."
+   specializer-direct-generic-functions "The generic functions with a method specialized on a class or `eql` specializer."
+   add-direct-subclass "Record a class as a direct subclass of another." remove-direct-subclass "Forget that a class is a direct subclass of another."
+   slot-definition-location "Where a slot lives: a vector index, or the shared cell of a class slot."
+   standard-instance-access "The value at a slot location of a standard instance, with no checks. `setf`able."
+   set-funcallable-instance-function "Make calling a funcallable instance run a function."
+   funcallable-instance-function "The function that calling a funcallable instance runs."))
+
+(%doc-bulk '%doc-type
+ '(generic-function "The class of generic functions." standard-generic-function "The class of generic functions made by `defgeneric`."
+   method "The class of methods." standard-method "The class of methods made by `defmethod`."
+   specializer "The class of method specializers." eql-specializer "The class of `eql` specializers."
+   funcallable-standard-class "Metaclass of classes whose instances can be called as functions; see `set-funcallable-instance-function`."
+   funcallable-standard-object "Superclass of the instances of funcallable classes."
+   direct-slot-definition "Slot definitions as written in a class." effective-slot-definition "Slot definitions after inheritance."
+   standard-direct-slot-definition "The class of direct slot definitions." standard-effective-slot-definition "The class of effective slot definitions."))

@@ -172,7 +172,14 @@ PRIM(p_stringp) { UNUSED_ARGS; return BOOL(STRINGP(argv[0])); }
 PRIM(p_characterp) { UNUSED_ARGS; return BOOL(CHARP(argv[0])); }
 PRIM(p_vectorp) { UNUSED_ARGS; Obj x = argv[0]; return BOOL(VECTORP(x) || STRINGP(x) || IS_TYPE(x, T_ADVEC)); }
 PRIM(p_simple_vector_p) { UNUSED_ARGS; return BOOL(VECTORP(argv[0])); }
-PRIM(p_functionp) { UNUSED_ARGS; Obj x = argv[0]; return BOOL(IS_TYPE(x, T_EVALFN) || IS_TYPE(x, T_CLOSURE) || IS_TYPE(x, T_PRIM)); }
+PRIM(p_functionp) {
+  UNUSED_ARGS; Obj x = argv[0];
+  if (IS_TYPE(x, T_STRUCT)) {                       /* funcallable instances: ask Lisp */
+    Obj h = SYM_FUNC(Q_funcallable_p);
+    return (h != NIL && !CONSP(h)) ? BOOL(call1(h, x) != NIL) : NIL;
+  }
+  return BOOL(IS_TYPE(x, T_EVALFN) || IS_TYPE(x, T_CLOSURE) || IS_TYPE(x, T_PRIM));
+}
 PRIM(p_packagep) { UNUSED_ARGS; return BOOL(IS_TYPE(argv[0], T_PACKAGE)); }
 PRIM(p_streamp) { UNUSED_ARGS; return BOOL(IS_TYPE(argv[0], T_STREAM)); }
 PRIM(p_structp) { UNUSED_ARGS; return BOOL(IS_TYPE(argv[0], T_STRUCT)); }
