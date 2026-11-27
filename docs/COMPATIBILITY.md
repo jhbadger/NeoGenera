@@ -45,9 +45,14 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 * `defmacro` expansion is memoised in place by the evaluator, so macros with side effects at expansion time run once per source form.
 
 **CLOS**
-* `change-class`, metaclasses, `:allocation :class` slots, non-standard method combinations and `update-instance-for-redefined-class` are not implemented;
-  redefining a class does not update existing instances. `standard-class` is not a type specifier for class objects.
-* The meta-object protocol is a small subset (`class-of`, `find-class`, `class-precedence-list`, slot access).
+* Supported: multiple dispatch with `eql` specializers, `:before`/`:after`/`:around`, `call-next-method`, `:allocation :class` slots,
+  the built-in and user-defined (short and long form) method combinations, class redefinition that updates existing instances
+  (`update-instance-for-redefined-class`, `make-instances-obsolete`), `change-class` with `update-instance-for-different-class`,
+  and metaclasses (`(:metaclass m)` for subclasses of `standard-class`; their slots live in a hidden instance), with
+  `standard-class`, `built-in-class` and `structure-class` usable as types for class objects.
+* The meta-object protocol is a subset: `class-of`, `find-class`, `ensure-class`, `class-precedence-list`, the class and slot-definition readers,
+  `compute-applicable-methods`, `find-method` and `remove-method`, and `allocate-instance`/`make-instance`/`slot-missing`/`slot-unbound` as generic
+  functions. Method combinations are not objects, and there is no `compute-effective-method` hook or `validate-superclass`.
 
 **Flavors** (the Symbolics/Lisp Machine object system, a layer over CLOS; see `docs/manual/flavors-manual.md`)
 * Supported, following the Lisp Machine Manual's Flavors chapter: `defflavor` with the common options (including `:abstract-flavor`),
