@@ -56,7 +56,7 @@ Welch Two Sample t-test
 statistic = -1.86081, df = 17.77647, p-value = 0.07939
 ```
 
-More in [`examples/`](examples/) (ten annotated programs; `make examples` runs them and writes a gallery).
+More in [`examples/`](examples/) (fourteen annotated programs, including a Mandelbrot renderer and a boids flocking simulation; `make examples` runs them and writes a gallery).
 
 ## Install and packages
 

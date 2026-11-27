@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **Two new `:demo` demos**, Mandelbrot (painted progressively, then zooms through a tour of views) and Boids (flocking),
+  and two matching example programs: `examples/13-mandelbrot.lisp` (escape-time iteration with built-in complex numbers; ASCII art plus a
+  colour PPM image written to `build/examples/mandelbrot.ppm`) and `examples/14-boids.lisp` (Reynolds flocking on a torus,
+  with complex-number positions and velocities and a flock-alignment order parameter).
+
 * **Printer variables**: `*print-base*` and `*print-radix*` are honoured for integers and ratios (`#xFF`, `#b101`, `#3r12`,
   `10.`), and `*print-pretty*` makes `prin1`/`princ`/`print`/`write` lay out lists as `pprint` does. `write` and
   `write-to-string` take `:escape :base :radix :pretty :length :right-margin`; `~D ~B ~O ~X` bind the base as ANSI requires.

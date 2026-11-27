@@ -391,6 +391,145 @@ cells' full resolution, scaled down to keep each frame small enough to send."
 
 (define-demo :life "Life" 'life-demo "Conway's Game of Life")
 
+;;; ---- Mandelbrot ------------------------------------------------------------------------------------------------
+;;; The image is painted a few rows per frame, so the set appears the way it did on slow machines; once complete it
+;;; rests for a while and then dives into the next view.  (The example examples/13-mandelbrot.lisp does the same sum
+;;; with complex numbers; here real arithmetic keeps every frame cheap.)
+
+(defparameter *mandelbrot-views*
+  '((-0.6 0.0 3.4 70) (-0.7436 0.1318 0.02 300) (-0.7616 -0.0848 0.01 300)
+    (-1.7499 0.0 0.02 300) (-0.743643 0.131825 0.002 600))
+  "Views (centre-real centre-imaginary width maximum-iterations).")
+
+(defclass mandelbrot-demo (demo-window)
+  ((view :initform -1 :accessor mandel-view)
+   (row :initform 0 :accessor mandel-row)               ; next row to paint
+   (hold :initform 0 :accessor mandel-hold)             ; frames since the picture was finished
+   (palette :initform nil :accessor mandel-palette)))
+
+(defmethod demo-base-interval ((w mandelbrot-demo)) 40)
+(defmethod demo-keys-help ((w mandelbrot-demo)) "")
+
+(defun %mandel-iterate (cr ci limit)
+  "Iterations of z -> z^2 + c (c = CR + CI i) before |z| passes 2, or LIMIT for points in the set."
+  (let* ((q (+ (* (- cr 0.25) (- cr 0.25)) (* ci ci))))
+    (if (or (< (* q (+ q (- cr 0.25))) (* 0.25 ci ci))        ; inside the main cardioid
+            (< (+ (* (+ cr 1.0) (+ cr 1.0)) (* ci ci)) 0.0625)) ; inside the period-2 bulb
+        limit
+        (let ((x 0.0) (y 0.0) (n 0))
+          (loop
+            (when (>= n limit) (return limit))
+            (let ((x2 (* x x)) (y2 (* y y)))
+              (when (> (+ x2 y2) 4.0) (return n))
+              (setq y (+ (* 2.0 x y) ci) x (+ (- x2 y2) cr) n (+ n 1))))))))
+
+(defmethod demo-setup ((w mandelbrot-demo))
+  (setf (mandel-view w) (mod (+ 1 (mandel-view w)) (length *mandelbrot-views*))
+        (mandel-row w) 0 (mandel-hold w) 0)
+  (unless (mandel-palette w)
+    (let ((pal (make-array 256 :initial-element 0)))
+      (dotimes (i 256) (setf (aref pal i) (%hsv-rgb (+ 0.6 (* 0.9 (/ i 256.0))) 0.85 (+ 0.35 (* 0.65 (abs (- 1.0 (/ (mod (* i 2) 256) 128.0))))))))
+      (setf (mandel-palette w) pal))))
+
+(defun %mandel-paint-row (w row)
+  (destructuring-bind (cx cy span limit) (nth (mandel-view w) *mandelbrot-views*)
+    (let* ((img (demo-image w)) (pw (demo-width w)) (ph (demo-height w)) (pal (mandel-palette w))
+           (ci (+ cy (* span (/ ph pw) (- 0.5 (/ (+ row 0.5) ph))))))
+      (dotimes (col pw)
+        (let* ((cr (+ cx (* span (- (/ (+ col 0.5) pw) 0.5))))
+               (n (%mandel-iterate cr ci limit)))
+          (image-fill-rect img col row 1 1 (if (>= n limit) (rgb 0 0 0) (aref pal (mod (* 7 n) 256)))))))))
+
+(defmethod demo-step ((w mandelbrot-demo))
+  (let ((ph (demo-height w)) (pw (demo-width w)))
+    (cond ((< (mandel-row w) ph)
+           (let ((budget (max 1 (floor 2500 pw))))
+             (dotimes (i budget)
+               (when (< (mandel-row w) ph)
+                 (%mandel-paint-row w (mandel-row w))
+                 (setf (mandel-row w) (+ 1 (mandel-row w)))))))
+          (t (setf (mandel-hold w) (+ 1 (mandel-hold w)))
+             (when (> (mandel-hold w) 120) (demo-restart w))))))   ; on to the next view
+
+(define-demo :mandelbrot "Mandelbrot" 'mandelbrot-demo "the Mandelbrot set, painted row by row, diving into the next view")
+
+;;; ---- Boids ----------------------------------------------------------------------------------------------------
+;;; Reynolds' flocking: every bird steers by separation, alignment and cohesion with the birds it can see.  Positions
+;;; and velocities are complex numbers.  The world is 36 units high however big the window is, on a torus.
+
+(defclass boids-demo (demo-window)
+  ((pos :initform nil :accessor boids-pos) (vel :initform nil :accessor boids-vel)
+   (scale :initform 1.0 :accessor boids-scale)          ; pixels per world unit
+   (ww :initform 72.0 :accessor boids-ww) (wh :initform 36.0 :accessor boids-wh)))
+
+(defmethod demo-base-interval ((w boids-demo)) 50)
+(defmethod demo-keys-help ((w boids-demo)) "R scatter")
+
+(defconstant +boids-count+ 60)
+(defparameter *boids-min-speed* 0.6)
+(defparameter *boids-max-speed* 1.1)
+
+(defun %boids-limit (v)
+  (let ((s (abs v)))
+    (cond ((< s 1e-9) (complex *boids-min-speed* 0.0))
+          ((> s *boids-max-speed*) (* v (/ *boids-max-speed* s)))
+          ((< s *boids-min-speed*) (* v (/ *boids-min-speed* s)))
+          (t v))))
+
+(defun %boids-scatter (w)
+  (let ((n +boids-count+))
+    (setf (boids-pos w) (make-array n) (boids-vel w) (make-array n))
+    (dotimes (i n)
+      (setf (aref (boids-pos w) i) (complex (random (boids-ww w)) (random (boids-wh w)))
+            (aref (boids-vel w) i) (%boids-limit (* (+ *boids-min-speed* (random 0.4))
+                                                    (exp (complex 0.0 (random (* 2 pi))))))))))
+
+(defmethod demo-setup ((w boids-demo))
+  (let ((s (/ (demo-height w) 36.0)))
+    (setf (boids-scale w) s (boids-wh w) 36.0 (boids-ww w) (/ (demo-width w) s))
+    (%boids-scatter w)))
+
+(defmethod demo-key ((w boids-demo) ch)
+  (when (char= ch #\r) (%boids-scatter w) t))
+
+(defun %boids-delta (w d)
+  "The shortest displacement on the torus equivalent to D."
+  (flet ((fold (v size) (cond ((> v (/ size 2)) (- v size)) ((< v (- (/ size 2))) (+ v size)) (t v))))
+    (complex (fold (realpart d) (boids-ww w)) (fold (imagpart d) (boids-wh w)))))
+
+(defun %boids-advance (w)
+  (let* ((pos (boids-pos w)) (vel (boids-vel w)) (n (length pos))
+         (new-pos (make-array n)) (new-vel (make-array n)))
+    (dotimes (i n)
+      (let ((p (aref pos i)) (v (aref vel i)) (centre 0) (heading 0) (push 0) (seen 0))
+        (dotimes (j n)
+          (unless (= i j)
+            (let* ((d (%boids-delta w (- (aref pos j) p))) (dist (abs d)))
+              (when (< dist 12.0)
+                (setq seen (+ seen 1) centre (+ centre d) heading (+ heading (aref vel j)))
+                (when (< dist 2.5) (setq push (- push (/ d (+ 0.1 (* dist dist))))))))))
+        (when (> seen 0)
+          (setq v (+ v (* 0.012 (/ centre seen)) (* 0.12 (- (/ heading seen) v)) (* 0.9 push))))
+        (setq v (%boids-limit v))
+        (setf (aref new-vel i) v)
+        (let ((q (+ p v)))
+          (setf (aref new-pos i) (complex (mod (realpart q) (boids-ww w)) (mod (imagpart q) (boids-wh w)))))))
+    (setf (boids-pos w) new-pos (boids-vel w) new-vel)))
+
+(defmethod demo-step ((w boids-demo))
+  (%boids-advance w)
+  (let* ((img (demo-image w)) (s (boids-scale w)) (ph (demo-height w)))
+    (image-fill-rect img 0 0 (demo-width w) ph (rgb 4 8 24))
+    (dotimes (i (length (boids-pos w)))
+      (let* ((p (aref (boids-pos w) i)) (v (aref (boids-vel w) i)) (dir (/ v (abs v)))
+             (x (* s (realpart p))) (y (- ph (* s (imagpart p))))
+             (len (* s 1.1)) (dx (* len (realpart dir))) (dy (* len (- (imagpart dir)))))
+        (image-line img (- x dx) (- y dy) (+ x dx) (+ y dy)
+                    (%hsv-rgb (/ (+ pi (atan (imagpart v) (realpart v))) (* 2 pi)) 0.6 1.0) (max 1 (floor s 1.2)))
+        (image-disc img (+ x dx) (+ y dy) (max 1.0 (* 0.45 s)) (rgb 255 255 255))))))
+
+(define-demo :boids "Boids" 'boids-demo "a flock of birds steering by three simple rules")
+
 ;;; ---- the command ----------------------------------------------------------------------------------------------
 
 (define-command (demo :documentation "Run a graphics demo; without a name, choose one from the menu")

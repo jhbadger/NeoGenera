@@ -202,6 +202,8 @@ own window. `:demo circles` (or any demo's name, abbreviated) starts one directl
 | Lissajous | Lissajous figures turning as their phase drifts, changing ratio now and then |
 | Bouncing Lines | a line whose ends bounce off the walls, leaving a fading trail |
 | Life | Conway's Game of Life on a torus; `R` starts a new random world, and a world that has settled starts again |
+| Mandelbrot | the Mandelbrot set painted a few rows at a time; when finished it rests, then dives into the next view (the seahorse valley, a spiral, a miniature copy of the set). `N` goes to the next view now |
+| Boids | Reynolds' flocking: each bird steers by separation, alignment and cohesion with the birds nearby, and flocks form and drift across a torus. `R` scatters the flock |
 
 In every demo, Space (or a click) pauses and resumes, `N` starts again, `+` and `-` change the speed, and `Q` closes the
 window. The demos use terminal graphics in kitty and Ghostty and half blocks elsewhere.

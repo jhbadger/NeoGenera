@@ -131,6 +131,56 @@
 
 (defun find-demo-window (wm) (find-if (lambda (w) (typep w 'demo-window)) (wm-windows wm)))
 
+(defun %count-lit-pixels (img)
+  (let ((n 0) (black (rgb 0 0 0)))
+    (dotimes (y (image-height img))
+      (dotimes (x (image-width img)) (unless (= black (image-pixel img x y)) (setq n (+ n 1)))))
+    n))
+
+(deftest demo-mandelbrot-and-boids
+  (multiple-value-bind (wm lw) (make-test-wm 30 100)
+    (let ((*graphics* nil))
+      ;; the iteration itself: inside, outside and the speed-up regions agree with the definition
+      (is-equal 50 (%mandel-iterate 0.0 0.0 50))             ; in the main cardioid
+      (is-equal 50 (%mandel-iterate -1.0 0.0 50))            ; in the period-2 bulb
+      (is-equal 50 (%mandel-iterate -0.1226 0.7449 50))      ; the period-3 bulb: outside both shortcuts, runs to the limit
+      (is-equal 1 (%mandel-iterate 2.5 0.0 50))
+      (is (< (%mandel-iterate 1.0 1.0 50) 5))
+      ;; Mandelbrot is painted progressively, then goes on to the next view
+      (type-line wm ":demo mandel")
+      (let ((d (find-demo-window wm)))
+        (is (typep d 'mandelbrot-demo))
+        (wm-draw wm)
+        (let ((first-view (mandel-view d)))
+          (is (< (mandel-row d) (demo-height d)))            ; not finished after the first frame
+          (dotimes (i 400) (window-animate d))               ; ... but finished well within 400
+          (is (> (%count-lit-pixels (demo-image d)) 100))
+          (is (/= first-view (mandel-view d))))               ; the rest period ran out and the next view began
+        (wm-close-window wm d))
+      ;; Boids: the flock keeps its size, stays on the torus, and the headings come into line
+      (wm-raise wm lw)
+      (type-line wm ":demo boids")
+      (let ((d (find-demo-window wm)))
+        (is (typep d 'boids-demo))
+        (wm-draw wm)
+        (flet ((order ()
+                 (let ((sum 0) (v (boids-vel d)))
+                   (dotimes (i (length v)) (setq sum (+ sum (/ (aref v i) (abs (aref v i))))))
+                   (/ (abs sum) (length v)))))
+          (let ((before (order)))
+            (dotimes (i 300) (window-animate d))
+            (is-equal 60 (length (boids-pos d)))
+            (is (every (lambda (p) (and (<= 0 (realpart p) (boids-ww d)) (<= 0 (imagpart p) (boids-wh d)))) (boids-pos d)))
+            (is (> (order) 0.8))
+            (is (> (order) before))))
+        (is (> (%count-lit-pixels (demo-image d)) 50))
+        (wm-feed wm "r")                                       ; R scatters the flock again
+        (is (< (let ((sum 0) (v (boids-vel d)))
+                 (dotimes (i (length v)) (setq sum (+ sum (/ (aref v i) (abs (aref v i))))))
+                 (/ (abs sum) (length v)))
+               0.7))
+        (wm-close-window wm d)))))
+
 (deftest demos
   (multiple-value-bind (wm lw) (make-test-wm 30 100)
     (let ((*graphics* nil))
