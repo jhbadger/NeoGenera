@@ -180,39 +180,138 @@ instead of signalling an error."
   (if (= rank 0) (list contents)
       (let ((acc nil)) (dolist (x (%elt-list contents)) (setq acc (append (reverse (%flatten-contents x (- rank 1))) acc))) (nreverse acc))))
 
+;;; ---- element types ---------------------------------------------------------------------------------------
+;;; Specialised arrays: MAKE-ARRAY :ELEMENT-TYPE gives an array whose stores are checked against the (upgraded) element
+;;; type, whose elements default to 0 / 0.0, and that ARRAY-ELEMENT-TYPE reports.  The storage is still one word per
+;;; element.  The codes below are the AE_ codes of src/neogenera.h; only strings (CHARACTER) are stored differently.
+
+(defparameter %array-etypes
+  '(bit (unsigned-byte 2) (unsigned-byte 4) (unsigned-byte 8) (unsigned-byte 16) (unsigned-byte 32) (unsigned-byte 64)
+    (signed-byte 8) (signed-byte 16) (signed-byte 32) (signed-byte 64) fixnum single-float double-float character)
+  "The upgraded element types, in AE_ code order (code 1 is the first).")
+
+(defun %etype-code (type)
+  "The AE_ code of the upgraded element type TYPE, or NIL for T."
+  (let ((i 1))
+    (dolist (x %array-etypes nil)
+      (when (equal x type) (return i))
+      (setq i (+ i 1)))))
+
+(defun %etype-from-code (code) (if code (nth (- code 1) %array-etypes) t))
+
+(defun %int-etype (lo hi)
+  (cond ((not (and (integerp lo) (integerp hi))) t)
+        ((>= lo 0)
+         (let ((n (integer-length hi)))
+           (cond ((<= n 1) 'bit) ((<= n 2) '(unsigned-byte 2)) ((<= n 4) '(unsigned-byte 4)) ((<= n 8) '(unsigned-byte 8))
+                 ((<= n 16) '(unsigned-byte 16)) ((<= n 32) '(unsigned-byte 32)) ((<= n 64) '(unsigned-byte 64)) (t t))))
+        (t (let ((n (+ 1 (max (integer-length lo) (integer-length hi)))))
+             (cond ((<= n 8) '(signed-byte 8)) ((<= n 16) '(signed-byte 16)) ((<= n 32) '(signed-byte 32))
+                   ((<= n 64) '(signed-byte 64)) (t t))))))
+
+(defun upgraded-array-element-type (type &optional environment)
+  "The element type arrays actually specialise on for TYPE: BIT, (UNSIGNED-BYTE n) for n 2 to 64, (SIGNED-BYTE n) for n
+8 to 64, FIXNUM, SINGLE-FLOAT, DOUBLE-FLOAT, CHARACTER, or T."
+  (declare (ignore environment))
+  (cond ((member type '(bit)) 'bit)
+        ((member type '(character base-char standard-char)) 'character)
+        ((member type '(fixnum)) 'fixnum)
+        ((member type '(single-float short-float)) 'single-float)
+        ((member type '(double-float long-float)) 'double-float)
+        ((consp type)
+         (let ((h (car type)) (n (cadr type)))
+           (cond ((and (eq h 'unsigned-byte) (integerp n)) (%int-etype 0 (- (expt 2 n) 1)))
+                 ((and (eq h 'signed-byte) (integerp n) (> n 0)) (%int-etype (- (expt 2 (- n 1))) (- (expt 2 (- n 1)) 1)))
+                 ((and (eq h 'mod) (integerp n) (> n 0)) (%int-etype 0 (- n 1)))
+                 ((eq h 'integer) (%int-etype (if (consp (cdr type)) (cadr type) '*) (if (consp (cddr type)) (caddr type) '*)))
+                 ((member h '(single-float short-float)) (if (cdr type) t 'single-float))
+                 (t t))))
+        (t t)))
+
+(defun %etype-default (code)
+  (cond ((null code) nil) ((= code 15) #\Space) ((<= code 12) 0) (t 0.0)))
+
+(defun %dims-total (dims)
+  (let ((p 1)) (dolist (d dims p) (unless (and (integerp d) (>= d 0)) (error "Bad array dimension ~S" d)) (setq p (* p d)))))
+
 (defun %make-md-array-of (dims initial-element initial-contents element-type)
-  (let* ((total (let ((p 1)) (dolist (d dims p) (unless (and (integerp d) (>= d 0)) (error "Bad array dimension ~S" d)) (setq p (* p d)))))
-         (data (if (eq element-type 'character) (make-string total (or initial-element #\Space)) (%make-vector total initial-element))))
+  (let* ((total (%dims-total dims))
+         (code (%etype-code (upgraded-array-element-type element-type)))
+         (chars (eql code 15))
+         (data (cond (chars (make-string total (or initial-element #\Space)))
+                     (code (%make-vector total (%etype-default code)))
+                     (t (%make-vector total initial-element))))
+         (a (%make-md-array data (copy-list dims) nil (and (not chars) code))))
+    (when (and code (not chars) initial-element (> total 0))
+      (%row-major-set a 0 initial-element)             ; type-check the initial element
+      (dotimes (i total) (%aset data i initial-element)))
     (when initial-contents
       (let ((elts (%flatten-contents initial-contents (length dims))) (i 0))
         (unless (= (length elts) total) (error "Initial contents do not match the dimensions ~S" dims))
-        (dolist (x elts) (%aset data i x) (setq i (+ i 1)))))
-    (%make-md-array data (copy-list dims))))
+        (dolist (x elts) (%row-major-set a i x) (setq i (+ i 1)))))
+    a))
 
-(defun make-array (dims &key initial-element initial-contents fill-pointer adjustable element-type displaced-to displaced-index-offset)
+(defun make-array (dims &key (initial-element nil ie-p) initial-contents fill-pointer adjustable (element-type t et-p)
+                          displaced-to (displaced-index-offset 0))
   "An array of dimensions DIMS (an integer for a vector, or a list): filled with INITIAL-ELEMENT or the nested
-INITIAL-CONTENTS.  A vector may have a FILL-POINTER and be ADJUSTABLE; ELEMENT-TYPE CHARACTER makes strings."
-  (declare (ignore displaced-index-offset))
-  (when displaced-to (error "Displaced arrays are not supported"))
-  (when (and (listp dims) (/= (length dims) 1))
-    (when fill-pointer (error "Only vectors have fill pointers"))
-    (return-from make-array (%make-md-array-of dims initial-element initial-contents element-type)))
-  (let ((n (if (consp dims) (car dims) dims)) (stringp (eq element-type 'character)))
-    (cond ((or fill-pointer adjustable)
-           (let ((v (%make-adjustable (max n 4) stringp)))
-             (if (and fill-pointer (not (eq fill-pointer t)))
-                 (%set-fill-pointer v fill-pointer)
-                 (when (eq fill-pointer t) (%set-fill-pointer v n)))
-             (when (and fill-pointer initial-element)
-               (dotimes (i (if (eq fill-pointer t) n fill-pointer)) (%aset v i initial-element)))
-             v))
-          (stringp (let ((s (make-string n (or initial-element #\Space))))
-                     (when initial-contents (let ((i 0)) (dolist (c (%elt-list initial-contents)) (%aset s i c) (setq i (+ i 1)))))
-                     s))
-          (t (let ((v (%make-vector n initial-element)))
-               (when initial-contents
-                 (let ((i 0)) (dolist (x (%elt-list initial-contents)) (%aset v i x) (setq i (+ i 1)))))
-               v)))))
+INITIAL-CONTENTS.  A vector may have a FILL-POINTER and be ADJUSTABLE.  ELEMENT-TYPE CHARACTER makes strings; the other
+types ARRAY-ELEMENT-TYPE reports (BIT, (UNSIGNED-BYTE 8), DOUBLE-FLOAT, ...) make specialised arrays whose stores are
+type-checked.  With DISPLACED-TO (and DISPLACED-INDEX-OFFSET) the array shares the elements of another array; its element
+type then defaults to the one of that array."
+  (let* ((dl (if (listp dims) dims (list dims)))
+         (vector-p (= (length dl) 1))
+         (code (if (and displaced-to (not et-p))
+                   (%array-etype displaced-to)
+                   (%etype-code (upgraded-array-element-type element-type))))
+         (chars (eql code 15))
+         (total (%dims-total dl)))
+    (when (and fill-pointer (not vector-p)) (error "Only vectors have fill pointers"))
+    (when (and (consp dims) (null (cdr dims)) (not (integerp (car dims)))) (error "Bad array dimension ~S" (car dims)))
+    (cond
+      (displaced-to
+       (when (or ie-p initial-contents) (error "MAKE-ARRAY: initial contents cannot be given for a displaced array"))
+       (unless (arrayp displaced-to) (error "MAKE-ARRAY: ~S is not an array to displace to" displaced-to))
+       (if vector-p
+           (%make-advec nil (cond ((eq fill-pointer t) total) (fill-pointer fill-pointer) (t total))
+                        (logior (if fill-pointer 0 1) (if adjustable 0 2)) code
+                        displaced-to displaced-index-offset total)
+           (%make-md-array displaced-to (copy-list dl) displaced-index-offset code)))
+      ((not vector-p) (%make-md-array-of dl initial-element initial-contents (%etype-from-code code)))
+      ((and code (not chars))
+       (let* ((n total)
+              (data (%make-vector n (%etype-default code)))
+              (fp (cond ((eq fill-pointer t) n) (fill-pointer fill-pointer) (t n)))
+              (v (%make-advec data fp (logior (if fill-pointer 0 1) (if adjustable 0 2)) code nil 0 n)))
+         (when (and ie-p (> n 0))
+           (%row-major-set v 0 initial-element)
+           (dotimes (i n) (%aset data i initial-element)))
+         (when initial-contents
+           (let ((i 0))
+             (unless (= (length initial-contents) n) (error "Initial contents do not match the dimension ~S" n))
+             (dolist (x (%elt-list initial-contents)) (%row-major-set v i x) (setq i (+ i 1)))))
+         v))
+      (t
+       (let ((n (car dl)) (stringp chars))
+         (cond ((or fill-pointer adjustable)
+                (let ((v (%make-adjustable (max n 4) stringp)))
+                  (if (and fill-pointer (not (eq fill-pointer t)))
+                      (%set-fill-pointer v fill-pointer)
+                      (when (eq fill-pointer t) (%set-fill-pointer v n)))
+                  (when (and fill-pointer initial-element)
+                    (dotimes (i (if (eq fill-pointer t) n fill-pointer)) (%aset v i initial-element)))
+                  (when (and fill-pointer initial-contents)
+                    (let ((i 0))
+                      (dolist (x (%elt-list initial-contents))
+                        (when (>= i (if (eq fill-pointer t) n fill-pointer)) (error "Initial contents do not fit the fill pointer"))
+                        (%aset v i x) (setq i (+ i 1)))))
+                  v))
+               (stringp (let ((s (make-string n (or initial-element #\Space))))
+                          (when initial-contents (let ((i 0)) (dolist (c (%elt-list initial-contents)) (%aset s i c) (setq i (+ i 1)))))
+                          s))
+               (t (let ((v (%make-vector n initial-element)))
+                    (when initial-contents
+                      (let ((i 0)) (dolist (x (%elt-list initial-contents)) (%aset v i x) (setq i (+ i 1)))))
+                    v))))))))
 
 (defun vector-push (x v) (vector-push-extend x v))
 (defun vector-pop (v)
@@ -222,9 +321,9 @@ INITIAL-CONTENTS.  A vector may have a FILL-POINTER and be ADJUSTABLE; ELEMENT-T
       (%set-fill-pointer v (- f 1))
       x)))
 (defun array-rank (a) "The number of dimensions of the array A." (if (%md-array-p a) (length (%md-dims a)) 1))
-(defun array-dimensions (a) "The dimensions of the array A, as a list." (if (%md-array-p a) (copy-list (%md-dims a)) (list (length a))))
+(defun array-dimensions (a) "The dimensions of the array A, as a list." (if (%md-array-p a) (copy-list (%md-dims a)) (list (%array-total-size a))))
 (defun array-dimension (a n) "Dimension N of the array A." (nth n (array-dimensions a)))
-(defun array-total-size (a) "The number of elements of the array A." (if (%md-array-p a) (length (%md-data a)) (length a)))
+(defun array-total-size (a) "The number of elements of the array A." (%array-total-size a))
 (defun array-row-major-index (a &rest subscripts)
   "The index in row-major order of the element of A at SUBSCRIPTS."
   (let ((dims (array-dimensions a)) (idx 0))
@@ -235,28 +334,51 @@ INITIAL-CONTENTS.  A vector may have a FILL-POINTER and be ADJUSTABLE; ELEMENT-T
   "True if SUBSCRIPTS are valid for the array A."
   (let ((dims (array-dimensions a)))
     (and (= (length dims) (length subscripts)) (every (lambda (s d) (and (integerp s) (< -1 s d))) subscripts dims))))
-(defun row-major-aref (a i) "The element of A at row-major index I." (if (%md-array-p a) (aref (%md-data a) i) (aref a i)))
-(defun %row-major-aset (a i v) (if (%md-array-p a) (%aset (%md-data a) i v) (%aset a i v)))
-(defun array-element-type (a) "The element type of A: CHARACTER for strings, else T."
-  (if (or (stringp a) (and (%md-array-p a) (stringp (%md-data a)))) 'character t))
-(defun adjustable-array-p (a) "True for an adjustable vector." (and (%advec-p a) t))
-(defun adjust-array (a new-dims &key initial-element initial-contents fill-pointer element-type)
-  "An array with dimensions NEW-DIMS holding the elements of A that fit (a new array; A is not changed)."
+(defun row-major-aref (a i) "The element of A at row-major index I." (%row-major-ref a i))
+(defun %row-major-aset (a i v) (%row-major-set a i v))
+(defun array-element-type (a)
+  "The (upgraded) element type of the array A: CHARACTER for strings, BIT or (UNSIGNED-BYTE 8) etc. for specialised arrays, else T."
+  (%etype-from-code (%array-etype a)))
+(defun array-displacement (a)
+  "Two values: the array A is displaced to (or NIL) and the index offset into it (0 when not displaced)."
+  (let ((to (%array-displaced-to a))) (if to (values to (%array-displacement-offset a)) (values nil 0))))
+(defun adjustable-array-p (a)
+  "True for an array made :ADJUSTABLE (or with a fill pointer): adjustable vectors."
+  (and (%advec-p a) (zerop (logand 2 (%advec-flags a)))))
+(defun bit (bit-array &rest subscripts) "The element of the bit array BIT-ARRAY at SUBSCRIPTS." (apply #'aref bit-array subscripts))
+(defun sbit (bit-array &rest subscripts) "The element of the simple bit array BIT-ARRAY at SUBSCRIPTS." (apply #'aref bit-array subscripts))
+(defun bit-vector-p (x) "True when X is a vector whose elements are bits." (and (vectorp x) (eq (array-element-type x) 'bit)))
+(defun simple-bit-vector-p (x) "True when X is a bit vector." (bit-vector-p x))
+(defun array-has-fill-pointer-p (v) "True for a vector with a fill pointer." (and (%advec-p v) (zerop (logand 1 (%advec-flags v)))))
+(defun adjust-array (a new-dims &key (initial-element nil ie-p) initial-contents fill-pointer element-type displaced-to (displaced-index-offset 0))
+  "Change the dimensions of A.  An adjustable vector is changed in place and returned; any other array is not changed
+and a new array holding the elements that fit is returned.  With DISPLACED-TO the result shares the elements of that array."
   (let* ((dims (if (listp new-dims) new-dims (list new-dims)))
-         (new (make-array (if (= (length dims) 1) (car dims) dims) :initial-element initial-element
-                          :initial-contents initial-contents :fill-pointer fill-pointer :adjustable (%advec-p a)
-                          :element-type (or element-type (array-element-type a)))))
-    (unless initial-contents
-      (let ((old-dims (array-dimensions a)))
-        (when (= (length old-dims) (length dims))
-          (labels ((copy (subs od nd)
-                     (if (null od) (apply #'%aset new (append (reverse subs) (list (apply #'aref a (reverse subs)))))
-                         (dotimes (i (min (car od) (car nd))) (copy (cons i subs) (cdr od) (cdr nd))))))
-            (if (%advec-p a)
-                (dotimes (i (min (length a) (car dims))) (vector-push-extend (aref a i) new))
-                (copy nil old-dims dims))))))
-    new))
-(defun array-has-fill-pointer-p (v) (and (%advec-p v) t))
+         (vector-p (null (cdr dims)))
+         (et (or element-type (array-element-type a)))
+         (arg (if vector-p (car dims) dims))
+         (new nil))
+    (unless (= (length dims) (array-rank a)) (error "ADJUST-ARRAY: the new array must have rank ~D, not ~D" (array-rank a) (length dims)))
+    (if displaced-to
+        (setq new (make-array arg :element-type et :displaced-to displaced-to :displaced-index-offset displaced-index-offset
+                                  :adjustable t
+                                  :fill-pointer (and vector-p (or fill-pointer (and (array-has-fill-pointer-p a) (fill-pointer a))))))
+        (let ((fp (and vector-p (or fill-pointer (array-has-fill-pointer-p a)))))
+          (setq new (apply #'make-array arg :fill-pointer (and fp t) :adjustable (adjustable-array-p a) :element-type et
+                           (append (and ie-p (list :initial-element initial-element))
+                                   (and initial-contents (list :initial-contents initial-contents)))))
+          (when (and vector-p (array-has-fill-pointer-p new)) (%set-fill-pointer new (car dims)))
+          (unless initial-contents
+            (if vector-p
+                (dotimes (i (min (length a) (car dims))) (%aset new i (aref a i)))
+                (let ((old-dims (array-dimensions a)))
+                  (labels ((copy (subs od nd)
+                             (if (null od) (apply #'%aset new (append (reverse subs) (list (apply #'aref a (reverse subs)))))
+                                 (dotimes (i (min (car od) (car nd))) (copy (cons i subs) (cdr od) (cdr nd))))))
+                    (copy nil old-dims dims)))))
+          (when (and vector-p (array-has-fill-pointer-p new))
+            (%set-fill-pointer new (or fill-pointer (if initial-contents (car dims) (min (length a) (car dims))))))))
+    (if (adjustable-array-p a) (%array-become a new) new)))
 
 (defun coerce (x type)
   (let ((ty (if (consp type) (car type) type)))

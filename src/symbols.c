@@ -77,10 +77,23 @@ static int pathname_struct_p(Obj o) {
   return str_equal_c(SYM_NAME(name), "PATHNAME", 8) || str_equal_c(SYM_NAME(name), "LOGICAL-PATHNAME", 16);
 }
 
+/* adjustable vectors that hold characters compare as strings */
+static Obj str_view(Obj o) { return (IS_TYPE(o, T_ADVEC) && av_char_p(o)) ? av_to_string(o) : o; }
+static int bitvec_p(Obj o) { return IS_TYPE(o, T_ADVEC) && SLOT(o, AV_ETYPE) == FIX(AE_BIT); }
+static long vec_len(Obj o) { return VECTORP(o) ? (long)OBJ_NWORDS(o) : av_length(o); }
+static Obj vec_ref(Obj o, long i) { return VECTORP(o) ? SLOT(o, i) : av_ref(o, i); }
+
 int equal(Obj a, Obj b) {
   STACK_CHECK();
   for (;;) {
     if (eql(a, b)) return 1;
+    a = str_view(a); b = str_view(b);
+    if (bitvec_p(a) && bitvec_p(b)) {                       /* bit vectors: by element */
+      long n = av_length(a);
+      if (n != av_length(b)) return 0;
+      for (long i = 0; i < n; i++) if (av_ref(a, i) != av_ref(b, i)) return 0;
+      return 1;
+    }
     if (CONSP(a) && CONSP(b)) { if (!equal(CAR(a), CAR(b))) return 0; a = CDR(a); b = CDR(b); continue; }
     if (STRINGP(a) && STRINGP(b)) return str_equal(a, b);
     if (pathname_struct_p(a) && pathname_struct_p(b) && SLOT(a, 0) == SLOT(b, 0) && OBJ_NWORDS(a) == OBJ_NWORDS(b)) {
@@ -97,6 +110,13 @@ int equalp(Obj a, Obj b) {
   STACK_CHECK();
   for (;;) {
     if (eql(a, b)) return 1;
+    a = str_view(a); b = str_view(b);
+    if ((IS_TYPE(a, T_ADVEC) && (IS_TYPE(b, T_ADVEC) || VECTORP(b))) || (IS_TYPE(b, T_ADVEC) && VECTORP(a))) {   /* vectors: by element */
+      long n = vec_len(a);
+      if (n != vec_len(b)) return 0;
+      for (long i = 0; i < n; i++) if (!equalp(vec_ref(a, i), vec_ref(b, i))) return 0;
+      return 1;
+    }
     if (is_number(a) && is_number(b)) return num_equal(a, b);
     if (CHARP(a) && CHARP(b)) return char_eqi(CHAR_CODE(a), CHAR_CODE(b));
     if (CONSP(a) && CONSP(b)) { if (!equalp(CAR(a), CAR(b))) return 0; a = CDR(a); b = CDR(b); continue; }
@@ -113,6 +133,11 @@ int equalp(Obj a, Obj b) {
     }
     if (IS_TYPE(a, T_MDARRAY) && IS_TYPE(b, T_MDARRAY)) {       /* same dimensions, elements EQUALP */
       if (!equal(SLOT(a, AR_DIMS), SLOT(b, AR_DIMS))) return 0;
+      if (SLOT(a, AR_OFFSET) != NIL || SLOT(b, AR_OFFSET) != NIL) {          /* a displaced array: compare element by element */
+        long n = arr_total(a);
+        for (long i = 0; i < n; i++) if (!equalp(arr_rm_ref(a, i), arr_rm_ref(b, i))) return 0;
+        return 1;
+      }
       a = SLOT(a, AR_DATA); b = SLOT(b, AR_DATA);
       continue;
     }

@@ -28,6 +28,12 @@ prints and reads as `#2A((0 0 0) (0 0 0))`. `array-rank`, `array-dimensions`, `a
 `array-row-major-index`, `row-major-aref`, `array-in-bounds-p` and `adjust-array` work on arrays of any rank. A one-dimensional array is a
 vector; vectors can have a fill pointer and be adjustable.
 
+`(make-array 8 :element-type '(unsigned-byte 8))` makes a specialised array: its elements start at 0 and every store is checked
+against the type, so `(setf (aref a 0) 256)` is a `type-error`. `bit` vectors print and read as `#*0101`. [upgraded-array-element-type](fn:upgraded-array-element-type)
+tells which type an `:element-type` becomes. `(make-array 4 :displaced-to a :displaced-index-offset 2)` shares four elements of
+`a` (any array, in row-major order), so a vector can be a window onto a matrix; [array-displacement](fn:array-displacement) gives the
+target and offset, and [adjust-array](fn:adjust-array) re-aims an adjustable one. Specialised arrays are not packed: each element still takes a word.
+
 ## Sequences and hash tables
 
 The sequence functions work on lists, vectors and strings: [remove](fn:remove), [find](fn:find),
@@ -157,7 +163,7 @@ compiled compiler produces byte-identical output.
 
 ## Not implemented
 
-Displaced arrays and specialised array element types, and making characters whitespace with `set-syntax-from-char`.
+Packed storage for specialised arrays (they check their element type, but each element still takes a word).
 
 The garbage collector is generational: new objects are collected cheaply while they are young, and a full collection
 copies the old ones only when they have grown. Collection never runs inside a primitive, so a pause is short and

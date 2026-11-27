@@ -93,7 +93,7 @@ PRIM(p_term_write_codes) {
   UNUSED_ARGS;
   Obj v = argv[0]; size_t n; Obj data;
   if (IS_TYPE(v, T_VECTOR)) { data = v; n = OBJ_NWORDS(v); }
-  else if (IS_TYPE(v, T_ADVEC) && VECTORP(SLOT(v, AV_DATA))) { data = SLOT(v, AV_DATA); n = (size_t)UNFIX(SLOT(v, AV_FILL)); }
+  else if (IS_TYPE(v, T_ADVEC) && SLOT(v, AV_DISP) == NIL && VECTORP(SLOT(v, AV_DATA))) { data = SLOT(v, AV_DATA); n = (size_t)UNFIX(SLOT(v, AV_FILL)); }
   else type_error("VECTOR", v);
   unsigned char *buf = malloc(n * 4 + 1);
   size_t len = 0;

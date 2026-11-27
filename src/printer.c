@@ -192,7 +192,7 @@ static int composite_p(Obj o) {
   if (!OBJP(o)) return 0;
   switch (OBJ_TYPE(o)) {
   case T_VECTOR: case T_MDARRAY: case T_STRUCT: return 1;
-  case T_ADVEC: return !STRINGP(SLOT(o, AV_DATA));
+  case T_ADVEC: return !av_char_p(o);
   default: return 0;
   }
 }
@@ -235,9 +235,9 @@ static void circ_scan(CTab *t, Obj o) {
     if (ct_visit(t, o)) return;
     switch (OBJ_TYPE(o)) {
     case T_VECTOR: for (size_t i = 0; i < OBJ_NWORDS(o); i++) circ_scan(t, SLOT(o, i)); break;
-    case T_ADVEC: { Obj d = SLOT(o, AV_DATA); long fill = (long)UNFIX(SLOT(o, AV_FILL)); for (long i = 0; i < fill; i++) circ_scan(t, SLOT(d, i)); break; }
+    case T_ADVEC: { long fill = av_length(o); for (long i = 0; i < fill; i++) circ_scan(t, av_ref(o, i)); break; }
     case T_STRUCT: for (size_t i = 1; i < OBJ_NWORDS(o); i++) circ_scan(t, SLOT(o, i)); break;
-    case T_MDARRAY: { Obj d = SLOT(o, AR_DATA); if (!STRINGP(d)) circ_scan(t, d); break; }
+    case T_MDARRAY: { Obj d = SLOT(o, AR_DATA); if (SLOT(o, AR_OFFSET) == NIL && !STRINGP(d)) circ_scan(t, d); break; }
     default: break;
     }
     return;
@@ -249,7 +249,7 @@ static int circ_shared(Obj o) { long *p = pr_circ ? ct_find(pr_circ, o) : NULL; 
 /* the elements of a multi-dimensional array from row-major index START, as nested lists by DIMS */
 static long print_md(Buf *b, Obj data, Obj dims, long start, int escape, int readable, int depth) {
   if (dims == NIL) {
-    Obj x = STRINGP(data) ? MK_CHAR(str_ref(data, (size_t)start)) : SLOT(data, start);
+    Obj x = arr_rm_ref(data, start);
     print_rec(b, x, escape, readable, depth + 1);
     return start + 1;
   }
@@ -325,23 +325,21 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_MDARRAY: {
     Obj dims = SLOT(o, AR_DIMS); long rank = list_length(dims);
     char hdr[32]; snprintf(hdr, sizeof hdr, "#%ldA", rank); buf_puts(b, hdr);
-    print_md(b, SLOT(o, AR_DATA), dims, 0, escape, readable, depth);
+    print_md(b, o, dims, 0, escape, readable, depth);
     return;
   }
   case T_ADVEC: {
-    Obj data = SLOT(o, AV_DATA); long fill = (long)UNFIX(SLOT(o, AV_FILL));
-    if (STRINGP(data)) {
-      Obj s = substring(data, 0, (size_t)fill);
-      print_string(b, s, escape);
-    } else {
-      buf_puts(b, "#(");
-      for (long i = 0; i < fill; i++) {
-        if (i) buf_putc(b, ' ');
-        if (pr_length >= 0 && i >= pr_length) { buf_puts(b, "..."); break; }
-        print_rec(b, SLOT(data, i), escape, readable, depth + 1);
-      }
-      buf_putc(b, ')');
+    long fill = av_length(o);
+    if (av_char_p(o)) { print_string(b, av_to_string(o), escape); return; }
+    int bits = SLOT(o, AV_ETYPE) == FIX(AE_BIT);
+    buf_puts(b, bits ? "#*" : "#(");
+    for (long i = 0; i < fill; i++) {
+      if (bits) { buf_putc(b, UNFIX(av_ref(o, i)) ? '1' : '0'); continue; }
+      if (i) buf_putc(b, ' ');
+      if (pr_length >= 0 && i >= pr_length) { buf_puts(b, "..."); break; }
+      print_rec(b, av_ref(o, i), escape, readable, depth + 1);
     }
+    if (!bits) buf_putc(b, ')');
     return;
   }
   case T_EVALFN: buf_puts(b, "#<FUNCTION "); print_rec(b, SLOT(o, EF_NAME), 1, 0, depth + 1); buf_putc(b, '>'); return;

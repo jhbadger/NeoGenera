@@ -55,7 +55,12 @@ numerator and a (positive, >1) denominator in lowest terms; `/` of integers is e
 imaginary part is made a real number. The generic operations (`num_add` and so on) handle it
 componentwise, `=` uses `num_equal` (complex numbers have no order), and the transcendental functions
 use C99 `<complex.h>`. A multi-dimensional array (`T_MDARRAY`) holds its elements in row-major order in a
-simple vector (or a string) and its dimensions as a list; vectors stay one-dimensional objects. Floats print and read
+simple vector (or a string) and its dimensions as a list; vectors stay one-dimensional objects. Two more slots make it
+displaced (`AR_OFFSET`, with `AR_DATA` then the array it shares elements with) and specialised (`AR_ETYPE`, an `AE_` code that
+`arr_rm_set` checks every store against). Every non-simple vector is a `T_ADVEC` (fill pointer, adjustable, specialised or
+displaced: slots `AV_DATA AV_FILL AV_FLAGS AV_ETYPE AV_DISP AV_OFF AV_DIM`); all element access goes through `arr_rm_ref` /
+`arr_rm_set`, which bounds-check, follow displacement and check element types, and `%make-advec` / `%make-md-array` validate
+their arguments so no array can make them read outside its storage. Storage is one word per element whatever the type. Floats print and read
 as doubles only.
 
 ## Characters and strings

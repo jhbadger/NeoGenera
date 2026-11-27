@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+* **Specialised array element types, displaced arrays, and whitespace via `set-syntax-from-char`.** `make-array :element-type`
+  now builds specialised arrays (`bit`, `(unsigned-byte 8)`, `(signed-byte 32)`, `double-float`, ... see
+  `upgraded-array-element-type`): elements default to 0 / 0.0, every store is checked, `array-element-type` reports the type, and
+  `typep` understands `(array (unsigned-byte 8) (*))`, `bit-vector` and so on. Bit vectors print and read as `#*0101` (`bit`, `sbit`,
+  `bit-vector-p` added). `make-array :displaced-to` / `:displaced-index-offset` now work for vectors, multi-dimensional arrays and
+  strings, in any combination (a vector over a matrix, chains of displacement), with `array-displacement`; `adjust-array` changes an
+  adjustable vector in place and can displace it. `set-syntax-from-char` copies whitespace and constituent syntax as well as macro
+  syntax (so `(set-syntax-from-char #\, #\Space)` works), and a copied built-in macro such as `'` now reads correctly under its new
+  character. Also fixed: `(setf (fill-pointer v) n)` accepted any `n`; `reverse`, `equal`/`equalp` and the string functions
+  now accept fill-pointer and displaced vectors; `:initial-contents` is honoured with `:fill-pointer t`. Storage is not bit-packed
+  (docs/COMPATIBILITY.md). C: `AV_`/`AR_` slots in `src/neogenera.h`, `src/prims_data.c`, `src/reader.c` (a per-character syntax table in the
+  readtable); fasl format version 3 (`AR_ETYPE` is dumped). Tests: `tests/lisp/array-tests.lisp`.
+
 * **The compiler honours declarations.** `(declare (type ...))` and the shorthand forms, `the`, `(declaim (type ...))`, `(declaim
   (ftype ...))` and `optimize` / `notinline` are acted on instead of ignored. A new pass between analysis and code generation
   (`lisp/compiler/15-specialize.lisp`) infers types, with interval arithmetic for integers, and replaces generic calls whose

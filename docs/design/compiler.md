@@ -120,7 +120,7 @@ and float loops at `safety 0`, and none on code that is already dominated by cal
 Lisp side (`30-driver.lisp`) only collects entries and decodes them one at a time.
 
     bytes 0-7    7F 'N' 'F' 'A' 'S' 'L' 0D 0A      magic (the CR LF catches text-mode damage)
-    byte  8      format version (2)
+    byte  8      format version (3)
     bytes 9-11   zero
     bytes 12-15  entry count (u32 little-endian)
     entries      u32 length, then that many bytes: one encoded code object per top-level form

@@ -107,11 +107,31 @@ enum { ST_KIND, ST_FILE, ST_BUF, ST_LEN, ST_POS, ST_COL, ST_PEEK, ST_SLOTS };
 enum { SK_STDIN, SK_STDOUT, SK_STDERR, SK_FILE_IN, SK_FILE_OUT, SK_STR_IN, SK_STR_OUT, SK_CLOSED };
 /* packages */
 enum { PK_NAME, PK_NICK, PK_INTERNAL, PK_EXTERNAL, PK_USES, PK_USEDBY, PK_SHADOW, PK_LOCK, PK_SLOTS };
-/* adjustable vectors */
-enum { AV_DATA, AV_FILL, AV_SLOTS };
+/* non-simple vectors: adjustable vectors, fill-pointer vectors, specialised vectors and displaced vectors.
+   AV_DATA is the storage (a simple vector or a string), or NIL for a displaced vector; AV_FILL the number of active elements
+   (the length -- for a vector without a fill pointer the whole dimension); AV_FLAGS (a fixnum or NIL, meaning 0) holds
+   AVF_ bits; AV_ETYPE is NIL (element type T) or an AE_ code; AV_DISP the array this one is displaced to (or NIL), AV_OFF the
+   index offset into it and AV_DIM the dimension of a displaced vector. */
+enum { AV_DATA, AV_FILL, AV_FLAGS, AV_ETYPE, AV_DISP, AV_OFF, AV_DIM, AV_SLOTS };
+#define AVF_NOFP  1    /* no fill pointer (a plain specialised or displaced vector) */
+#define AVF_FIXED 2    /* not adjustable */
 /* a multi-dimensional array: its elements in row-major order (a simple vector, or a string for characters) and its
-   dimensions (a list of fixnums; rank 0 has one element) */
-enum { AR_DATA, AR_DIMS, AR_SLOTS };
+   dimensions (a list of fixnums; rank 0 has one element).  AR_OFFSET is NIL, or -- for a displaced array -- the index
+   offset into the array AR_DATA is then (any kind of array).  AR_ETYPE is NIL or an AE_ code. */
+enum { AR_DATA, AR_DIMS, AR_OFFSET, AR_ETYPE, AR_SLOTS };
+/* specialised element types (the codes stored in AV_ETYPE / AR_ETYPE; array storage is still one word per element, but
+   stores are checked against the type) */
+enum { AE_BIT = 1, AE_UB2, AE_UB4, AE_UB8, AE_UB16, AE_UB32, AE_UB64, AE_SB8, AE_SB16, AE_SB32, AE_SB64, AE_FIXNUM,
+       AE_SINGLE, AE_DOUBLE, AE_CHAR, AE_LAST = AE_CHAR };
+long  arr_total(Obj a);                  /* the total size of any array (vector, string, adjustable vector, md array) */
+Obj   arr_rm_ref(Obj a, long i);         /* the element at row-major index I (bounds checked) */
+void  arr_rm_set(Obj a, long i, Obj v);  /* store it (bounds and element type checked) */
+long  av_length(Obj v);                  /* the active length of an adjustable vector */
+Obj   av_ref(Obj v, long i);             /* element I (< the length) of an adjustable vector */
+Obj   av_to_string(Obj v);               /* a character vector as a string (NIL when it is not one) */
+int   av_char_p(Obj v);                  /* whether an adjustable vector holds characters */
+Obj   av_copy(Obj v, long start, long end, int reversed);  /* a fresh copy of part of an adjustable vector */
+Obj   arr_etype(Obj a);                  /* the AE_ code (a fixnum) or NIL */
 
 /* ---- memory ----------------------------------------------------------- */
 void  init_memory(void);
@@ -442,6 +462,7 @@ Obj   open_file_stream(const char *path, int output, int append);
 void  init_streams(void);
 
 Obj   read_form(Obj stream, int *eof);          /* sets *eof=1 at EOF       */
+int   reader_whitespace_p(int c);               /* whitespace[2] in the current readtable */
 void  init_reader_prims(void);
 Obj   read_form_recursive(Obj stream, int *eof); /* from a reader macro: keeps the backquote depth */
 Obj   read_from_cstring(const char *s);

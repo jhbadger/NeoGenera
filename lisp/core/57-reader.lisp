@@ -3,7 +3,10 @@
 ;;;; The reader itself is C (src/reader.c).  *READTABLE* holds a READTABLE structure that it consults: macro
 ;;;; characters call Lisp functions (STREAM CHAR), dispatch characters such as # call a function for their
 ;;;; sub-character (STREAM SUB-CHAR ARG), and the readtable case controls how symbol names are converted.  Only
-;;;; characters below 128 can be macro characters.  The slot order of READTABLE is known to the C reader.
+;;;; characters below 128 can be macro characters or have their syntax changed.  The slot order of READTABLE is known to
+;;;; the C reader.  The SYNTAX slot holds, per character, NIL (the standard syntax: whitespace for space, tab, newline,
+;;;; return, page and VT, macro syntax for the characters ( ) ' ` , " ; #, a constituent otherwise), T (whitespace) or 0
+;;;; (neither: a constituent, or a macro character whose function is in MACROS).
 
 (in-package :cl)
 
@@ -11,7 +14,8 @@
   (case 0)                                             ; 0 :upcase, 1 :downcase, 2 :preserve, 3 :invert
   (macros (make-array 128 :initial-element nil))       ; function per character, or NIL
   (terminating (make-array 128 :initial-element nil))  ; T for a terminating macro character
-  (dispatch (make-array 128 :initial-element nil)))    ; for a dispatch character: a vector of 128 functions
+  (dispatch (make-array 128 :initial-element nil))     ; for a dispatch character: a vector of 128 functions
+  (syntax (make-array 128 :initial-element nil)))      ; per character: NIL standard syntax, T whitespace, 0 no standard syntax
 
 (defmethod print-object ((rt readtable) stream) (write-string "#<READTABLE>" stream))
 
@@ -43,7 +47,8 @@
     (setf (%rt-case dst) (%rt-case src)
           (%rt-macros dst) (copy-seq (%rt-macros src))
           (%rt-terminating dst) (copy-seq (%rt-terminating src))
-          (%rt-dispatch dst) (map 'vector (lambda (d) (and d (copy-seq d))) (%rt-dispatch src)))
+          (%rt-dispatch dst) (map 'vector (lambda (d) (and d (copy-seq d))) (%rt-dispatch src))
+          (%rt-syntax dst) (copy-seq (%rt-syntax src)))
     dst))
 
 (defun set-macro-character (char function &optional non-terminating-p (readtable *readtable*))
@@ -52,14 +57,16 @@ read (or no values, for something like a comment).  Unless NON-TERMINATING-P, CH
   (let ((code (%rt-code char)))
     (setf (svref (%rt-macros readtable) code) (%designated-function function)
           (svref (%rt-terminating readtable) code) (not non-terminating-p)
-          (svref (%rt-dispatch readtable) code) nil)
+          (svref (%rt-dispatch readtable) code) nil
+          (svref (%rt-syntax readtable) code) 0)
     t))
 
 ;;; The built-in syntax, as functions (what GET-MACRO-CHARACTER returns for a standard character)
 (defun %standard-macro-function (char)
   (case char
     (#\; (lambda (stream c) (declare (ignore c)) (read-line stream nil) (values)))
-    ((#\( #\) #\' #\` #\, #\" #\#) (lambda (stream c) (%read-standard-macro stream c)))
+    ((#\( #\) #\' #\` #\, #\" #\#)                      ; the function reads as CHAR whatever character it is copied to
+     (lambda (stream c) (declare (ignore c)) (%read-standard-macro stream char)))
     (t nil)))
 
 (defun get-macro-character (char &optional (readtable *readtable*))
@@ -67,8 +74,15 @@ read (or no values, for something like a comment).  Unless NON-TERMINATING-P, CH
   (let* ((rt (or readtable %standard-readtable)) (code (char-code char))
          (fn (and (< code 128) (svref (%rt-macros rt) code))))
     (cond (fn (values fn (not (svref (%rt-terminating rt) code))))
+          ((and (< code 128) (svref (%rt-syntax rt) code)) (values nil nil))   ; made whitespace or a constituent
           ((%standard-macro-function char) (values (%standard-macro-function char) (char= char #\#)))
           (t (values nil nil)))))
+
+(defun %whitespace-char-p (char readtable)
+  "True when CHAR is whitespace[2] in READTABLE."
+  (let* ((code (char-code char)) (syn (and (< code 128) (svref (%rt-syntax readtable) code))))
+    (cond ((< code 128) (cond ((eq syn t) t) (syn nil) (t (and (member code '(9 10 11 12 13 32)) t))))
+          (t nil))))
 
 (defun %read-dispatch-arg (stream)
   (let ((n nil))
@@ -116,13 +130,27 @@ calls the function set with SET-DISPATCH-MACRO-CHARACTER for it."
           (t nil))))
 
 (defun set-syntax-from-char (to-char from-char &optional (to-readtable *readtable*) (from-readtable nil))
-  "Give TO-CHAR the reader syntax FROM-CHAR has: its macro function, terminating-ness and dispatch table, or,
-for a constituent, no macro.  (Only macro syntax can be copied: a character cannot be made whitespace.)"
-  (let ((to (%rt-code to-char)) (from (%rt-code from-char)) (src (or from-readtable %standard-readtable)))
+  "Give TO-CHAR in TO-READTABLE the syntax FROM-CHAR has in FROM-READTABLE (the standard readtable if NIL): whitespace,
+a macro character (with its function, terminating-ness and dispatch table), or a constituent.  Setting a character
+from a whitespace character makes it separate tokens; setting a standard whitespace character from a letter makes it a
+constituent.  TO-CHAR must be below 128."
+  (let* ((from (char-code from-char)) (src (or from-readtable %standard-readtable)) (dst to-readtable)
+         (to (if (< (char-code to-char) 128) (char-code to-char) -1)))
+    (when (< to 0)                       ; characters above 127 are always constituents
+      (when (or (get-macro-character from-char src) (%whitespace-char-p from-char src))
+        (error "Only characters below 128 can be given macro or whitespace syntax, not ~S" to-char))
+      (return-from set-syntax-from-char t))
     (multiple-value-bind (fn non-term) (get-macro-character from-char src)
-      (setf (svref (%rt-macros to-readtable) to) fn
-            (svref (%rt-terminating to-readtable) to) (and fn (not non-term))
-            (svref (%rt-dispatch to-readtable) to) (let ((d (svref (%rt-dispatch src) from))) (and d (copy-seq d)))))
+      (cond (fn
+             (setf (svref (%rt-macros dst) to) fn
+                   (svref (%rt-terminating dst) to) (not non-term)
+                   (svref (%rt-dispatch dst) to) (let ((d (and (< from 128) (svref (%rt-dispatch src) from)))) (and d (copy-seq d)))
+                   (svref (%rt-syntax dst) to) 0))
+            (t
+             (setf (svref (%rt-macros dst) to) nil
+                   (svref (%rt-terminating dst) to) nil
+                   (svref (%rt-dispatch dst) to) nil
+                   (svref (%rt-syntax dst) to) (if (%whitespace-char-p from-char src) t 0)))))
     t))
 
 (defun read-delimited-list (char &optional stream recursive-p)
@@ -142,4 +170,19 @@ for a constituent, no macro.  (Only macro syntax can be copied: a character cann
 (setq %standard-readtable (%make-readtable))
 (setf (svref (%rt-dispatch %standard-readtable) (char-code #\#)) (make-array 128 :initial-element nil))
 (set-dispatch-macro-character #\# #\A (lambda (stream c n) (declare (ignore c)) (%read-sharp-a (read stream t nil t) n)) %standard-readtable)
+;;; #*0101: a bit vector (#n* repeats the last bit, or pads with 0)
+(defun %read-sharp-star (stream c n)
+  (declare (ignore c))
+  (let ((bits nil))
+    (loop (let ((ch (peek-char nil stream nil nil)))
+            (if (and ch (or (char= ch #\0) (char= ch #\1)))
+                (progn (read-char stream) (setq bits (cons (if (char= ch #\1) 1 0) bits)))
+                (return))))
+    (setq bits (nreverse bits))
+    (let* ((len (or n (length bits))) (v (make-array len :element-type 'bit)) (last 0) (i 0))
+      (when (> (length bits) len) (error "READ error: #*~D has ~D bits" len (length bits)))
+      (dolist (b bits) (setq last b) (%aset v i b) (setq i (+ i 1)))
+      (loop while (< i len) do (%aset v i last) (setq i (+ i 1)))
+      v)))
+(set-dispatch-macro-character #\# #\* #'%read-sharp-star %standard-readtable)
 (setq *readtable* (copy-readtable %standard-readtable))

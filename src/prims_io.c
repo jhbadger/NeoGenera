@@ -13,8 +13,8 @@ static Obj in_arg(int argc, Obj *argv, int i) { return designate_in(argc > i ? a
 PRIM(p_write_string) {
   Obj s = argv[0];
   if (!STRINGP(s)) {
-    if (IS_TYPE(s, T_ADVEC) && STRINGP(SLOT(s, AV_DATA))) s = substring(SLOT(s, AV_DATA), 0, (size_t)UNFIX(SLOT(s, AV_FILL)));
-    else type_error("STRING", s);
+    Obj str = IS_TYPE(s, T_ADVEC) ? av_to_string(s) : NIL;
+    if (str != NIL) s = str; else type_error("STRING", s);
   }
   Obj st = out_arg(argc, argv, 1);
   size_t start = 0, end = str_len(s);
@@ -85,7 +85,7 @@ PRIM(p_peek_char) {
   /* (peek-char peek-type stream eof-error-p eof-value) */
   Obj st = in_arg(argc, argv, 1);
   int c;
-  if (argc > 0 && argv[0] == TT) { while ((c = stream_getc(st)) >= 0 && (c == ' ' || c == '\n' || c == '\t' || c == '\r')) ; stream_ungetc(st, c); }
+  if (argc > 0 && argv[0] == TT) { while ((c = stream_getc(st)) >= 0 && reader_whitespace_p(c)) ; stream_ungetc(st, c); }
   else c = stream_peekc(st);
   c = stream_peekc(st);
   if (c < 0) { if (argc > 2 && argv[2] == NIL) return argc > 3 ? argv[3] : NIL; lisp_error("End of file"); }

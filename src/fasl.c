@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FASL_VERSION 2
+#define FASL_VERSION 3
 #define FASL_HEADER 16
 
 enum {
@@ -157,7 +157,9 @@ static void enc_obj(Enc *e, Obj o) {
       for (size_t i = 0; i < n; i++) enc_obj(e, SLOT(o, i));
       return;
     }
-    case T_MDARRAY: put_byte(e, FT_MDARRAY); enc_obj(e, SLOT(o, AR_DATA)); enc_obj(e, SLOT(o, AR_DIMS)); return;
+    case T_MDARRAY:
+      if (SLOT(o, AR_OFFSET) != NIL) lisp_error("Cannot dump a displaced array into a fasl file");
+      put_byte(e, FT_MDARRAY); enc_obj(e, SLOT(o, AR_DATA)); enc_obj(e, SLOT(o, AR_DIMS)); enc_obj(e, SLOT(o, AR_ETYPE)); return;
     case T_CODE: enc_code(e, o); return;
     default: break;
     }
@@ -406,10 +408,17 @@ static Obj dec_obj(Dec *d) {
     return s;
   }
   case FT_MDARRAY: {
-    Obj data = dec_obj(d), dims = dec_obj(d);
+    Obj data = dec_obj(d), dims = dec_obj(d), et = dec_obj(d);
     if (!VECTORP(data) && !STRINGP(data)) bad("bad array data");
+    if (et != NIL && (!FIXP(et) || UNFIX(et) < 1 || UNFIX(et) > AE_LAST)) bad("bad array element type");
+    long n = 1;
+    for (Obj dl = dims; dl != NIL; dl = CDR(dl)) {
+      if (!CONSP(dl) || !FIXP(CAR(dl)) || UNFIX(CAR(dl)) < 0 || UNFIX(CAR(dl)) > (1L << 40)) bad("bad array dimensions");
+      n *= (long)UNFIX(CAR(dl)); if (n > (1L << 40)) bad("bad array dimensions");
+    }
+    if (n > (VECTORP(data) ? (long)OBJ_NWORDS(data) : (long)str_len(data))) bad("array data too short");
     Obj a = make_obj(T_MDARRAY, AR_SLOTS);
-    SLOT(a, AR_DATA) = data; SLOT(a, AR_DIMS) = dims; WB(a, data); WB(a, dims);
+    SLOT(a, AR_DATA) = data; SLOT(a, AR_DIMS) = dims; SLOT(a, AR_ETYPE) = et; WB(a, data); WB(a, dims);
     return a;
   }
   case FT_SYMBOL: {

@@ -17,13 +17,16 @@ static Obj rd(Obj s);
 static void reader_error(const char *msg) __attribute__((noreturn));
 static void reader_error(const char *msg) { lisp_error("READ error: %s", msg); }
 
-static int is_ws(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 11; }
+static int builtin_ws(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 11; }
 /* ---- the current readtable ------------------------------------------------------------------------------
  * *READTABLE* is NIL (built-in syntax only) or a READTABLE structure (lisp/core/57-reader.lisp) whose slots are
  * 1: case (fixnum: 0 upcase, 1 downcase, 2 preserve, 3 invert), 2: macro functions, 3: terminating flags and
- * 4: dispatch tables, each a vector indexed by character code below 128.  A dispatch table is a vector of 128
+ * 4: dispatch tables and 5: syntax overrides, each a vector indexed by character code below 128.  A syntax entry is NIL
+ * (the character has the standard syntax: whitespace for space, tab, newline, return, page and VT; a macro character
+ * for ( ) ' ` , " ; and #; a constituent otherwise), T (whitespace) or 0 (a plain constituent, or a macro character
+ * whose function is in the macro table: neither whitespace nor standard macro syntax).  A dispatch table is a vector of 128
  * functions indexed by the upper-case sub-character. */
-#define RT_SLOTS 5
+#define RT_SLOTS 6
 static Obj cur_rt(void) {
   Obj rt = SYM_VALUE(Q_readtable);
   if (!IS_TYPE(rt, T_STRUCT) || OBJ_NWORDS(rt) < RT_SLOTS) return NIL;
@@ -36,10 +39,20 @@ static Obj rt_vec(Obj rt, int slot, int c) {
 }
 static int rt_case(void) { Obj rt = cur_rt(); return rt == NIL || !FIXP(SLOT(rt, 1)) ? 0 : (int)UNFIX(SLOT(rt, 1)); }
 
+/* the syntax override of C in the current readtable: NIL (standard), TT (whitespace) or FIX(0) (no standard syntax) */
+static Obj rt_syntax(int c) { Obj rt = cur_rt(); return rt == NIL ? NIL : rt_vec(rt, 5, c); }
+static int is_ws(int c) {
+  Obj syn = rt_syntax(c);
+  return syn == TT ? 1 : syn == NIL ? builtin_ws(c) : 0;
+}
+/* whether C still has the built-in macro syntax (it has not been made whitespace or a constituent) */
+static int builtin_syntax_p(int c) { return rt_syntax(c) == NIL; }
+int reader_whitespace_p(int c) { return is_ws(c); }       /* for PEEK-CHAR T: whitespace[2] in the current readtable */
 static int is_term(int c) {
-  if (c == '(' || c == ')' || c == '\'' || c == '"' || c == ';' || c == '`' || c == ',') return 1;
   Obj rt = cur_rt();
-  return rt != NIL && rt_vec(rt, 2, c) != NIL && rt_vec(rt, 3, c) != NIL;
+  if (rt != NIL && rt_vec(rt, 2, c) != NIL) return rt_vec(rt, 3, c) != NIL;
+  if (c == '(' || c == ')' || c == '\'' || c == '"' || c == ';' || c == '`' || c == ',') return builtin_syntax_p(c);
+  return 0;
 }
 
 /* Call a reader macro function: GC is inhibited, as the reader holds raw objects in C locals. */
@@ -59,7 +72,7 @@ static int skip_ws(Obj s) {
     int c = stream_getc(s);
     if (c < 0) return -1;
     if (is_ws(c)) continue;
-    if (c == ';') { while ((c = stream_getc(s)) >= 0 && c != '\n') ; if (c < 0) return -1; continue; }
+    if (c == ';' && builtin_syntax_p(';') && rt_vec(cur_rt(), 2, ';') == NIL) { while ((c = stream_getc(s)) >= 0 && c != '\n') ; if (c < 0) return -1; continue; }
     stream_ungetc(s, c);
     return c;
   }
@@ -323,7 +336,7 @@ static Obj read_list(Obj s, int close) {
     int c = skip_ws(s);
     if (c < 0) reader_error("EOF inside list");
     if (c == close) { stream_getc(s); return head; }
-    if (c == ')') reader_error("mismatched close parenthesis");
+    if (c == ')' && builtin_syntax_p(')') && rt_vec(cur_rt(), 2, ')') == NIL) reader_error("mismatched close parenthesis");
     if (c == '.' && rt_vec(cur_rt(), 2, '.') == NIL) {
       stream_getc(s);
       int n = stream_peekc(s);
@@ -487,6 +500,7 @@ static Obj rd1(Obj s) {
     Obj r = call_reader_fn(fn, s, MK_CHAR(c), NIL, 2, &nv);
     return nv == 0 ? NOVALUE : r;
   }
+  if (!builtin_syntax_p(c)) return read_atom(s, c, NULL);        /* made a constituent */
   return rd_builtin(s, c);
 }
 

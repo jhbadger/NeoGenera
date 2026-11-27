@@ -105,6 +105,7 @@ PRIM(p_reverse) {
   if (LISTP(x)) { Obj r = NIL; for (; CONSP(x); x = CDR(x)) r = cons(CAR(x), r); return r; }
   if (STRINGP(x)) { size_t n = str_len(x); Obj s = substring(x, 0, n); for (size_t i = 0; i < n; i++) str_set(s, i, str_ref(x, n - 1 - i)); return s; }
   if (VECTORP(x)) { size_t n = OBJ_NWORDS(x); Obj v = make_vector(n, NIL); for (size_t i = 0; i < n; i++) SLOT(v, i) = SLOT(x, n - 1 - i); return v; }
+  if (IS_TYPE(x, T_ADVEC)) return av_copy(x, 0, av_length(x), 1);
   type_error("SEQUENCE", x);
 }
 PRIM(p_nreverse) {
