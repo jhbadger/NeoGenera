@@ -21,7 +21,7 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
   functions use the C library's branch cuts.
 * Floats are a single type (double); there are no single-float, short-float or long-float distinctions, and `float` takes no prototype.
 * Division by zero with `/` signals `division-by-zero` for floats too; infinities and NaN arise from overflow and `+infinity+`, `+nan+`.
-* `*print-base*` and `*print-radix*` are not honoured by the printer; use `~B ~O ~X ~R`.
+* `*print-base*` and `*print-radix*` are honoured for integers and ratios (not floats); `~D ~B ~O ~X` bind them as ANSI requires.
 
 **Strings and characters**
 * Strings hold characters: `length`, `char`, `schar`, `subseq` and `position` count code points. Files, the terminal,
@@ -72,7 +72,7 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 * The reader is written in C and consults `*readtable*`: macro characters, dispatch characters and the readtable case are supported for
   characters below 128; `set-syntax-from-char` copies macro syntax only (a character cannot be made whitespace). `#C`, `#P` and `#A` read.
 * `pprint` is a line-filling printer for code; `pprint-logical-block`, `pprint-newline`, `pprint-indent`, `pprint-tab` and `pprint-fill`/`-linear`/`-tabular`
-  lay out logical blocks. `*print-pretty*` does not make `print` use them.
+  lay out logical blocks. `*print-pretty*` makes `prin1`/`princ`/`print`/`write` lay out lists with the `pprint` algorithm (not the logical-block machinery, and not `print-object` methods or vectors); it is off by default.
 
 **System interface**
 * Pathnames are Unix paths with Common Lisp components; logical pathnames translate through `logical-pathname-translations`. `directory`

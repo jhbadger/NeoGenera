@@ -320,9 +320,13 @@ void init_symbols(void) {
   };
   for (size_t i = 0; i < sizeof sf / sizeof sf[0]; i++) set_special_form(*sf[i].s, sf[i].id);
 
-  Obj specials[] = { Q_package, Q_stdout, Q_stdin, Q_stderr, Q_features, Q_print_pkg, Q_read_eval, Q_in_signal, Q_readtable };
+  Obj specials[] = { Q_package, Q_stdout, Q_stdin, Q_stderr, Q_features, Q_print_pkg, Q_read_eval, Q_in_signal, Q_readtable,
+                     Q_print_base, Q_print_radix, Q_print_pretty };
   for (size_t i = 0; i < sizeof specials / sizeof specials[0]; i++)
     SYM_FLAGS(specials[i]) = FIX(UNFIX(SYM_FLAGS(specials[i])) | SF_SPECIAL);
+  SYM_VALUE(Q_print_base) = FIX(10);
+  SYM_VALUE(Q_print_radix) = NIL;
+  SYM_VALUE(Q_print_pretty) = NIL;
   SYM_VALUE(Q_in_signal) = NIL;
   SYM_VALUE(Q_package) = PKG_USER;
   SYM_VALUE(Q_print_pkg) = NIL;

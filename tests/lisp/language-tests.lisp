@@ -518,3 +518,66 @@
   (is-equal 4 (handler-bind ((error (lambda (c) (declare (ignore c)) (debugger-restart-frame (fr-frame 'fr-boxed)))))
                 (fr-boxed 2)))
   (is (handler-case (progn (debugger-return-from-frame (list nil 'nothing nil 999999) 1) nil) (error () t))))
+
+;;; ---- *PRINT-BASE*, *PRINT-RADIX*, *PRINT-PRETTY* -------------------------------------------------------
+
+(deftest print-base-and-radix
+  (is-equal "FF" (let ((*print-base* 16)) (prin1-to-string 255)))
+  (is-equal "-ff" (string-downcase (let ((*print-base* 16)) (princ-to-string -255))))
+  (is-equal "10000000000000000000000000" (let ((*print-base* 16)) (prin1-to-string (expt 2 100))))
+  (is-equal "(#b101 #b-101 #b1/11)" (let ((*print-base* 2) (*print-radix* t)) (prin1-to-string '(5 -5 1/3))))
+  (is-equal "#o10" (let ((*print-radix* t) (*print-base* 8)) (prin1-to-string 8)))
+  (is-equal "#xFF" (let ((*print-radix* t) (*print-base* 16)) (prin1-to-string 255)))
+  (is-equal "#3r101" (let ((*print-radix* t) (*print-base* 3)) (prin1-to-string 10)))
+  (is-equal "(10. #10r1/3 1.5)" (let ((*print-radix* t)) (prin1-to-string '(10 1/3 1.5))))
+  (is-equal "10" (let ((*print-base* 10) (*print-radix* nil)) (prin1-to-string 10)))
+  ;; floats, symbols and strings are unaffected; lists and vectors print their elements in the base
+  (is-equal "(A 1F 1.5 \"9\")" (let ((*print-base* 16)) (prin1-to-string '(a 31 1.5 "9"))))
+  (is-equal "#(A B)" (let ((*print-base* 16)) (prin1-to-string #(10 11))))
+  ;; an invalid base falls back to 10
+  (is-equal "5" (let ((*print-base* 99)) (prin1-to-string 5)))
+  ;; princ, prin1 and print to a stream
+  (is-equal "FF(A 1F)" (let ((*print-base* 16)) (with-output-to-string (s) (princ 255 s) (prin1 '(a 31) s))))
+  ;; ~D binds the base to 10, ~B ~O ~X to their own; ~A and ~S follow *print-base*
+  (is-equal "255 FF FF FF" (let ((*print-base* 16)) (format nil "~D ~A ~S ~X" 255 255 255 255)))
+  (is-equal "255 ff" (let ((*print-base* 16)) (string-downcase (format nil "~D ~X" 255 255))))
+  ;; a PRINT-OBJECT method that rebinds the base does not leak it to the printer around it
+  (is-equal "(10 20)" (let ((*print-base* 10)) (prin1-to-string (list 10 (let ((*print-base* 16)) 20)))))
+  ;; WITH-STANDARD-IO-SYNTAX resets both
+  (is-equal "(5 5)" (let ((*print-base* 2) (*print-radix* t))
+                      (with-standard-io-syntax (prin1-to-string (list 5 5)))))
+  ;; WRITE and WRITE-TO-STRING
+  (is-equal "#xFF" (write-to-string 255 :base 16 :radix t))
+  (is-equal "a" (write-to-string "a" :escape nil))
+  (is-equal "\"a\"" (write-to-string "a"))
+  (is-equal "11" (with-output-to-string (s) (write 3 :base 2 :stream s)))
+  (is-equal "*print-base* restored" (progn (write-to-string 3 :base 2) (if (eql *print-base* 10) "*print-base* restored" "leaked"))))
+
+(deftest print-pretty
+  (let ((form '(defun foo (a b) (let ((x (+ a b)) (y (* a b))) (list x y (sqrt x))))))
+    ;; off by default: flat
+    (is-equal "(DEFUN FOO (A B) (LET ((X (+ A B)) (Y (* A B))) (LIST X Y (SQRT X))))" (prin1-to-string form))
+    (let ((*print-pretty* t) (*print-right-margin* 30))
+      (is-equal (format nil "(DEFUN FOO (A B)~%  (LET ((X (+ A B))~%        (Y (* A B)))~%    (LIST X Y (SQRT X))))")
+                (prin1-to-string form))
+      (is-equal (prin1-to-string form) (with-output-to-string (s) (prin1 form s)))
+      (is-equal (format nil "~%~A " (prin1-to-string form)) (with-output-to-string (s) (print form s)))
+      ;; lists that fit stay flat; atoms are unaffected
+      (is-equal "(SHORT LIST)" (prin1-to-string '(short list)))
+      (is-equal "42" (prin1-to-string 42))
+      ;; princ leaves out the escapes
+      (is-equal (format nil "(DEFUN FOO (A B)~%  (LET ((X s)) (LIST X Y)))")
+                (princ-to-string '(defun foo (a b) (let ((x "s")) (list x y)))))
+      (is-equal (format nil "(DEFUN FOO (A B)~%  (LET ((X \"s\")) (LIST X Y)))")
+                (prin1-to-string '(defun foo (a b) (let ((x "s")) (list x y))))))
+    ;; the layout starts at the stream's current column
+    (let ((*print-pretty* t) (*print-right-margin* 20))
+      (is-equal (format nil "xxxxxxxxxx(FOO BAR~%               BAZ~%               QUUX)")
+                (with-output-to-string (s) (write-string "xxxxxxxxxx" s) (prin1 '(foo bar baz quux) s))))
+    ;; WRITE's :pretty and :right-margin keywords
+    (is-equal (format nil "(FOO BAR~%     BAZ)") (write-to-string '(foo bar baz) :pretty t :right-margin 10))
+    (is-equal "(FOO BAR BAZ)" (write-to-string '(foo bar baz) :pretty nil :right-margin 10))
+    ;; PPRINT is unaffected by the variable and does not recurse
+    (let ((*print-pretty* t)) (is-equal "(A B)" (string-trim '(#\Newline) (with-output-to-string (s) (pprint '(a b) s)))))
+    ;; the variable is restored
+    (is (null *print-pretty*))))

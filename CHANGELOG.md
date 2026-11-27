@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **Printer variables**: `*print-base*` and `*print-radix*` are honoured for integers and ratios (`#xFF`, `#b101`, `#3r12`,
+  `10.`), and `*print-pretty*` makes `prin1`/`princ`/`print`/`write` lay out lists as `pprint` does. `write` and
+  `write-to-string` take `:escape :base :radix :pretty :length :right-margin`; `~D ~B ~O ~X` bind the base as ANSI requires.
+
 * **The FORTRAN Tool Kit**, after the Symbolics one: ANSI FORTRAN 77 (X3.9-1978) compiled into Lisp (and then to bytecode),
   with arbitrary-size integers, detection of uninitialised values, stronger type checks (including checks of calls against
   routines compiled earlier), packages (`FTN-USER`, with no superiors), integer/logical coercions, `DO WHILE`, `ENDDO`,

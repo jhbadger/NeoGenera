@@ -136,6 +136,29 @@ static void print_char(Buf *b, int c, int escape) {
 }
 
 static void print_rec(Buf *b, Obj o, int escape, int readable, int depth);
+
+/* *PRINT-BASE* / *PRINT-RADIX* as read when the outermost print started (saved and restored around nested prints,
+   because a PRINT-OBJECT method may rebind them). */
+static int pr_base = 10, pr_radix = 0;
+static int current_print_base(void) {
+  Obj v = SYM_VALUE(Q_print_base);
+  return (FIXP(v) && UNFIX(v) >= 2 && UNFIX(v) <= 36) ? (int)UNFIX(v) : 10;
+}
+
+/* an integer or ratio in the current base, with the radix marker when *PRINT-RADIX* is true:
+   "#x" "#o" "#b" "#Nr" before the digits, or a trailing "." for a decimal integer ("#10r" for a decimal ratio) */
+static void print_rational(Buf *b, Obj o) {
+  int ratio = OBJP(o) && OBJ_TYPE(o) == T_RATIO;
+  if (pr_radix) {
+    if (pr_base == 10) { if (ratio) buf_puts(b, "#10r"); }
+    else if (pr_base == 2) buf_puts(b, "#b");
+    else if (pr_base == 8) buf_puts(b, "#o");
+    else if (pr_base == 16) buf_puts(b, "#x");
+    else { char t[16]; snprintf(t, sizeof t, "#%dr", pr_base); buf_puts(b, t); }
+  }
+  number_print(b, o, pr_base);
+  if (pr_radix && pr_base == 10 && !ratio) buf_putc(b, '.');
+}
 /* the elements of a multi-dimensional array from row-major index START, as nested lists by DIMS */
 static long print_md(Buf *b, Obj data, Obj dims, long start, int escape, int readable, int depth) {
   if (dims == NIL) {
@@ -154,7 +177,7 @@ void print_object_rec(Buf *b, Obj o) { print_rec(b, o, 1, 0, 0); }    /* the par
 static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   STACK_CHECK();
   if (depth > 2000) { buf_puts(b, "..."); return; }
-  if (FIXP(o)) { char t[32]; snprintf(t, sizeof t, "%ld", (long)UNFIX(o)); buf_puts(b, t); return; }
+  if (FIXP(o)) { print_rational(b, o); return; }
   if (CHARP(o)) { print_char(b, CHAR_CODE(o), escape); return; }
   if (CONSP(o)) {
     Obj h = CAR(o);
@@ -188,7 +211,8 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   case T_SYMBOL: print_symbol(b, o, escape, readable); return;
   case T_STRING: case T_WSTRING: case T_STRBOX: print_string(b, o, escape); return;
   case T_FLONUM: format_double(b, flonum_value(o)); return;
-  case T_BIGNUM: case T_RATIO: case T_COMPLEX: number_print(b, o, 10); return;
+  case T_BIGNUM: case T_RATIO: print_rational(b, o); return;
+  case T_COMPLEX: number_print(b, o, pr_base); return;
   case T_VECTOR: {
     buf_puts(b, "#(");
     for (size_t i = 0; i < OBJ_NWORDS(o); i++) { if (i) buf_putc(b, ' '); print_rec(b, SLOT(o, i), escape, readable, depth + 1); }
@@ -253,9 +277,27 @@ static void print_rec(Buf *b, Obj o, int escape, int readable, int depth) {
   }
 }
 
-void print_to_buf(Buf *b, Obj o, int escape, int readable) { print_rec(b, o, escape, readable, 0); }
+void print_to_buf(Buf *b, Obj o, int escape, int readable) {
+  int sb = pr_base, sr = pr_radix;
+  pr_base = current_print_base(); pr_radix = SYM_VALUE(Q_print_radix) != NIL;
+  print_rec(b, o, escape, readable, 0);
+  pr_base = sb; pr_radix = sr;
+}
+
+/* *PRINT-PRETTY* true: a list is laid out by the Lisp function %PP-HOOK (object escape stream -> string, or NIL to
+   print it flat); STREAM is NIL when printing to a string */
+static Obj pretty_string(Obj o, int escape, Obj stream) {
+  if (!CONSP(o) || SYM_VALUE(Q_print_pretty) == NIL) return NIL;
+  Obj hook = SYM_FUNC(Q_pp_hook);
+  if (hook == NIL || CONSP(hook)) return NIL;
+  gc_inhibit++;
+  Obj r = call3(hook, o, BOOL(escape), stream);
+  gc_inhibit--;
+  return STRINGP(r) ? r : NIL;
+}
 
 Obj print_to_string(Obj o, int escape, int readable) {
+  if (!readable) { Obj p = pretty_string(o, escape, NIL); if (p != NIL) return p; }
   Buf b; buf_init(&b);
   print_to_buf(&b, o, escape, readable);
   Obj s = make_string_utf8(b.buf ? b.buf : "", b.len);
@@ -264,6 +306,8 @@ Obj print_to_string(Obj o, int escape, int readable) {
 }
 
 void print_obj(Obj stream, Obj o, int escape) {
+  Obj p = pretty_string(o, escape, stream);
+  if (p != NIL) { Buf pb; buf_init(&pb); buf_put_str(&pb, p); stream_write(stream, pb.buf ? pb.buf : "", pb.len); buf_free(&pb); return; }
   Buf b; buf_init(&b);
   print_to_buf(&b, o, escape, 0);
   stream_write(stream, b.buf ? b.buf : "", b.len);

@@ -313,8 +313,8 @@
    streamp "True for streams, including Gray streams." listen "True when input is available on a stream."
    peek-char "Return the next character without consuming it." unread-char "Push back the last character read."
    read-from-string "Read an object from a string; returns the object and the position after it."
-   write "Write an object with `:stream` and `:escape` options." write-char "Write a character." write-line "Write a string and a newline."
-   write-to-string "Print an object to a string." pprint "Pretty-print an object on a fresh line, filling to `*print-right-margin*`."
+   write "Write an object, binding the printer variables named by `:escape :base :radix :pretty :length :right-margin`; `:stream` is the output stream." write-char "Write a character." write-line "Write a string and a newline."
+   write-to-string "Print an object to a string; takes the keywords of `write`." pprint "Pretty-print an object on a fresh line, filling to `*print-right-margin*`."
    print-unreadable-object "Print `#<...>` around the body's output for objects with no readable form."
    iota "List of N numbers starting at START with a STEP." intersection "Elements common to two lists." union "Elements of either list."
    set-difference "Elements of the first list not in the second." subsetp "True when every element of one list is in another."
@@ -380,7 +380,7 @@
    fundamental-stream "Base class of Gray streams." fundamental-input-stream "Base class of Gray input streams." fundamental-output-stream "Base class of Gray output streams."))
 
 (%doc-bulk '%doc-variable
- '(*print-escape* "True when objects are printed with escape characters (as `prin1`)." *print-pretty* "Reserved: pretty printing is requested with `pprint`."
+ '(*print-escape* "True when objects are printed with escape characters (as `prin1`)." *print-pretty* "When true, `prin1`, `princ`, `print`, `write` and the string printers lay out lists as `pprint` does." *print-base* "The radix (2-36) in which integers and ratios are printed." *print-radix* "When true, integers and ratios are printed with a radix marker (`#x1F`, or a trailing point for decimal integers)."
    *terminal-io* "The terminal as a two-way stream." *query-io* "Stream for questions to the user." *debug-io* "Stream used by the debugger."
    *trace-output* "Stream receiving trace output." *gensym-counter* "Counter used to name `gensym` symbols." *read-eval* "True when `#.` is allowed in the reader."
    *load-pathname* "The file being loaded, as a pathname." *print-packages* "Reserved."

@@ -16,7 +16,31 @@
 (in-package :cl)
 
 (defvar *print-right-margin* 80)
-(defvar *print-pretty* nil)
+(defvar *print-length* nil "If an integer, logical blocks print at most this many elements of a list (then \"...\").")
+(defvar *print-pretty* nil "When true, PRIN1, PRINC, PRINT, WRITE and the string printers lay out lists with the pretty printer (as PPRINT).")
+(defvar *print-base* 10 "The radix (2-36) in which integers and ratios are printed.")
+(defvar *print-radix* nil "When true, integers and ratios are printed with their radix: #x1F, #b101, #o17, #3r12; decimal integers end in a point.")
+(defvar *pp-escape* t "Whether the pretty printer prints with escape characters (as PRIN1) or without (as PRINC).")
+
+(defun %pp-flat (x) (if *pp-escape* (prin1-to-string x) (princ-to-string x)))
+
+(defun %pp-hook (obj escape stream)
+  "Called by the printer when *PRINT-PRETTY* is true: OBJ (a list) laid out from STREAM's current column."
+  (let ((*print-pretty* nil) (*pp-escape* escape))
+    (%pp-string obj (if stream (%stream-column stream) 0) (or *print-right-margin* 80))))
+
+(defun write (obj &key stream (escape *print-escape*) (base *print-base*) (radix *print-radix*)
+                    (pretty *print-pretty*) (length *print-length*) (right-margin *print-right-margin*)
+                    &allow-other-keys)
+  "Print OBJ to STREAM, binding the printer variables named by the keywords :ESCAPE :BASE :RADIX :PRETTY :LENGTH :RIGHT-MARGIN."
+  (let ((*print-escape* escape) (*print-base* base) (*print-radix* radix)
+        (*print-pretty* pretty) (*print-length* length) (*print-right-margin* right-margin))
+    (if escape (prin1 obj stream) (princ obj stream)))
+  obj)
+
+(defun write-to-string (obj &rest keys)
+  "Print OBJ to a string; the keywords are those of WRITE (except :STREAM)."
+  (with-output-to-string (s) (apply #'write obj :stream s keys)))
 
 (defparameter *pp-body-ops*
   '(defun defmacro defvar defparameter defconstant defstruct defclass defgeneric defmethod
@@ -39,7 +63,7 @@
     (t 1)))
 
 (defun %pp-string (obj col width)
-  (let ((flat (prin1-to-string obj)))
+  (let ((flat (%pp-flat obj)))
     (cond ((or (atom obj) (<= (+ col (length flat)) width) (not (%proper-list-p obj))) flat)
           ((and (symbolp (car obj)) (member (car obj) *pp-body-ops*)) (%pp-body obj col width))
           (t (%pp-call obj col width flat)))))
@@ -48,7 +72,7 @@
   (let ((head (car obj)) (args (cdr obj)))
     (cond ((null args) flat)
           ((symbolp head)
-           (let* ((hs (prin1-to-string head)) (acol (+ col 2 (length hs))))
+           (let* ((hs (%pp-flat head)) (acol (+ col 2 (length hs))))
              (with-output-to-string (o)
                (write-string "(" o) (write-string hs o) (write-char #\Space o)
                (write-string (%pp-string (car args) acol width) o)
@@ -65,7 +89,7 @@
                (write-char #\) o))))))
 
 (defun %pp-body (obj col width)
-  (let* ((head (car obj)) (hs (prin1-to-string head)) (nd (%pp-distinguished head)) (n 0) (icol (+ col 2)))
+  (let* ((head (car obj)) (hs (%pp-flat head)) (nd (%pp-distinguished head)) (n 0) (icol (+ col 2)))
     (with-output-to-string (o)
       (write-string "(" o) (write-string hs o)
       (dolist (a (cdr obj))
@@ -76,17 +100,17 @@
       (write-char #\) o))))
 
 (defun pprint (obj &optional stream)
-  (let ((s (%out stream)))
+  (let ((s (%out stream)) (*print-pretty* nil) (*pp-escape* t))
     (terpri s)
     (write-string (%pp-string obj (%stream-column s) *print-right-margin*) s)
     (values)))
 
-(defun pretty-string (obj &optional (width *print-right-margin*)) (%pp-string obj 0 width))
+(defun pretty-string (obj &optional (width *print-right-margin*))
+  (let ((*print-pretty* nil) (*pp-escape* t)) (%pp-string obj 0 width)))
 
 ;;; ---- logical blocks ----------------------------------------------------------------------------------
 
 (defvar *print-miser-width* 40 "When a logical block starts this close to the right margin (or closer), its fill and miser newlines act as linear ones.")
-(defvar *print-length* nil "If an integer, logical blocks print at most this many elements of a list (then \"...\").")
 
 (defstruct (%ppblock (:constructor %make-ppblock (prefix per-line-prefix suffix)) (:copier nil))
   prefix per-line-prefix suffix (items nil) (flat nil))   ; ITEMS newest first while collecting

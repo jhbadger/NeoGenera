@@ -55,12 +55,7 @@
         (values obj pos))))
 (defun %eof-object () (%read-from-string "" 0))
 
-(defun write-to-string (obj &rest r) (declare (ignore r)) (prin1-to-string obj))
-(defun write (obj &key stream escape &allow-other-keys)
-  (if (or escape (null escape))
-      (prin1 obj stream)
-      (princ obj stream))
-  obj)
+;;; WRITE and WRITE-TO-STRING (which honour the printer variables) are in 58-pprint.lisp.
 
 (defvar *load-pathname* nil)
 (defvar *load-verbose* nil)
@@ -226,7 +221,7 @@
                    ((#\D #\B #\O #\X)
                     (let* ((v (car args))
                            (radix (case dchar (#\D 10) (#\B 2) (#\O 8) (t 16)))
-                           (s (if (integerp v) (%number-to-string v radix) (princ-to-string v))))
+                           (s (if (integerp v) (%number-to-string v radix) (let ((*print-base* radix) (*print-radix* nil)) (princ-to-string v)))))
                       (setq args (cdr args))
                       (when (and at (integerp v) (>= v 0)) (setq s (%string-concat "+" s)))
                       (when (and colon (integerp v))
