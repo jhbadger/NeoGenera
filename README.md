@@ -24,6 +24,11 @@ mathematics, statistics and bioinformatics. Version **1.0.0**. A scripted tour r
 * **The FORTRAN Tool Kit.** ANSI FORTRAN 77 with the Symbolics extensions compiles into Lisp: arbitrary-size integers, detection of
   uninitialised values, stronger type checks, `DO WHILE`/`ENDDO`/`INCLUDE`, bit operations and binary patterns, packages, full
   formatted and list-directed I/O, and a fixed-format FORTRAN mode in the editor. See `:doc fortran-manual` and `examples/12-fortran.lisp`.
+* **The Bytecode Assembler.** Write a function as raw instructions for the bytecode machine with `defasm`: labels, a full instruction set,
+  and a verifier that checks stack depth, slots, jumps, dynamic bindings and the types the unchecked instructions assume before the
+  routine exists. `asm-listing` turns any compiled function back into assembly source that assembles to the same code, and ASM mode in
+  the editor lays routines out like an assembler, assembles them from the buffer and points errors at the instruction. See
+  `:doc bytecode-manual` and `examples/15-bytecode-assembly.lisp`.
 * **Bioinformatics.** Sequences, FASTA/FASTQ/GenBank/GFF3/GTF/BED/VCF/SAM/BAM, pairwise alignment, suffix arrays, seeded search, motifs, phylogenetics, genomic
   intervals and a safe layer for BLAST, minimap2 and samtools, with clickable sequence, alignment and tree viewers.
 * **Hardened.** Every parser is fuzzed under ASan/UBSan; memory and stack exhaustion are recoverable errors; heap images are checksummed and saved atomically;
@@ -56,7 +61,7 @@ Welch Two Sample t-test
 statistic = -1.86081, df = 17.77647, p-value = 0.07939
 ```
 
-More in [`examples/`](examples/) (fourteen annotated programs, including a Mandelbrot renderer and a boids flocking simulation; `make examples` runs them and writes a gallery).
+More in [`examples/`](examples/) (fifteen annotated programs, including a Mandelbrot renderer and a boids flocking simulation; `make examples` runs them and writes a gallery).
 
 ## Install and packages
 

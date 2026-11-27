@@ -1,0 +1,73 @@
+;;;; numeric.ngasm -- routines written directly in NeoGenera bytecode (see `:doc bytecode-manual`).
+;;;;
+;;;; Load this file with (load "examples/asm/numeric.ngasm"), or open it in the editor -- the .ngasm suffix selects ASM mode --
+;;;; and press C-c C-b to assemble the whole buffer or C-c C-c to assemble the routine at point.
+
+(defvar *scale* 1 "The factor SCALED multiplies by; SCALED-BY binds it.")
+
+(defun scaled (x) (* x *scale*))
+
+(defasm gcd2 (a b)
+  "Greatest common divisor of two non-negative integers (Euclid's algorithm), in fixnum arithmetic."
+    (lref a) (chkfix) (lset a)          ; from here on the assembler knows a and b are fixnums,
+    (lref b) (chkfix) (lset b)          ; so the unchecked fixnum instructions are allowed
+  again
+    (lref b) (const 0) (numeqfx)
+    (jnnil done)
+    (lref a) (lref b) (remfx)           ; r = a rem b
+    (lref b) (lset a)                   ; a = b
+    (lset b)                            ; b = r
+    (jmp again)
+  done
+    (lref a)
+    (ret))
+
+(defasm fib-fixnum (n)
+  "The Nth Fibonacci number for N from 0 to 88, computed in fixnum arithmetic."
+    (lref n) (chkrange 0 88) (lset n)   ; fib(88) is the largest that fits in a fixnum
+    (const 0) (:var a)
+    (const 1) (:var b)
+  next
+    (lref n) (const 0) (numeqfx)
+    (jnnil done)
+    (lref a) (lref b) (addfx)           ; t = a + b
+    (lref b) (lset a)                   ; a = b
+    (lset b)                            ; b = t
+    (lref n) (decfx) (lset n)
+    (jmp next)
+  done
+    (lref a)
+    (ret))
+
+(defasm vector-sum (v)
+  "The sum of the numbers in the vector V."
+    (const 0) (:var sum)
+    (const 0) (:var i)
+  loop
+    (lref i) (gfun length) (lref v) (call 1) (ge)
+    (jnnil done)
+    (lref sum) (lref v) (lref i) (svref) (add) (lset sum)
+    (lref i) (const 1) (add) (lset i)
+    (jmp loop)
+  done
+    (lref sum)
+    (ret))
+
+(defasm make-accumulator (start)
+  "Return a function that adds its argument to a running total that begins at START and returns the new total."
+    (lref start) (box)                  ; the total lives in a box shared by every call
+    (closure (:lambda (n)
+               (:free total)
+               (fref total) (chktype cons)
+               (fref total) (chktype cons) (unbox) (lref n) (add)
+               (boxset)
+               (ret))
+             1)
+    (ret))
+
+(defasm scaled-by (x k)
+  "Call SCALED on X with *SCALE* dynamically bound to K."
+    (lref k) (bind *scale*)
+    (gfun scaled) (lref x) (call 1)
+    (unbind 1)
+    (ret))

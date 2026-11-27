@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+* **The Bytecode Assembler.** `defasm` defines a function in raw VM instructions: labels, every instruction of the machine, constants as
+  data, `(:var name)` for named stack slots, `(:lambda ...)` operands for closures with `(:free ...)` names, and `(:unsafe)` to waive the
+  type proofs. `asm-assemble` is the function behind it. A verifier (abstract interpretation over stack depth and a small type lattice)
+  runs before any code exists: stack underflow, bad slots, jump targets, paths that disagree about depth or dynamic bindings, falling off
+  the end, unbalanced `bind`, and use of the unchecked instructions (`addfx`, `carx`, `unbox`, `addfl`, ...) on operands that are not
+  proved to have the right type are all errors (`asm-error`, with the index of the offending item). `asm-listing` and `asm-decompile`
+  turn any compiled function back into `defasm` source (labels at jump targets, nested lambdas, `(:unsafe)` where the compiler's own
+  code needs it); the listing of ~4,700 functions in the system assembles back to identical code. **ASM mode** (`.ngasm` files) lays
+  routines out like an assembler (labels column 2, instructions column 4, comments aligned), formats on `TAB`, completes and describes
+  instructions, assembles from the buffer with `C-c C-c` / `C-c C-b`, points diagnostics at the instruction (`C-c C-w`), shows the
+  listing (`C-c C-a`) and calls the routine (`C-c C-x`). New manual: `:doc bytecode-manual` (with a generated instruction reference);
+  design notes in `docs/design/asm.md`; example `examples/15-bytecode-assembly.lisp` with `examples/asm/numeric.ngasm`.
+  Files: `lisp/asm/*-asm-*.lisp` (no C changes). Tests: `tests/lisp/asm-tests.lisp`, `fuzz-asm`.
+
 * **Specialised array element types, displaced arrays, and whitespace via `set-syntax-from-char`.** `make-array :element-type`
   now builds specialised arrays (`bit`, `(unsigned-byte 8)`, `(signed-byte 32)`, `double-float`, ... see
   `upgraded-array-element-type`): elements default to 0 / 0.0, every store is checked, `array-element-type` reports the type, and

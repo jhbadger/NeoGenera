@@ -156,6 +156,14 @@ indented statement line, `C-M-j` opens a continuation card, Electric FORTRAN mod
 cards, `C-M-a`/`C-M-e`/`C-M-f`/`C-M-b`/`C-M-h` move over and mark routines and statements, and `C-c C-c` compiles the
 routine at point. See [The FORTRAN Tool Kit](topic:fortran-manual).
 
+## ASM mode
+
+Files ending in `.ngasm` are edited in ASM mode, an assembler-style mode for `defasm` bytecode routines: `TAB` puts labels,
+instructions and trailing comments in their columns, `RET` opens a correctly indented line, `M-<tab>` completes an instruction
+name, `C-c ?` describes the instruction at point, `C-c C-c` assembles the routine at point, and an error puts the cursor on the
+offending instruction (`C-c C-w`, then `C-.`). `C-c C-a` shows the assembly listing of the compiled routine and `C-c C-x` calls
+it. See [The Bytecode Assembler](topic:bytecode-manual).
+
 Other language modes can be added the same way: a mode is a symbol whose property list gives its `mode-keymap`,
 `mode-name`, `line-syntax` function (for colouring), `match-offsets` function and `before-self-insert` and
 `after-self-insert` hooks, and `*auto-mode-alist*` maps file name suffixes to modes.

@@ -179,3 +179,77 @@ break" "ünï") *fuzz-rng*)) (4 (rand-choice '(foo bar |Hello World| :key nil t)
       (let ((fmt (f77-parse-format "(I3,F5.1,A4,L2)")))
         (multiple-value-bind (ok errors) (fuzz-each (s 1500 (fuzz-string 30)) (reading fmt s))
           (is (> (+ ok errors) 1499)))))))
+
+;;; ---- the bytecode assembler ----------------------------------------------------------------------------------------------
+
+(defun fuzz-asm-atom ()
+  (rand-choice (list 0 1 2 3 -1 100 1.5 "s" nil t 'foo 'bar :key 'l0 'l1 'l2 'x 'y (list 1 2) '(a . b) (expt 2 70) #\a) *fuzz-rng*))
+
+(defun fuzz-asm-item ()
+  "A random assembly item: a label, a junk atom, or an instruction with random operands."
+  (case (rand-int 10 *fuzz-rng*)
+    (0 (rand-choice '(l0 l1 l2 done top) *fuzz-rng*))
+    (1 (fuzz-asm-atom))
+    (t (let ((head (if (< (rand-uniform *fuzz-rng*) 0.95)
+                       (intern (string-upcase (rand-choice (asm-mnemonics) *fuzz-rng*)) :cl)
+                       (rand-choice (list :unsafe :var :free :lambda 'nonsense 3 nil) *fuzz-rng*)))
+             (n (case (rand-int 5 *fuzz-rng*) (0 0) (1 2) (t 1))))
+         (cons head (let ((ops nil)) (dotimes (i n) (push (if (< (rand-uniform *fuzz-rng*) 0.1) (list :lambda nil '(const 1) '(ret)) (fuzz-asm-atom)) ops)) ops))))))
+
+(defvar *fuzz-asm-label* 0)
+
+(defun fuzz-asm-snippet ()
+  "A well-formed run of instructions, mostly leaving the stack one deeper: the building block of generated programs."
+  (case (rand-int 8 *fuzz-rng*)
+    (0 (list (list 'const (rand-choice '(0 1 2 5 -3 1.5 nil) *fuzz-rng*))))
+    (1 (list '(lref 0)))
+    (2 (list '(lref 0) (rand-choice '((car) (cdr) (not) (box) (chkfix) (chktype cons) (chktype list) (chkrange 0 9) (dup) (pop) (unbox)) *fuzz-rng*)))
+    (3 (list '(lref 0) '(lref 0) (list (rand-choice '(add sub mul lt eq cons numeq ge addfx ltfx addfl svref schar svset remfx) *fuzz-rng*))))
+    (4 (list '(lref 0) '(chkfix) '(lset 0) '(lref 0) '(const 3) (list (rand-choice '(addfx subfx mulfx logandfx ltfx remfx) *fuzz-rng*))))
+    (5 (list '(lref 0) '(chktype double-float) '(lset 0) '(lref 0) '(lref 0) (list (rand-choice '(addfl subfl mulfl ltfl) *fuzz-rng*))))
+    (6 (list '(lref 0) '(box) '(chktype cons) '(unbox)))
+    (t (let ((l (intern (format nil "G~D" (incf *fuzz-asm-label*)) :cl)))
+         (list '(lref 0) (list (rand-choice '(jnil jnnil) *fuzz-rng*) l) '(const 7) '(pop) l '(const 8))))))
+
+(defun fuzz-asm-program ()
+  "Items for a random but mostly sound routine of one parameter.  Forward jumps only, so it always terminates."
+  (let ((items nil))
+    (dotimes (i (+ 1 (rand-int 6 *fuzz-rng*)))
+      (dolist (it (fuzz-asm-snippet)) (push it items)))
+    (push '(ret) items)
+    (nreverse items)))
+
+(deftest fuzz-asm
+  ;; the assembler's contract: any items assemble or signal ASM-ERROR -- nothing else, never a crash
+  (let ((other 0) (accepted 0))
+    (dotimes (i 4000)
+      (let ((items (if (evenp i)
+                       (let ((acc nil)) (dotimes (k (rand-int 9 *fuzz-rng*)) (push (fuzz-asm-item) acc)) (nreverse acc))
+                       ;; a sound program with one item replaced, deleted or added
+                       (let* ((p (fuzz-asm-program)) (k (rand-int (length p) *fuzz-rng*)))
+                         (case (rand-int 3 *fuzz-rng*)
+                           (0 (append (subseq p 0 k) (list (fuzz-asm-item)) (nthcdr (+ k 1) p)))
+                           (1 (append (subseq p 0 k) (nthcdr (+ k 1) p)))
+                           (t (append (subseq p 0 k) (list (fuzz-asm-item)) (nthcdr k p)))))))
+            (ll (if (evenp i)
+                    (rand-choice '(() (x) (x y) (x &optional y) (x &rest r) (&optional a b) (&key a) (x x) (1) foo) *fuzz-rng*)
+                    '(x))))
+        (handler-case (progn (asm-assemble 'fuzz-routine ll items) (incf accepted))
+          (asm-error () nil)
+          (error () (incf other)))))
+    (is-equal 0 other)
+    (is (> accepted 100)))
+  ;; and what assembles runs without taking the process down, whatever the argument
+  (let ((other 0) (accepted 0) (ran 0))
+    (dotimes (i 3000)
+      (let ((items (fuzz-asm-program)))
+        (handler-case
+            (let ((fn (asm-assemble 'fuzz-routine '(x) items)))
+              (incf accepted)
+              (dolist (arg (list 0 1 -5 1.5 nil '(1 2 3) "str" (vector 1 2) 'sym (expt 2 70)))
+                (handler-case (progn (funcall fn arg) (incf ran)) (error () (incf ran)))))
+          (asm-error () nil)
+          (error () (incf other)))))
+    (is-equal 0 other)
+    (is (> accepted 500))
+    (is (> ran 5000))))

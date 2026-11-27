@@ -68,6 +68,13 @@ where operand types are established (see compiler.md, "Declarations, policy and 
 `(+ a b c)` folds into `ADD ADD`; `1+`/`1-` become `CONST 1; ADD/SUB`. Open-coding assumes the
 standard definitions of these functions are not redefined.
 
+## Writing instructions by hand
+
+`defasm` (docs/design/asm.md, manual `:doc bytecode-manual`) assembles routines from instruction lists. It verifies stack depth, frame
+slots, jump targets, dynamic bindings and the operand types of the unchecked instructions before building the code object, so a
+hand-written routine cannot violate the assumptions this document makes ("the compiler emits them only where operand types are
+established").
+
 ## Safe points
 
 `CALL` and `TAILCALL` poll `gc_pending`. After a collection or after any call that may have

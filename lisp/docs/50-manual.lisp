@@ -28,5 +28,8 @@
 (import-markdown :fortran-manual "docs/manual/fortran-manual.md" :category :manual
                  :keywords (fortran f77 ftn compiler format fixed-format electric fortran-mode tool-kit symbolics))
 
+(import-markdown :bytecode-manual "docs/manual/bytecode-manual.md" :category :manual
+                 :keywords (bytecode assembler assembly defasm vm instructions verifier asm-mode disassemble stack-machine))
+
 ;;; Coverage is measured over what exists now; symbols defined later (user code, tests) are not counted.
 (snapshot-core-symbols)

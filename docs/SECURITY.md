@@ -28,6 +28,14 @@ code, because that is what a Lisp system is for. The security goal is therefore 
 | BAM parser | Found by fuzzing: a corrupt length field could request gigabytes. | **Fixed**: every count and length is checked against the data that remains |
 | Temporary files | The library never creates predictable temporary files; test and example scripts use fixed names in `/tmp` and are not meant to be run on shared machines. | Documented |
 
+The bytecode assembler (`lisp/asm/`, `defasm`) is the one place a user supplies raw instructions. Nothing it builds reaches the VM unverified:
+every routine is checked by abstract interpretation for stack depth (no underflow, equal depth where paths meet), frame slots, jump
+targets, dynamic-binding balance and falling off the end, and the instructions that trust their operands' types (`addfx`, `carx`,
+`unbox`, `addfl`, ...) are accepted only on operands the verifier has proved to have that type; `svrefx`/`svsetx` need a routine
+declared `(:unsafe)`, which waives the type proofs (like `(safety 0)`) but never the stack and control-flow checks. `%make-code` itself
+does no checking and is not part of the interface. Fuzzed (`fuzz-asm`: random instruction soups must assemble or signal `asm-error`, and
+anything that assembles must run without crashing the process).
+
 ## Fuzzing
 
 `tests/lisp/fuzz-tests.lisp` (part of `make test`, and run under ASan and UBSan by `make fuzz` and in CI) feeds random and mutated

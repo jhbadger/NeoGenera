@@ -82,3 +82,5 @@ the selected function. See [Developer Tools](topic:tools-manual).
   in the editor.
 * [The FORTRAN Tool Kit](topic:fortran-manual) for compiling and running ANSI FORTRAN 77 with the Symbolics extensions, and
   FORTRAN mode in the editor.
+* [The Bytecode Assembler](topic:bytecode-manual) for writing functions as raw virtual-machine instructions (`defasm`), the
+  verifier that checks them, listing compiled code as assembly, and ASM mode in the editor.
