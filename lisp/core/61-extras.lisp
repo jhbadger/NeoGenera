@@ -100,3 +100,8 @@ is used.  A YEAR below 100 means the year within 50 years of now with those last
         (+ u (round (* time-zone 3600)))
         (let* ((off1 (%local-offset u)) (guess (- u off1)) (off2 (%local-offset guess)))
           (if (= off1 off2) guess (- u off2))))))
+
+(defun function-lambda-expression (fn)
+  "Returns (values lambda-expression closure-p name).  The source is not kept, so the first value is always NIL
+and the second always true; NAME is the function's name when it is known."
+  (values nil t (and (functionp fn) (compiled-function-p fn) (car (%code-parts fn)))))

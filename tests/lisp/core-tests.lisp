@@ -205,3 +205,27 @@ b" (format nil "a~%b"))
   ;; two-digit years are within 50 years of now
   (let ((this (nth-value 5 (get-decoded-time))))
     (is-equal this (nth-value 5 (decode-universal-time (encode-universal-time 0 0 12 1 6 (mod this 100) 0) 0)))))
+
+(deftest string-comparisons-return-mismatch-index
+  (is-equal 0 (string< "a" "b"))
+  (is-equal 2 (string< "abc" "abd"))
+  (is-equal 2 (string< "ab" "abc"))
+  (is (null (string< "b" "a")))
+  (is (null (string< "a" "a")))
+  (is-equal 1 (string> "ba" "bA"))
+  (is-equal 0 (string/= "a" "b"))
+  (is (null (string/= "ab" "ab")))
+  (is-equal 2 (string<= "ab" "ab"))
+  (is-equal 2 (string>= "ab" "ab"))
+  (is (null (string>= "a" "b")))
+  (is-equal 1 (string-lessp "aB" "AC"))
+  (is (null (string-not-equal "AB" "ab")))
+  (is-equal 3 (string<= "xyz" "xyz" :start1 1 :end1 3 :start2 1))
+  (is-equal 1 (string< 'abc "abd" :start1 1 :end1 2 :start2 2))
+  (is-equal '("a" "b" "c") (sort (list "c" "a" "b") #'string<)))
+
+(deftest function-lambda-expression-basics
+  (multiple-value-bind (expr closure-p name) (function-lambda-expression #'car)
+    (declare (ignore closure-p name))
+    (is (null expr)))
+  (is (null (function-lambda-expression (lambda (x) x)))))

@@ -29,7 +29,6 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
   character with that code. There are no external formats other than UTF-8. Case conversion and the character
   predicates cover Latin, Greek, Cyrillic and the other scripts of `lisp/core/63-unicode.lisp`; a mapping that changes
   a string's length (`ß` → `SS`) is not made. `base-char` is the same type as `character`.
-* `string<`, `string>`, `string<=`, `string>=` and `string/=` return a boolean rather than the mismatch index, and do not take `:start`/`:end` keywords.
 * `format` implements the standard directives, including `~E ~F ~G ~$` with all their parameters, `~<...~>` justification and
   `~<...~:>` logical blocks, `~_ ~I ~W ~/name/` and `~T`. `~R` spells numbers in English up to the quintillions.
 

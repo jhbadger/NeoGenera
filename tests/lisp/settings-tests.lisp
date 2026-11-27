@@ -3,7 +3,8 @@
 
 (in-package :cl)
 
-(defvar *st-dir* "/tmp/ng-settings-test")
+(defvar *st-dir* (format nil "/tmp/ng-settings-test-~D-~D" (get-universal-time) (get-internal-real-time))
+  "A directory name unique to this run: a fixed name collides with leftovers owned by another user.")
 (defvar *st-pwned* nil)
 (defun st-path () (%string-concat *st-dir* "/settings.lisp"))
 (defun st-clean () (when (probe-file (st-path)) (delete-file (st-path))))

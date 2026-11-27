@@ -41,14 +41,37 @@
 
 ;;; ---- strings --------------------------------------------------------------
 
-(defun string< (a b) (< (%string-compare a b nil) 0))
-(defun string> (a b) (> (%string-compare a b nil) 0))
-(defun string<= (a b) (<= (%string-compare a b nil) 0))
-(defun string>= (a b) (>= (%string-compare a b nil) 0))
-(defun string/= (a b) (not (string= a b)))
+(defun %string-mismatch (a b ci start1 end1 start2 end2)
+  "Compare the designated substrings of A and B: (values index order), where INDEX is the position in A of the first
+difference (NIL when equal) and ORDER is -1, 0 or 1.  CI compares ignoring case."
+  (let* ((a (string a)) (b (string b))
+         (i (or start1 0)) (e1 (or end1 (length a))) (j (or start2 0)) (e2 (or end2 (length b))))
+    (block nil
+      (tagbody top
+         (cond ((and (>= i e1) (>= j e2)) (return (values nil 0)))
+               ((>= i e1) (return (values i -1)))
+               ((>= j e2) (return (values i 1))))
+         (let ((x (char a i)) (y (char b j)))
+           (when ci (setq x (char-downcase x) y (char-downcase y)))
+           (cond ((char< x y) (return (values i -1)))
+                 ((char> x y) (return (values i 1)))))
+         (setq i (+ i 1) j (+ j 1))
+         (go top)))))
+
+(defun %string-order (a b ci keys test)
+  (let ((start1 (getf keys :start1)) (end1 (getf keys :end1)) (start2 (getf keys :start2)) (end2 (getf keys :end2)))
+    (multiple-value-bind (i order) (%string-mismatch a b ci start1 end1 start2 end2)
+      (and (funcall test order) (or i (or end1 (length (string a))))))))
+
+(defun string< (a b &rest keys) "The mismatch index in A if A sorts before B, else NIL." (%string-order a b nil keys (lambda (o) (< o 0))))
+(defun string> (a b &rest keys) "The mismatch index in A if A sorts after B, else NIL." (%string-order a b nil keys (lambda (o) (> o 0))))
+(defun string<= (a b &rest keys) "The mismatch index in A if A sorts before or equal to B, else NIL." (%string-order a b nil keys (lambda (o) (<= o 0))))
+(defun string>= (a b &rest keys) "The mismatch index in A if A sorts after or equal to B, else NIL." (%string-order a b nil keys (lambda (o) (>= o 0))))
+(defun string/= (a b &rest keys) "The mismatch index in A if the strings differ, else NIL." (%string-order a b nil keys (lambda (o) (/= o 0))))
 (defun string-equal (a b) (= (%string-compare a b t) 0))
-(defun string-lessp (a b) (< (%string-compare a b t) 0))
-(defun string-greaterp (a b) (> (%string-compare a b t) 0))
+(defun string-lessp (a b &rest keys) "Like STRING< ignoring case." (%string-order a b t keys (lambda (o) (< o 0))))
+(defun string-greaterp (a b &rest keys) "Like STRING> ignoring case." (%string-order a b t keys (lambda (o) (> o 0))))
+(defun string-not-equal (a b &rest keys) "Like STRING/= ignoring case." (%string-order a b t keys (lambda (o) (/= o 0))))
 
 (defun %trim-pred (bag) (lambda (c) (find c bag)))
 (defun string-left-trim (bag s)

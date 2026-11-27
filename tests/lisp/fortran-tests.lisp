@@ -24,7 +24,10 @@
 
 (defun ftn-has (text part) (and (%string-search part text 0) t))
 
-(defun ftn-tmp (name) (format nil "/tmp/nf~D~A" (random 1000000) name))
+(defvar *ftn-tmp-tag* (format nil "~D~D" (mod (get-universal-time) 100000) (mod (get-internal-real-time) 10000))
+  "Unique to this run (and short: names go in column-limited FORTRAN source): RANDOM is not seeded, so its names repeat between runs and collide with leftovers.")
+(defvar *ftn-tmp-count* 0)
+(defun ftn-tmp (name) (format nil "/tmp/nf~A-~D~A" *ftn-tmp-tag* (incf *ftn-tmp-count*) name))
 
 (defun ftn-lines (&rest lines) (format nil "~{~A~%~}" lines))
 
