@@ -245,9 +245,14 @@
   (or (%find-symbol-named text) (error "No symbol named ~A" text)))
 
 (define-command (edit :documentation "Edit a file or the definition of a function") ((target word :prompt "File or function"))
-  (cond ((probe-file target) (open-editor *wm* :file target))
-        (t (let ((sym (%resolve-symbol-arg target)))
-             (unless (edit-definition sym) (error "No source recorded for ~A" target))))))
+  (let ((sym (unless (probe-file target) (ignore-errors (%find-symbol-named target))))
+        (path-like (or (find #\. target) (find #\/ target))))
+    (cond ((probe-file target) (open-editor *wm* :file target))
+          ((and sym (edit-definition sym)))
+          ((or path-like (not sym))                     ; a file that doesn't exist yet: a new, empty buffer
+           (open-editor *wm* :file target)
+           (let ((ed (find-editor-window *wm*))) (when ed (ed-message* ed "(New file)"))))
+          (t (error "No source recorded for ~A" target)))))
 (define-command (inspect :documentation "Inspect the value of an expression") ((object expression :prompt "Expression"))
   (open-inspector *wm* (eval object)))
 (define-command (set-entry :documentation "Set an entry of the topmost Inspector to the value of an expression")

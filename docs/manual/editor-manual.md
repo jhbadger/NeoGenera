@@ -1,7 +1,8 @@
 # The Editor
 
 The editor is an Emacs-style editor that runs in a window. Open it with `:edit file`, `:edit function-name`
-or `:editor`. Press `C-x C-c` to close it. Keys are written Emacs-style: `C-` is Control, `M-` is Meta (Alt or
+or `:editor`; `:edit` on a file that doesn't exist yet opens an empty buffer that creates it when saved. Press
+`C-x C-c` to close it. Keys are written Emacs-style: `C-` is Control, `M-` is Meta (Alt or
 Escape).
 
 ## Moving

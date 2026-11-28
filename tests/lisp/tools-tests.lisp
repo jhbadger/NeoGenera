@@ -481,6 +481,23 @@ world" (buffer-string b))
     (is (edit-definition 'bignums wm))
     (is (%string-search "deftest bignums" (buf-current-line (ed-buffer ed)) 0))))
 
+(deftest edit-command-new-file
+  (multiple-value-bind (wm ed) (make-editor-wm)
+    (let* ((*wm* wm) (dir (make-temp-dir)) (path (%string-concat dir "/foo.lisp")))
+      (execute-command-line (%string-concat "edit " path))          ; no such file: a blank buffer named after it
+      (is-equal "foo.lisp" (buffer-name (ed-buffer ed)))
+      (is-equal path (buffer-file (ed-buffer ed)))
+      (is-equal "" (buffer-string (ed-buffer ed)))
+      (is-equal 'lisp-mode (buffer-mode (ed-buffer ed)))
+      (is (not (probe-file path)))
+      (ed-type wm "(defun foo () 1)")
+      (ed-save-buffer ed)                                              ; saving creates it
+      (is (probe-file path))
+      (is-equal '("(defun foo () 1)") (read-file-lines path))
+      (execute-command-line "edit mapcar")                             ; a function name still finds its definition
+      (is-equal "00-base.lisp" (buffer-name (ed-buffer ed)))
+      (cleanup-dir dir))))
+
 ;;; ---- cross reference, trace, step, profile ---------------------------------------------------------------------------------
 
 (defun xr-leaf (x) (+ x 1))
