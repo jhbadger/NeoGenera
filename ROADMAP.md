@@ -6,7 +6,7 @@ NeoGenera is a Lisp environment in the spirit of Symbolics Genera: a single, liv
 
 ## Status
 
-*Last updated 2026-11-25.* **All ten phases are implemented and 1.0.0 is released**; the compiler compiles itself to a byte-identical
+*Last updated 2026-11-28.* **All ten phases are implemented and 1.0.0 is released**; the compiler compiles itself to a byte-identical
 fixed point (`make selfhost`, 54 source files).
 
 | Phase | State | Evidence |
@@ -30,38 +30,40 @@ conformance cases, 20 real-terminal checks. The Lisp suite takes a few seconds.
 
 These are scope decisions, not oversights; each is a candidate for a later phase.
 
+`docs/COMPATIBILITY.md` is the detailed, current list of language-level deviations; this section summarises them by phase.
+
+**Done since these notes were first written** (previously listed here as deviations): character strings; the generational collector, weak hash
+tables and finalization; complex numbers in the numeric tower; `with-condition-restarts` and
+`invoke-restart-interactively`; CLOS class redefinition that updates instances, `change-class`, metaclasses,
+`:allocation :class`, user-defined method combinations and most of the MOP; debugger return-from-frame and retry, and
+the interactive debugger in the window Listener; `format` `~R ~E ~G ~<..~:>` and `pprint-logical-block`; wide and
+combining characters in display widths; editor query-replace, regexp search, split windows and syntax colouring;
+specialised and displaced arrays; compiler type declarations. Also added beyond the plan: Flavors, and the Pascal,
+FORTRAN, Prolog and bytecode-assembler tool kits.
+
 **Phase 2-3 (earlier)**
-* The reader and printer are still written in C (readtables are not extensible).
-* ~~Strings are byte vectors~~ Done: strings hold characters (narrow Latin-1 or wide code points).
-* The collector is a non-generational two-space copier.
+* The reader and printer are still written in C. The reader consults `*readtable*` (macro characters, dispatch
+  characters, readtable case, `set-syntax-from-char`), but only for characters below 128.
 
 **Phase 4**
-* **Done since:** the generational collector, weak hash tables and finalization.
 * **Not done:** the `ansi-test`
   conformance baseline (the suite is not available offline, so no pass rate is published).
-* Numbers: bignums and exact ratios are implemented (schoolbook multiplication; no fast multiplication
-  or complex numbers). `/` of integers is now exact.
-* Conditions: `handler-bind`/`handler-case`/`restart-case`/`signal`/`error`/`warn`/`cerror`/`ignore-errors`, a
-  standard hierarchy; kernel errors become typed conditions. Missing: `with-condition-restarts`,
-  `invoke-restart-interactively`, `define-condition` slot options beyond the usual ones.
-* CLOS: C3 precedence, multiple dispatch, EQL specializers, standard method combination, in-place class
-  redefinition (**existing instances are not updated**). No metaclasses, `:allocation :class`,
-  `change-class`, or non-standard method combinations; the MOP is a small subset.
-* Debugger: backtrace with arguments, restarts menu, frame selection, `:edit`. **Not done:** return from a
-  frame, retry, local variables (only argument values), and frames of the interpreter or C primitives.
-* `format`: no `~R ~E ~G ~<..~:>`; `pprint` is a simple line-filling printer (no `pprint-logical-block`).
+* Numbers: one float type (double); no single/short/long-float distinction.
+* Conditions: `define-condition` slot options beyond the usual ones.
+* CLOS: generic functions are not instances (no `:generic-function-class`, no custom
+  `compute-discriminating-function`); `ensure-class-using-class`, `make-method-lambda` and a few other MOP entry
+  points are missing (see `docs/COMPATIBILITY.md`).
+* Debugger: no local variables (only argument values), and no frames of the interpreter or C primitives.
+* Printer: `*print-lines*` and `*print-readably*` are not implemented; `*print-pretty*` does not go through
+  `print-object` methods or logical blocks.
 * Gray streams: `read` on a Gray stream consumes whole lines.
 
 **Phase 5**
 * No SDL or other GUI backend (the window abstraction is not tied to the terminal, but none exists).
-* Every code point is one column wide (no wide or combining characters).
-* The window Listener's error display is post-mortem (the evaluation is unwound first); evaluation blocks
-  the UI; the UI Listener cannot read from stdin. Only the line-mode Listener offers the interactive
-  debugger.
+* In the window Listener, evaluation blocks the UI and the Listener cannot read from stdin.
 
 **Phase 6**
-* The editor works on bytes (UTF-8 characters move as units; nothing else is Unicode-aware). No query-replace,
-  regexp search, multiple windows inside one editor, or syntax colouring beyond comment lines.
+* Editor lines are stored as UTF-8 bytes (characters move as units and display widths are Unicode-aware).
 * Undo is a real tree (`undo-tree-select`, text visualisation) but there is no interactive tree browser.
 * Source locations are definition-level: "jump from a backtrace frame to the source" opens the function's
   definition, not the executing line.
@@ -86,7 +88,7 @@ These are scope decisions, not oversights; each is a candidate for a later phase
   ten minutes with a collection at every safe point).
 
 **Phase 8** (details in `docs/design/math.md`)
-* Complex numbers are a library type, not part of the numeric tower; no BLAS/LAPACK binding (the loops are Lisp, practical to a few hundred rows);
+* No BLAS/LAPACK binding (the loops are Lisp, practical to a few hundred rows);
   Karatsuba but no Toom-Cook; eigenvalues of non-symmetric matrices without eigenvectors; GLMs limited to gaussian, binomial and Poisson.
 * The symbolic layer integrates polynomials, powers, `exp`, `sin`, `cos` and linear arguments only. Validation uses R and NIST values quoted in the tests
   (no network access to fetch the full NIST StRD tables).

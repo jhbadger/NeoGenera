@@ -112,7 +112,7 @@ a printer with `pprint`, a compiler to bytecode that compiles itself, an interac
 
 **Conditions and the debugger**
 * The interactive debugger with restarts runs in both the line-mode and the window Listener. `break` enters it with a CONTINUE restart, and it honours `*debugger-hook*`.
-* `with-condition-restarts` and `invoke-restart-interactively` are implemented. Missing: return-from-frame and retry in the debugger.
+* `with-condition-restarts` and `invoke-restart-interactively` are implemented. The debugger can return values from a frame (`:return`) or run it again (`:retry`); it shows argument values but not local variables.
 
 **Packages, reading and printing**
 * The standard package API is implemented: `make-package`, `defpackage` (`:nicknames :use :shadow :shadowing-import-from :import-from :export :intern :documentation :size`, plus SBCL's `:lock`), `in-package` (an unknown package is an error), `rename-package`, `delete-package` (with a `continue` restart when the package is still used), `use-package`/`unuse-package`, `export`/`unexport`, `import`/`shadowing-import`, `shadow`, `unintern`, `find-symbol`, `find-all-symbols`, `package-nicknames`, `package-use-list`, `package-used-by-list`, `package-shadowing-symbols`, `do-symbols`, `do-external-symbols`, `do-all-symbols` and `with-package-iterator`. `use-package`, `export` and `import` signal a `package-error` on a name conflict (shadowing resolves it). Limits: the conflict errors have no restarts (no "unintern the old one" choice); `*package*` may be bound to a package that is later deleted; `delete-package` does not unintern the symbols' function or value cells.
